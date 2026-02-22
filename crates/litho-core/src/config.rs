@@ -41,9 +41,10 @@ pub struct LithoConfig {
 }
 
 /// Identifies which LLM backend will handle generation requests.
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum LlmProvider {
+    #[default]
     Codex,
     Ollama,
     OpenAI,
@@ -127,12 +128,6 @@ impl Default for LithoConfig {
             llm: LlmConfig::default(),
             cache: CacheConfig::default(),
         }
-    }
-}
-
-impl Default for LlmProvider {
-    fn default() -> Self {
-        Self::Codex
     }
 }
 
