@@ -10,6 +10,8 @@
 
 **Scope:** litho-workspace is a standalone tool for any codebase. PC_AI is the validation target but not a dependency.
 
+**Migration principle:** Move and reuse existing deepwiki-rs/litho-book code wherever possible. Replace internals (regex→tree-sitter, multi-LLM→codex) but keep interfaces, types, config parsing, cache system, i18n, and pipeline structure. New code only where the existing code is fundamentally incompatible (e.g., the 6,889-line regex processors).
+
 ---
 
 ### Task 1: Create Workspace Skeleton
@@ -307,7 +309,7 @@ Expected: FAIL (LithoConfig not defined)
 
 **Step 3: Implement config.rs**
 
-Port from `deepwiki-rs/src/config.rs` with these changes:
+**Source:** Copy `deepwiki-rs/src/config.rs` (667 lines) and `deepwiki-rs/src/types/` as starting points. Preserve existing TOML parsing, LLMProvider enum, CacheConfig, KnowledgeConfig. Changes:
 - `api_base_url` default: `""` (empty, not modelscope.cn)
 - `model_efficient` default: `""` (empty, not Qwen)
 - `model_powerful` default: `""` (empty, not Qwen)
@@ -673,6 +675,8 @@ pub fn detect_language(path: &Path) -> Language {
 ```
 
 **Step 4: Implement Extractor trait and RustExtractor**
+
+**Source:** Migrate the `LanguageProcessor` trait from `deepwiki-rs/src/generator/preprocess/extractors/language_processors/mod.rs` — keep the trait method signatures (`extract_dependencies`, `extract_interfaces`, `is_important_line`), replace the regex-based bodies with tree-sitter queries. The existing `RustProcessor` (343 lines) becomes `RustExtractor` (~100 lines of tree-sitter queries).
 
 ```rust
 // crates/litho-extract/src/extractors/mod.rs
