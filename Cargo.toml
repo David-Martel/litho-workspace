@@ -1,0 +1,30 @@
+[workspace]
+members = ["crates/*"]
+resolver = "3"
+
+[workspace.package]
+version = "2.0.0-alpha.1"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/David-Martel/litho-workspace"
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+thiserror = "2.0"
+tokio = { version = "1.47", features = ["full"] }
+clap = { version = "4.5", features = ["derive"] }
+async-trait = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+tree-sitter = "0.26"
+tree-sitter-rust = "0.24"
+tree-sitter-typescript = "0.23"
+tree-sitter-python = "0.25"
+tree-sitter-c-sharp = "0.23"
+tree-sitter-javascript = "0.23"
+ignore = "0.4"
+toml = "0.9"
+litho-core = { path = "crates/litho-core" }
+litho-extract = { path = "crates/litho-extract" }
+litho-codex = { path = "crates/litho-codex" }

@@ -1,0 +1,17 @@
+[package]
+name = "litho-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "litho"
+path = "src/main.rs"
+
+[dependencies]
+litho-core = { workspace = true }
+litho-extract = { workspace = true }
+litho-codex = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
