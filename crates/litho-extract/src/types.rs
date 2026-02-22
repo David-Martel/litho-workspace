@@ -1,1 +1,2 @@
-// Re-exports from litho-core, implemented in Task 3
+// Re-export shared types from litho-core for convenience
+pub use litho_core::types::*;
