@@ -1,0 +1,35 @@
+[package]
+name = "litho-book"
+version.workspace = true
+edition.workspace = true
+description = "Web documentation reader for Litho-generated architecture docs"
+license = "MIT"
+
+[[bin]]
+name = "litho-book"
+path = "src/main.rs"
+
+[dependencies]
+clap = { workspace = true }
+axum = "0.8.4"
+tokio = { workspace = true }
+tower-http = { version = "0.6", features = ["fs", "cors"] }
+pulldown-cmark = "0.13"
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+chrono = { version = "0.4", features = ["serde"] }
+reqwest = { version = "0.12", features = ["json", "stream"] }
+async-stream = "0.3"
+futures = "0.3"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
+http = "1"
