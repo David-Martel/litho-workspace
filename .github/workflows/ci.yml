@@ -1,0 +1,120 @@
+# CI workflow for litho-workspace
+#
+# Build matrix: windows-latest only.
+# tree-sitter grammars compile C code via the `cc` crate. The repo's
+# .cargo/config.toml already sets CC_x86_64_pc_windows_msvc=cl.exe so
+# Cargo picks up MSVC's cl.exe rather than any MinGW gcc on PATH.
+# windows-latest runners ship Visual Studio 2022 with cl.exe on PATH,
+# satisfying that requirement without any extra vcvarsall step here.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - "v*"
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  # Deny warnings in CI to keep clippy output clean.
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # build: compile, test, and lint the full workspace
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build / Test / Clippy
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Install the stable Rust toolchain. dtolnay's action caches the
+      # toolchain by default and correctly handles the MSVC target on Windows.
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          # clippy is not bundled with stable by default in all environments;
+          # requesting it explicitly guarantees it is present.
+          components: clippy
+
+      # Cache compiled dependencies so that incremental CI runs are fast.
+      # The cache key is keyed on the OS and the workspace Cargo.lock so that
+      # adding or updating a dependency invalidates the cache correctly.
+      - name: Cache Cargo registry and build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build workspace (debug)
+        run: cargo build --workspace
+
+      - name: Run workspace tests
+        run: cargo test --workspace
+
+      # Clippy is run as a separate step so its output is clearly visible in
+      # the Actions log. RUSTFLAGS=-D warnings is already set at the job level,
+      # but -D warnings is also passed on the command line for explicitness and
+      # to ensure it applies even if the env var is overridden by a sub-crate.
+      - name: Clippy (all targets, deny warnings)
+        run: cargo clippy --workspace -- -D warnings
+
+  # ---------------------------------------------------------------------------
+  # release: build the CLI binary and upload it to a GitHub Release.
+  # Only runs when a version tag (v*) is pushed.
+  # ---------------------------------------------------------------------------
+  release:
+    name: Release (litho-cli)
+    runs-on: windows-latest
+    needs: build
+    # Guard: only execute on version tags, never on branch pushes or PRs.
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    permissions:
+      # softprops/action-gh-release needs write access to create the release
+      # and upload assets.
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry and build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-release-
+            ${{ runner.os }}-cargo-
+
+      # Build only the CLI crate in release mode.  -p litho-cli restricts the
+      # build to the binary crate and its transitive dependencies only.
+      - name: Build release binary (litho-cli)
+        run: cargo build --release -p litho-cli
+
+      # softprops/action-gh-release creates (or updates) the GitHub Release for
+      # the current tag and attaches the specified files as release assets.
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: target/release/litho.exe
+          # Generate a minimal release body from the tag annotation if present.
+          generate_release_notes: true
