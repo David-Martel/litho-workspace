@@ -18,8 +18,8 @@ use std::path::Path;
 /// # Errors
 ///
 /// Propagates I/O errors encountered while walking the project tree.
-pub async fn extract(project_path: &Path) -> anyhow::Result<ExtractedCodebase> {
-    extract_with_config(project_path, &LithoConfig::default()).await
+pub fn extract(project_path: &Path) -> anyhow::Result<ExtractedCodebase> {
+    extract_with_config(project_path, &LithoConfig::default())
 }
 
 /// Extract a project with explicit configuration.
@@ -27,7 +27,7 @@ pub async fn extract(project_path: &Path) -> anyhow::Result<ExtractedCodebase> {
 /// # Errors
 ///
 /// Propagates I/O errors encountered while walking the project tree.
-pub async fn extract_with_config(
+pub fn extract_with_config(
     project_path: &Path,
     config: &LithoConfig,
 ) -> anyhow::Result<ExtractedCodebase> {

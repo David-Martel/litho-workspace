@@ -138,9 +138,9 @@ async fn cmd_extract(args: ExtractArgs) -> anyhow::Result<()> {
             let cfg = LithoConfig::from_file(&config_path).with_context(|| {
                 format!("failed to load config from {}", config_path.display())
             })?;
-            litho_extract::extract_with_config(&project_path, &cfg).await
+            litho_extract::extract_with_config(&project_path, &cfg)
         }
-        None => litho_extract::extract(&project_path).await,
+        None => litho_extract::extract(&project_path),
     }
     .with_context(|| format!("extraction failed for {}", project_path.display()))?;
 
@@ -213,7 +213,6 @@ async fn cmd_generate(args: GenerateArgs) -> anyhow::Result<()> {
 
     eprintln!("Extracting project: {}", project_path.display());
     let extracted = litho_extract::extract(&project_path)
-        .await
         .with_context(|| format!("extraction failed for {}", project_path.display()))?;
 
     eprintln!(

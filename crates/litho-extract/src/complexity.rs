@@ -10,7 +10,6 @@ use litho_core::types::{ComplexityMetrics, Language};
 /// The `functions` and `classes` fields are initialised to 0 here; the caller
 /// is expected to fill them in from the interface list after extraction.
 pub fn compute_complexity(content: &str, language: &Language) -> ComplexityMetrics {
-    let _loc = content.lines().count();
     let non_blank = content
         .lines()
         .filter(|l| !l.trim().is_empty())

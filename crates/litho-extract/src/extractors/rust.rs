@@ -67,7 +67,6 @@ impl Extractor for RustExtractor {
         let source_bytes = content.as_bytes();
         let root = tree.root_node();
         let mut interfaces = Vec::new();
-        let cursor = root.walk();
 
         // We do a full depth-first traversal looking for top-level declarations.
         // Using a manual stack avoids lifetime conflicts with the tree-sitter
@@ -132,8 +131,6 @@ impl Extractor for RustExtractor {
                 }
             }
         }
-
-        let _ = cursor; // keep the walker alive for the traversal duration
 
         interfaces
     }

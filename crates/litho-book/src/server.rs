@@ -24,6 +24,7 @@ pub struct AppState {
     pub index_html: Arc<String>,
     pub http_client: reqwest::Client,
     pub llm_key: Arc<String>,
+    pub llm_api_url: Arc<String>,
 }
 
 #[derive(Deserialize)]
@@ -120,12 +121,18 @@ pub fn create_router(doc_tree: DocumentTree, docs_path: String) -> Router {
         String::new()
     });
 
+    let llm_api_url = std::env::var("LITHO_BOOK_LLM_API_URL").unwrap_or_else(|_| {
+        tracing::warn!("LITHO_BOOK_LLM_API_URL not set; AI chat will use no default endpoint");
+        String::new()
+    });
+
     let state = AppState {
         doc_tree: Arc::new(doc_tree),
         docs_path,
         index_html,
         http_client: reqwest::Client::new(),
         llm_key: Arc::new(llm_key_value),
+        llm_api_url: Arc::new(llm_api_url),
     };
 
     Router::new()
@@ -256,6 +263,7 @@ async fn chat_stream_handler(
             &state.docs_path,
             &state.http_client,
             &state.llm_key,
+            &state.llm_api_url,
         ).await {
             Ok(mut response_stream) => {
                 let mut full_response = String::new();
@@ -343,10 +351,15 @@ async fn call_openai_stream_api(
     _docs_path: &str,
     client: &reqwest::Client,
     llm_key: &str,
+    api_url: &str,
 ) -> Result<
     tokio::sync::mpsc::Receiver<Result<String, Box<dyn std::error::Error + Send + Sync>>>,
     Box<dyn std::error::Error + Send + Sync>,
 > {
+    if api_url.is_empty() {
+        return Err("LLM API URL not configured. Set LITHO_BOOK_LLM_API_URL environment variable.".into());
+    }
+
     // 构建系统提示词
     let mut system_prompt = "你是一个专业的文档助手，专门帮助用户理解和分析技术文档。请用中文回答问题，回答要准确、简洁、有帮助。".to_string();
 
@@ -382,7 +395,7 @@ async fn call_openai_stream_api(
     });
 
     let request_body = OpenAIRequest {
-        model: "GLM-4.7-Flash".to_string(),
+        model: std::env::var("LITHO_BOOK_LLM_MODEL").unwrap_or_else(|_| "gpt-4".into()),
         messages,
         temperature: 0.7,
         max_tokens: 16384,
@@ -390,7 +403,7 @@ async fn call_openai_stream_api(
     };
 
     let response = client
-        .post("https://open.bigmodel.cn/api/paas/v4/chat/completions")
+        .post(api_url)
         .header("Authorization", format!("Bearer {}", llm_key))
         .header("Content-Type", "application/json")
         .json(&request_body)
