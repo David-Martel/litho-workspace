@@ -11,6 +11,7 @@ pub mod event_processor_with_jsonl_output;
 pub mod exec_events;
 
 pub use cli::Cli;
+pub use cli::Color;
 pub use cli::Command;
 pub use cli::ReviewArgs;
 use codex_cloud_requirements::cloud_requirements_loader;

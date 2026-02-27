@@ -1,3 +1,4 @@
+use anyhow::Context;
 use crate::prompts;
 use crate::provider::{DocGenerator, DocumentSection};
 use async_trait::async_trait;
@@ -160,33 +161,49 @@ impl DocGenerator for CodexLibGenerator {
     ) -> anyhow::Result<Vec<DocumentSection>> {
         let prompt = prompts::build_prompt_with_optional_qmd(extracted, "full", project_path);
         let output_file = output_path.join("codex-output.md");
+        let model = self.model.clone();
+        let project_path = project_path.to_path_buf();
+        let output_file_for_task = output_file.clone();
 
-        let cli = codex_exec::Cli {
-            command: None, // Default non-interactive session
-            images: vec![],
-            model: Some(self.model.clone()),
-            oss: false,
-            oss_provider: None,
-            sandbox_mode: Some(codex_utils_cli::SandboxModeCliArg::WorkspaceWrite),
-            config_profile: None,
-            full_auto: true,
-            dangerously_bypass_approvals_and_sandbox: false,
-            cwd: Some(project_path.to_path_buf()),
-            skip_git_repo_check: true,
-            add_dir: vec![],
-            ephemeral: true,
-            output_schema: None,
-            config_overrides: Default::default(),
-            color: codex_exec::Color::Auto,
-            json: false,
-            last_message_file: Some(output_file.clone()),
-            prompt: Some(prompt),
-        };
+        // codex_exec::run_main uses non-Send types internally (dyn EventProcessor,
+        // dyn PullProgressReporter), so we cannot .await it inside an async_trait
+        // method (which requires Send futures). Work around this by running it on
+        // a dedicated single-threaded runtime inside spawn_blocking.
+        tokio::task::spawn_blocking(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| anyhow::anyhow!("Failed to create tokio runtime: {}", e))?;
 
-        // Note: Codex might use its own internal sandboxing which might require its own setup.
-        codex_exec::run_main(cli, None)
-            .await
-            .map_err(|e| anyhow::anyhow!("Codex library execution failed: {}", e))?;
+            let local = tokio::task::LocalSet::new();
+            local.block_on(&rt, async {
+                let cli = codex_exec::Cli {
+                    command: None,
+                    images: vec![],
+                    model: Some(model),
+                    oss: false,
+                    oss_provider: None,
+                    sandbox_mode: Some(codex_utils_cli::SandboxModeCliArg::WorkspaceWrite),
+                    config_profile: None,
+                    full_auto: true,
+                    dangerously_bypass_approvals_and_sandbox: false,
+                    cwd: Some(project_path),
+                    skip_git_repo_check: true,
+                    add_dir: vec![],
+                    ephemeral: true,
+                    output_schema: None,
+                    config_overrides: Default::default(),
+                    color: codex_exec::Color::Auto,
+                    json: false,
+                    last_message_file: Some(output_file_for_task),
+                    prompt: Some(prompt),
+                };
+
+                codex_exec::run_main(cli, None).await
+            })
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("Codex library thread panicked: {}", e))??;
 
         let content = std::fs::read_to_string(&output_file)
             .context("Failed to read documentation output from library call")?;
