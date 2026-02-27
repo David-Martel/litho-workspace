@@ -105,7 +105,7 @@ impl Extractor for RustExtractor {
                                 .trim()
                                 .to_string();
 
-                            let line = node.start_position().row + 1; // 1-based
+                            let line = node.start_position().row as usize + 1; // 1-based
 
                             interfaces.push(Interface {
                                 name: name.to_string(),
@@ -126,7 +126,7 @@ impl Extractor for RustExtractor {
             // Push children in reverse order so they are processed left-to-right.
             let child_count = node.child_count();
             for i in (0..child_count).rev() {
-                if let Some(child) = node.child(i as u32) {
+                if let Some(child) = node.child(i as usize) {
                     stack.push(child);
                 }
             }
@@ -180,7 +180,7 @@ impl Extractor for RustExtractor {
 
             let child_count = node.child_count();
             for i in (0..child_count).rev() {
-                if let Some(child) = node.child(i as u32) {
+                if let Some(child) = node.child(i as usize) {
                     stack.push(child);
                 }
             }

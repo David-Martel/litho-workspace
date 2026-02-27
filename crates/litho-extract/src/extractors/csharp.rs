@@ -31,7 +31,7 @@ fn identifier_child(node: tree_sitter::Node<'_>, source_bytes: &[u8]) -> Option<
         }
     }
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i as u32)
+        if let Some(child) = node.child(i as usize)
             && child.kind() == "identifier"
         {
             let t = node_text(child, source_bytes);
@@ -46,7 +46,7 @@ fn identifier_child(node: tree_sitter::Node<'_>, source_bytes: &[u8]) -> Option<
 /// Extract the visibility from C# access modifiers that appear as children.
 fn cs_visibility(node: tree_sitter::Node<'_>, source_bytes: &[u8]) -> String {
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i as u32) {
+        if let Some(child) = node.child(i as usize) {
             let k = child.kind();
             if k == "modifier" {
                 let t = node_text(child, source_bytes);
@@ -108,7 +108,7 @@ impl Extractor for CSharpExtractor {
                     kind: sk.to_string(),
                     visibility: vis,
                     signature,
-                    line: node.start_position().row + 1,
+                    line: node.start_position().row as usize + 1,
                 });
                 // Do not recurse into members of a class/interface to keep
                 // the list at the declared-type level.  Recurse for
@@ -118,7 +118,7 @@ impl Extractor for CSharpExtractor {
 
             let child_count = node.child_count();
             for i in (0..child_count).rev() {
-                if let Some(child) = node.child(i as u32) {
+                if let Some(child) = node.child(i as usize) {
                     stack.push(child);
                 }
             }
@@ -170,7 +170,7 @@ impl Extractor for CSharpExtractor {
 
             let child_count = node.child_count();
             for i in (0..child_count).rev() {
-                if let Some(child) = node.child(i as u32) {
+                if let Some(child) = node.child(i as usize) {
                     stack.push(child);
                 }
             }

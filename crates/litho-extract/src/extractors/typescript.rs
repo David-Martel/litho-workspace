@@ -33,7 +33,7 @@ fn first_identifier_child(node: tree_sitter::Node<'_>, source_bytes: &[u8]) -> O
     }
     // Fall back to scanning children for an identifier node
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i as u32)
+        if let Some(child) = node.child(i as usize)
             && (child.kind() == "identifier" || child.kind() == "type_identifier")
         {
             let text = node_text(child, source_bytes);
@@ -80,7 +80,7 @@ impl Extractor for TypeScriptExtractor {
                     // Don't skip — recurse into exports to find declarations.
                     let child_count = node.child_count();
                     for i in (0..child_count).rev() {
-                        if let Some(child) = node.child(i as u32) {
+                        if let Some(child) = node.child(i as usize) {
                             stack.push(child);
                         }
                     }
@@ -105,14 +105,14 @@ impl Extractor for TypeScriptExtractor {
                     kind: sk.to_string(),
                     visibility: "pub".to_string(), // TS declarations are public by default
                     signature,
-                    line: node.start_position().row + 1,
+                    line: node.start_position().row as usize + 1,
                 });
                 continue; // do not recurse into bodies
             }
 
             let child_count = node.child_count();
             for i in (0..child_count).rev() {
-                if let Some(child) = node.child(i as u32) {
+                if let Some(child) = node.child(i as usize) {
                     stack.push(child);
                 }
             }
@@ -162,7 +162,7 @@ impl Extractor for TypeScriptExtractor {
 
             let child_count = node.child_count();
             for i in (0..child_count).rev() {
-                if let Some(child) = node.child(i as u32) {
+                if let Some(child) = node.child(i as usize) {
                     stack.push(child);
                 }
             }
