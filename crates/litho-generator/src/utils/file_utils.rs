@@ -135,6 +135,7 @@ pub fn is_test_directory(dir_name: &str) -> bool {
 }
 
 /// Check if a file path is a binary file
+#[allow(dead_code)]
 pub fn is_binary_file_path(path: &Path) -> bool {
     if let Some(extension) = path.extension().and_then(|e| e.to_str()) {
         let ext_lower = extension.to_lowercase();
@@ -160,5 +161,167 @@ pub fn is_binary_file_path(path: &Path) -> bool {
         )
     } else {
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    // -----------------------------------------------------------------------
+    // is_test_file
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn rust_test_file_by_name_suffix() {
+        assert!(is_test_file(Path::new("my_module_test.rs")));
+        assert!(is_test_file(Path::new("my_module_tests.rs")));
+    }
+
+    #[test]
+    fn rust_source_file_not_test() {
+        assert!(!is_test_file(Path::new("main.rs")));
+        assert!(!is_test_file(Path::new("config.rs")));
+        assert!(!is_test_file(Path::new("utils.rs")));
+    }
+
+    #[test]
+    fn js_spec_files_are_tests() {
+        assert!(is_test_file(Path::new("app.test.js")));
+        assert!(is_test_file(Path::new("app.spec.js")));
+        assert!(is_test_file(Path::new("component.test.ts")));
+        assert!(is_test_file(Path::new("component.spec.tsx")));
+    }
+
+    #[test]
+    fn python_test_file_prefix() {
+        assert!(is_test_file(Path::new("test_main.py")));
+        assert!(is_test_file(Path::new("test_config.py")));
+    }
+
+    #[test]
+    fn python_test_file_suffix() {
+        assert!(is_test_file(Path::new("main_test.py")));
+    }
+
+    #[test]
+    fn path_in_tests_directory_is_test() {
+        assert!(is_test_file(Path::new("src/tests/helper.rs")));
+        assert!(is_test_file(Path::new("src/test/utils.py")));
+    }
+
+    #[test]
+    fn path_in_spec_directory_is_test() {
+        assert!(is_test_file(Path::new("spec/models/user.js")));
+        assert!(is_test_file(Path::new("specs/api.ts")));
+    }
+
+    #[test]
+    fn go_test_file() {
+        assert!(is_test_file(Path::new("handler_test.go")));
+    }
+
+    #[test]
+    fn java_test_file() {
+        assert!(is_test_file(Path::new("UserServiceTest.java")));
+        assert!(is_test_file(Path::new("IntegrationTests.java")));
+    }
+
+    #[test]
+    fn csharp_test_file() {
+        assert!(is_test_file(Path::new("UserServiceTest.cs")));
+        assert!(is_test_file(Path::new("Helpers.Tests.cs")));
+    }
+
+    #[test]
+    fn normal_source_file_not_test() {
+        assert!(!is_test_file(Path::new("src/lib.rs")));
+        assert!(!is_test_file(Path::new("handler.go")));
+        assert!(!is_test_file(Path::new("UserService.java")));
+    }
+
+    // -----------------------------------------------------------------------
+    // is_test_directory
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_dir_names() {
+        assert!(is_test_directory("test"));
+        assert!(is_test_directory("tests"));
+        assert!(is_test_directory("__tests__"));
+        assert!(is_test_directory("spec"));
+        assert!(is_test_directory("specs"));
+        assert!(is_test_directory("e2e"));
+        assert!(is_test_directory("integration"));
+        assert!(is_test_directory("unit"));
+    }
+
+    #[test]
+    fn test_dir_case_insensitive() {
+        assert!(is_test_directory("Tests"));
+        assert!(is_test_directory("TESTS"));
+        assert!(is_test_directory("Spec"));
+    }
+
+    #[test]
+    fn test_dir_suffix_patterns() {
+        assert!(is_test_directory("api_test"));
+        assert!(is_test_directory("api_tests"));
+        assert!(is_test_directory("api-test"));
+        assert!(is_test_directory("api-tests"));
+    }
+
+    #[test]
+    fn non_test_directory_names() {
+        assert!(!is_test_directory("src"));
+        assert!(!is_test_directory("lib"));
+        assert!(!is_test_directory("target"));
+        assert!(!is_test_directory("node_modules"));
+    }
+
+    // -----------------------------------------------------------------------
+    // is_binary_file_path
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn image_extensions_are_binary() {
+        for ext in &["jpg", "jpeg", "png", "gif", "bmp", "ico"] {
+            let filename = format!("image.{}", ext);
+            let path = Path::new(&filename);
+            assert!(
+                is_binary_file_path(path),
+                "expected binary: {}",
+                path.display()
+            );
+        }
+    }
+
+    #[test]
+    fn executable_extensions_are_binary() {
+        assert!(is_binary_file_path(Path::new("app.exe")));
+        assert!(is_binary_file_path(Path::new("lib.dll")));
+        assert!(is_binary_file_path(Path::new("libfoo.so")));
+    }
+
+    #[test]
+    fn archive_extensions_are_binary() {
+        assert!(is_binary_file_path(Path::new("archive.zip")));
+        assert!(is_binary_file_path(Path::new("data.tar")));
+        assert!(is_binary_file_path(Path::new("docs.pdf")));
+    }
+
+    #[test]
+    fn source_extensions_not_binary() {
+        assert!(!is_binary_file_path(Path::new("main.rs")));
+        assert!(!is_binary_file_path(Path::new("app.py")));
+        assert!(!is_binary_file_path(Path::new("index.ts")));
+        assert!(!is_binary_file_path(Path::new("Config.cs")));
+    }
+
+    #[test]
+    fn no_extension_not_binary() {
+        assert!(!is_binary_file_path(Path::new("Makefile")));
+        assert!(!is_binary_file_path(Path::new("Dockerfile")));
     }
 }
