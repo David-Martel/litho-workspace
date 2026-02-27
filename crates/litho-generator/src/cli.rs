@@ -121,25 +121,42 @@ impl Args {
             TargetLanguage::default()
         };
 
+        // Resolve the project path early so we can probe it for a litho.toml.
+        // Canonicalize is best-effort; fall back to the raw value if the path
+        // does not yet exist on disk.
+        let resolved_project_path = self
+            .project_path
+            .canonicalize()
+            .unwrap_or_else(|_| self.project_path.clone());
+
         let mut config = if let Some(config_path) = &self.config {
-            // If config file path is explicitly specified, load from that path
+            // Explicit --config flag takes highest priority.
             let msg = target_lang
                 .msg_config_read_error()
                 .replace("{:?}", &format!("{:?}", config_path));
-            return Config::from_file(config_path).expect(&msg);
+            Config::from_file(config_path).expect(&msg)
         } else {
-            // If no config file is explicitly specified, try loading from default location
-            let default_config_path = std::env::current_dir()
+            // Auto-discovery: check the project directory first, then CWD.
+            // Checking the project directory first means `--project-path
+            // /some/repo` picks up `/some/repo/litho.toml` even when the
+            // tool is invoked from a different working directory.
+            let project_dir_toml = resolved_project_path.join("litho.toml");
+            let cwd_toml = std::env::current_dir()
                 .unwrap_or_else(|_| std::path::PathBuf::from("."))
                 .join("litho.toml");
 
-            if default_config_path.exists() {
+            if project_dir_toml.exists() {
                 let msg = target_lang
                     .msg_config_read_error()
-                    .replace("{:?}", &format!("{:?}", default_config_path));
-                return Config::from_file(&default_config_path).expect(&msg);
+                    .replace("{:?}", &format!("{:?}", project_dir_toml));
+                Config::from_file(&project_dir_toml).expect(&msg)
+            } else if cwd_toml.exists() {
+                let msg = target_lang
+                    .msg_config_read_error()
+                    .replace("{:?}", &format!("{:?}", cwd_toml));
+                Config::from_file(&cwd_toml).expect(&msg)
             } else {
-                // Default config file doesn't exist, use default values
+                // No config file found anywhere; start from built-in defaults.
                 Config::default()
             }
         };

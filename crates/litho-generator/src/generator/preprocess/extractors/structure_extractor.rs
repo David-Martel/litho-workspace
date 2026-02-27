@@ -135,8 +135,18 @@ impl StructureExtractor {
                         .to_string_lossy()
                         .to_string();
 
+                    // Compute the path relative to the project root so that
+                    // multi-component exclusion patterns such as
+                    // "facts/reference_templates" can be matched against the
+                    // real directory subtree, not just the bare leaf name.
+                    let relative_path = path
+                        .strip_prefix(root_path)
+                        .unwrap_or(&path)
+                        .to_string_lossy()
+                        .replace('\\', "/");
+
                     // Skip hidden directories and commonly ignored directories
-                    if !self.should_ignore_directory(&dir_name) {
+                    if !self.should_ignore_directory(&dir_name, &relative_path) {
                         dir_subdirectory_count += 1;
 
                         // Recursively scan subdirectories
@@ -223,14 +233,41 @@ impl StructureExtractor {
         }
     }
 
-    fn should_ignore_directory(&self, dir_name: &str) -> bool {
+    /// Returns `true` when the directory should be excluded from scanning.
+    ///
+    /// Two kinds of `excluded_dirs` entries are supported:
+    ///
+    /// * **Simple name** — e.g. `"external"`, `"target"`. The bare directory
+    ///   name is compared case-insensitively against every path component.
+    /// * **Relative sub-path** — e.g. `"facts/reference_templates"`. The
+    ///   relative path of the directory from the project root (always using
+    ///   forward slashes) is checked for a case-insensitive prefix match so
+    ///   that the entire subtree is excluded.
+    fn should_ignore_directory(&self, dir_name: &str, relative_path: &str) -> bool {
         let config = &self.context.config;
         let dir_name_lower = dir_name.to_lowercase();
+        let relative_path_lower = relative_path.to_lowercase();
 
-        // Check excluded directories configured in Config
+        // Check excluded directories configured in Config.
         for excluded_dir in &config.excluded_dirs {
-            if dir_name_lower == excluded_dir.to_lowercase() {
-                return true;
+            let excluded_lower = excluded_dir.to_lowercase();
+
+            if excluded_lower.contains('/') {
+                // Multi-component pattern: match against the relative path.
+                // We accept both an exact match and a prefix match (so that
+                // parent directories of the excluded sub-path are not blocked
+                // prematurely, but the excluded dir itself and all children are
+                // skipped).
+                if relative_path_lower == excluded_lower
+                    || relative_path_lower.starts_with(&format!("{}/", excluded_lower))
+                {
+                    return true;
+                }
+            } else {
+                // Simple name pattern: match against the bare directory name.
+                if dir_name_lower == excluded_lower {
+                    return true;
+                }
             }
         }
 
