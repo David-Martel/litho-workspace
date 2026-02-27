@@ -59,5 +59,6 @@ pub fn test_config() -> Config {
         },
         knowledge: Default::default(),
         qmd: Default::default(),
+        output_format: "md".to_string(),
     }
 }

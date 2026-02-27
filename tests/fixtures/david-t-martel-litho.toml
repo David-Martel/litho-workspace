@@ -1,0 +1,31 @@
+# Litho documentation generator configuration
+project_name = "david-t-martel"
+
+# Directories to exclude from scanning (must be before [llm] section)
+excluded_dirs = [
+    "external",
+    ".venv",
+    "node_modules",
+    ".git",
+    ".litho",
+    "target",
+    "__pycache__",
+    ".pytest_tmp",
+    ".claude",
+    "docs",
+    "output",
+    "publications",
+    "versioning",
+    "pierre_apo",
+    "facts/reference_templates",
+    "facts/evidence",
+    "memory/data",
+]
+
+[llm]
+provider = "ollama"
+api_base_url = "http://localhost:11434"
+model_efficient = "litho-gemma3:12b"
+model_powerful = "litho-gemma3:12b"
+max_tokens = 4096
+context_window = 131072
