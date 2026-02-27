@@ -1,0 +1,40 @@
+{
+  "database": {
+    "host": "127.0.0.1",
+    "port": 5432,
+    "user": "postgres",
+    "password": "password",
+    "name": "qmd_index",
+    "sslmode": "disable",
+    "admin_db": "postgres",
+    "bootstrap": true,
+    "pool_max": 24,
+    "pool_min_idle": 4,
+    "pool_connect_timeout_ms": 8000,
+    "pool_idle_timeout_ms": 600000,
+    "pool_max_lifetime_ms": 3600000,
+    "pool_test_on_check_out": true,
+    "db_connect_timeout_ms": 5000,
+    "allow_tls": true,
+    "allow_insecure_tls": false
+  },
+  "llm": {
+    "provider": "hybrid",
+    "ollama_query_model": "qwen2.5-coder:3b",
+    "ollama_rerank_model": "qwen2.5-coder:3b",
+    "ollama_required_models": [
+      "nomic-embed-text:latest",
+      "qwen2.5-coder:3b"
+    ],
+    "model_dirs": [
+      "C:/codedev/llm/.models",
+      "C:/Users/david/.ollama/models"
+    ],
+    "ollama_complexity_threshold": 6,
+    "force_ollama": false
+  },
+  "paths": {
+    "collections_config_path": "C:/Users/david/AppData/Roaming/qmd/index.yml",
+    "search_telemetry_path": "C:/codedev/litho-workspace/.litho/qmd-search-telemetry.jsonl"
+  }
+}

@@ -2,10 +2,9 @@
 #
 # Build matrix: windows-latest only.
 # tree-sitter grammars compile C code via the `cc` crate. The repo's
-# .cargo/config.toml already sets CC_x86_64_pc_windows_msvc=cl.exe so
-# Cargo picks up MSVC's cl.exe rather than any MinGW gcc on PATH.
-# windows-latest runners ship Visual Studio 2022 with cl.exe on PATH,
-# satisfying that requirement without any extra vcvarsall step here.
+# .cargo/config.toml sets CC/CXX for the MSVC target to clang-cl.exe
+# so Cargo avoids MinGW/shim collisions while still emitting MSVC-compatible
+# objects and link behavior.
 
 name: CI
 
@@ -69,6 +68,51 @@ jobs:
       # to ensure it applies even if the env var is overridden by a sub-crate.
       - name: Clippy (all targets, deny warnings)
         run: cargo clippy --workspace -- -D warnings
+
+  # ---------------------------------------------------------------------------
+  # qmd-quality: focused quality gate for Rust-native qmd integration.
+  # Runs coverage + benchmark framework on qmd crates and integration packages.
+  # ---------------------------------------------------------------------------
+  qmd-quality:
+    name: QMD Coverage / Bench
+    runs-on: windows-latest
+    needs: build
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable + llvm-tools
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - name: Cache Cargo registry and build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target-qmd-coverage
+            target-qmd-bench
+            coverage
+          key: ${{ runner.os }}-qmd-quality-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-qmd-quality-
+            ${{ runner.os }}-cargo-
+
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov --locked
+
+      - name: QMD quality pipeline (tests + coverage + bench)
+        run: pwsh -NoProfile -File scripts/qmd-quality.ps1 -SkipIntegration:$false -BenchNoPlot
+
+      - name: Upload QMD quality artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: qmd-quality-artifacts
+          path: |
+            coverage/qmd
 
   # ---------------------------------------------------------------------------
   # release: build the CLI binary and upload it to a GitHub Release.

@@ -1,17 +1,22 @@
-# litho-workspace Cargo configuration
-#
-# tree-sitter grammars compile C code via the `cc` crate. On Windows, if
-# Strawberry Perl's gcc.exe is on PATH (or CC is set to it), the cc crate
-# picks it up, producing MinGW objects that fail to link with MSVC's lld-link
-# (__mingw_vfprintf / __mingw_vsnprintf errors).
-#
-# The target-specific CC override below forces the cc crate to use MSVC's
-# cl.exe (from PATH) instead of any generic CC setting.
-#
-# REQUIREMENT: Build from a VS Developer PowerShell or run vcvarsall.bat
-# so that cl.exe is on PATH.
+﻿[build]
+rustc-wrapper = "sccache"
+target-dir = "target"
 
 [env]
-# Target-specific vars take priority over CC in the cc crate
-CC_x86_64_pc_windows_msvc = "cl.exe"
-CXX_x86_64_pc_windows_msvc = "cl.exe"
+SCCACHE_DIR = ".cache/sccache"
+NEXTEST_RETRY_DATA_DIR = ".cache/nextest"
+CARGO_INCREMENTAL = "1"
+
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld.exe"
+rustflags = [
+    "-C", "target-cpu=native",
+]
+
+[profile.dev]
+split-debuginfo = "packed"
+
+[profile.release]
+split-debuginfo = "packed"
+lto = "thin"
+codegen-units = 4

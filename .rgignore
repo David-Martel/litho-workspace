@@ -1,0 +1,13 @@
+# Ripgrep/fd ignore — keep search fast on source code only
+target/
+target-*/
+.cache/
+.litho/cache/
+coverage/
+third_party/
+external/codex-rs/
+node_modules/
+*.exe
+*.pdb
+*.log
+*.lock

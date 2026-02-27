@@ -1,4 +1,42 @@
+# Build artifacts
 /target/
+/target-*/
+*.exe
+*.pdb
+
+# Caches
+.cache/
+.litho/cache/
+*.log
+
+# Coverage & benchmarks
+/coverage/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Editor/IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS artifacts
+Thumbs.db
+.DS_Store
+
+# Local config overrides
+qmd.config.local.json
 build-test.bat
 build-test.ps1
 check-workspace.ps1
+
+# Node artifacts (if any)
+node_modules/
+package-lock.json
+
+# Third-party build artifacts
+/third_party/
