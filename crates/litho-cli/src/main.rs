@@ -6,6 +6,9 @@
 //!   emit structured output.
 //! - `litho generate <path>` — Extract a project and then invoke the Codex-CLI
 //!   doc generator to produce Markdown documentation.
+//! - `litho status <path>` — Show generation status from the documentation manifest.
+//! - `litho serve <path>` — Launch litho-book to serve generated documentation.
+//! - `litho validate <path>` — Check generated docs for broken references.
 
 use anyhow::Context as _;
 use clap::{Parser, Subcommand, ValueEnum};
@@ -44,6 +47,15 @@ enum Commands {
 
     /// Extract a project and generate Markdown documentation via Codex-CLI.
     Generate(GenerateArgs),
+
+    /// Show generation status from the documentation manifest.
+    Status(StatusArgs),
+
+    /// Launch litho-book to serve generated documentation.
+    Serve(ServeArgs),
+
+    /// Check generated docs for broken file path references.
+    Validate(ValidateArgs),
 }
 
 // ---------------------------------------------------------------------------
@@ -82,6 +94,10 @@ enum OutputFormat {
 
 #[derive(Debug, Parser)]
 struct GenerateArgs {
+    /// Root directory of the project to generate docs for.
+    #[arg(default_value = ".")]
+    path: PathBuf,
+
     /// Documentation provider to use.
     #[arg(long, value_enum, default_value_t = Provider::CodexLib)]
     provider: Provider,
@@ -108,6 +124,41 @@ enum Provider {
 }
 
 // ---------------------------------------------------------------------------
+// `status` subcommand
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Parser)]
+struct StatusArgs {
+    /// Project path to check status for.
+    #[arg(default_value = ".")]
+    path: PathBuf,
+}
+
+// ---------------------------------------------------------------------------
+// `serve` subcommand
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Parser)]
+struct ServeArgs {
+    /// Path to generated documentation directory.
+    path: PathBuf,
+
+    /// Port to serve on.
+    #[arg(long, default_value = "3333")]
+    port: u16,
+}
+
+// ---------------------------------------------------------------------------
+// `validate` subcommand
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Parser)]
+struct ValidateArgs {
+    /// Path to generated documentation directory.
+    path: PathBuf,
+}
+
+// ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
 
@@ -119,6 +170,9 @@ async fn main() -> anyhow::Result<()> {
     match cli.command {
         Commands::Extract(args) => cmd_extract(args).await,
         Commands::Generate(args) => cmd_generate(args).await,
+        Commands::Status(args) => cmd_status(args).await,
+        Commands::Serve(args) => cmd_serve(args).await,
+        Commands::Validate(args) => cmd_validate(args).await,
     }
 }
 
@@ -259,4 +313,278 @@ async fn cmd_generate(args: GenerateArgs) -> anyhow::Result<()> {
     );
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// `status` handler
+// ---------------------------------------------------------------------------
+
+/// Lightweight manifest reader (mirrors litho-generator's DocumentationManifest
+/// but avoids pulling in that crate as a dependency).
+#[derive(serde::Deserialize)]
+struct ManifestInfo {
+    version: u32,
+    generated_at: chrono::DateTime<chrono::Utc>,
+    git_commit: Option<String>,
+    git_branch: Option<String>,
+    file_hashes: std::collections::HashMap<String, String>,
+    modules: std::collections::HashMap<String, serde_json::Value>,
+    total_generation_time_secs: f64,
+}
+
+async fn cmd_status(args: StatusArgs) -> anyhow::Result<()> {
+    let project_path = args
+        .path
+        .canonicalize()
+        .with_context(|| format!("project path does not exist: {}", args.path.display()))?;
+
+    let manifest_path = project_path.join(".litho").join("manifest.json");
+    if !manifest_path.exists() {
+        println!("No documentation manifest found at {}", manifest_path.display());
+        println!("Run `litho-generator` to generate documentation first.");
+        return Ok(());
+    }
+
+    let content = tokio::fs::read_to_string(&manifest_path).await?;
+    let info: ManifestInfo =
+        serde_json::from_str(&content).context("failed to parse manifest.json")?;
+
+    println!("Documentation Status");
+    println!("====================");
+    println!("Manifest version : {}", info.version);
+    println!(
+        "Generated at     : {}",
+        info.generated_at.format("%Y-%m-%d %H:%M:%S UTC")
+    );
+    println!(
+        "Git commit       : {}",
+        info.git_commit.as_deref().unwrap_or("(unknown)")
+    );
+    println!(
+        "Git branch       : {}",
+        info.git_branch.as_deref().unwrap_or("(unknown)")
+    );
+    println!("Files tracked    : {}", info.file_hashes.len());
+    println!("Modules generated: {}", info.modules.len());
+    println!(
+        "Generation time  : {:.1}s",
+        info.total_generation_time_secs
+    );
+
+    // Compute staleness: how many commits since the manifest
+    if let Some(ref commit) = info.git_commit {
+        let output = tokio::process::Command::new("git")
+            .args(["rev-list", "--count", &format!("{}..HEAD", commit)])
+            .current_dir(&project_path)
+            .output()
+            .await;
+
+        if let Ok(out) = output {
+            if out.status.success() {
+                let count = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                println!(
+                    "Staleness        : {} commit(s) behind HEAD",
+                    count
+                );
+            }
+        }
+    }
+
+    if !info.modules.is_empty() {
+        println!("\nModules:");
+        for (key, _) in &info.modules {
+            println!("  - {}", key);
+        }
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// `serve` handler
+// ---------------------------------------------------------------------------
+
+async fn cmd_serve(args: ServeArgs) -> anyhow::Result<()> {
+    let docs_path = args
+        .path
+        .canonicalize()
+        .with_context(|| format!("docs path does not exist: {}", args.path.display()))?;
+
+    // Try to find litho-book binary
+    let litho_book = which_litho_book();
+
+    match litho_book {
+        Some(bin) => {
+            println!("Serving docs at http://localhost:{}", args.port);
+            let status = tokio::process::Command::new(bin)
+                .args(["serve", &docs_path.to_string_lossy(), "--port", &args.port.to_string()])
+                .status()
+                .await?;
+
+            if !status.success() {
+                anyhow::bail!("litho-book exited with status: {}", status);
+            }
+        }
+        None => {
+            println!("litho-book not found in PATH.");
+            println!("To serve documentation, install litho-book or use any static file server:");
+            println!("  python -m http.server {} --directory {}", args.port, docs_path.display());
+        }
+    }
+
+    Ok(())
+}
+
+/// Try to find the litho-book binary in common locations.
+fn which_litho_book() -> Option<PathBuf> {
+    // Check PATH using platform-appropriate command
+    let cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
+    if let Ok(output) = std::process::Command::new(cmd)
+        .arg("litho-book")
+        .output()
+    {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if !path.is_empty() {
+                return Some(PathBuf::from(path));
+            }
+        }
+    }
+
+    // Check common locations
+    let candidates = [
+        ".claude/tools/bin/litho-book.exe",
+        ".claude/tools/bin/litho-book",
+        "target/release/litho-book.exe",
+        "target/release/litho-book",
+    ];
+
+    for candidate in &candidates {
+        let path = PathBuf::from(candidate);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
+    None
+}
+
+// ---------------------------------------------------------------------------
+// `validate` handler
+// ---------------------------------------------------------------------------
+
+async fn cmd_validate(args: ValidateArgs) -> anyhow::Result<()> {
+    let docs_path = args
+        .path
+        .canonicalize()
+        .with_context(|| format!("docs path does not exist: {}", args.path.display()))?;
+
+    println!("Validating documentation at {}", docs_path.display());
+    println!();
+
+    let mut issues: Vec<String> = Vec::new();
+    let mut files_checked = 0;
+
+    // Walk all .md files in the docs directory
+    for entry in walkdir(&docs_path)? {
+        let path = entry;
+        if path.extension().and_then(|e| e.to_str()) != Some("md") {
+            continue;
+        }
+
+        files_checked += 1;
+        let content = tokio::fs::read_to_string(&path).await?;
+        let relative = path.strip_prefix(&docs_path).unwrap_or(&path);
+
+        // Check for backtick-quoted file paths that might be broken references
+        for (line_num, line) in content.lines().enumerate() {
+            // Find backtick-quoted paths (e.g., `src/main.rs`)
+            for cap in find_backtick_paths(line) {
+                let ref_path = PathBuf::from(&cap);
+                // Only check paths that look like file references (contain / or \, have extension)
+                if (cap.contains('/') || cap.contains('\\')) && cap.contains('.') {
+                    // Try to resolve relative to the project root (parent of docs dir)
+                    let project_root = docs_path.parent().unwrap_or(&docs_path);
+                    let resolved = project_root.join(&ref_path);
+                    if !resolved.exists() {
+                        issues.push(format!(
+                            "{}:{}: broken reference `{}`",
+                            relative.display(),
+                            line_num + 1,
+                            cap
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    if issues.is_empty() {
+        println!("All {} file(s) validated. No issues found.", files_checked);
+    } else {
+        println!(
+            "Found {} issue(s) across {} file(s):",
+            issues.len(),
+            files_checked
+        );
+        println!();
+        for issue in &issues {
+            println!("  {}", issue);
+        }
+    }
+
+    Ok(())
+}
+
+/// Walk a directory and collect all file paths.
+fn walkdir(path: &std::path::Path) -> anyhow::Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    walk_recursive(path, &mut files)?;
+    Ok(files)
+}
+
+fn walk_recursive(path: &std::path::Path, files: &mut Vec<PathBuf>) -> anyhow::Result<()> {
+    if path.is_dir() {
+        for entry in std::fs::read_dir(path)? {
+            let entry = entry?;
+            let entry_path = entry.path();
+            if entry_path.is_dir() {
+                walk_recursive(&entry_path, files)?;
+            } else {
+                files.push(entry_path);
+            }
+        }
+    } else {
+        files.push(path.to_path_buf());
+    }
+    Ok(())
+}
+
+/// Find backtick-quoted strings that look like file paths.
+fn find_backtick_paths(line: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    let mut in_backtick = false;
+    let mut current = String::new();
+
+    for ch in line.chars() {
+        if ch == '`' {
+            if in_backtick {
+                // End of backtick — check if it looks like a path
+                if !current.is_empty() {
+                    paths.push(current.clone());
+                }
+                current.clear();
+            }
+            in_backtick = !in_backtick;
+        } else if in_backtick {
+            current.push(ch);
+        }
+    }
+
+    paths
 }

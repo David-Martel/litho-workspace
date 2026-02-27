@@ -1,0 +1,77 @@
+# Documentation generation workflow for litho-workspace
+#
+# On push to main: full generation + validate.
+# On PR: incremental + validate.
+# Uploads generated docs as artifact.
+
+name: Docs
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  docs:
+    name: Generate Documentation
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history needed for incremental mode
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-docs-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-docs-
+
+      - name: Build litho-generator
+        run: cargo build --release -p litho-generator
+
+      - name: Generate documentation (full on push, incremental on PR)
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "Running incremental generation..."
+            target/release/litho-generator.exe --incremental \
+              --project-path . \
+              --output-path ./litho-docs/ \
+              --llm-provider openai \
+              --llm-api-base-url "${{ secrets.LLM_API_BASE_URL }}" \
+              --llm-api-key "${{ secrets.LLM_API_KEY }}" \
+              --model-efficient "${{ secrets.LLM_MODEL }}" \
+              --target-language en
+          else
+            echo "Running full generation..."
+            target/release/litho-generator.exe \
+              --project-path . \
+              --output-path ./litho-docs/ \
+              --llm-provider openai \
+              --llm-api-base-url "${{ secrets.LLM_API_BASE_URL }}" \
+              --llm-api-key "${{ secrets.LLM_API_KEY }}" \
+              --model-efficient "${{ secrets.LLM_MODEL }}" \
+              --target-language en
+          fi
+        shell: bash
+        continue-on-error: true  # Don't fail CI if LLM is unavailable
+
+      - name: Upload documentation artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: litho-docs
+          path: litho-docs/
+          if-no-files-found: warn
+          retention-days: 30

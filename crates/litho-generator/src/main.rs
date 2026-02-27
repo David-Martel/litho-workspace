@@ -23,8 +23,13 @@ async fn main() -> Result<()> {
     }
 
     // Default: run documentation generation
+    let incremental = args.incremental;
     let config = args.to_config();
-    launch(&config).await
+    if incremental {
+        crate::generator::workflow::launch_incremental(&config).await
+    } else {
+        launch(&config).await
+    }
 }
 
 /// Handle CLI subcommands

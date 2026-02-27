@@ -94,6 +94,14 @@ pub struct Args {
     /// Force regeneration (clear cache)
     #[arg(long)]
     pub force_regenerate: bool,
+
+    /// Incremental mode: only regenerate docs for files changed since last run
+    #[arg(long)]
+    pub incremental: bool,
+
+    /// Output format (md, html)
+    #[arg(long, default_value = "md")]
+    pub format: String,
 }
 
 /// CLI subcommands
@@ -227,6 +235,9 @@ impl Args {
         if self.no_cache {
             config.cache.enabled = false;
         }
+
+        // Output format
+        config.output_format = self.format;
 
         config
     }

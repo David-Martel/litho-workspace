@@ -6,10 +6,12 @@ use std::collections::HashMap;
 use std::fs;
 
 pub mod fixer;
+pub mod html_outlet;
 pub mod summary_generator;
 pub mod summary_outlet;
 
 pub use fixer::MermaidFixer;
+pub use html_outlet::HtmlOutlet;
 pub use summary_outlet::SummaryOutlet;
 
 pub trait Outlet {
