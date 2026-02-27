@@ -76,34 +76,49 @@ where
 }
 
 /// Streamlined relationship analysis result
-#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema, Default)]
 pub struct RelationshipAnalysis {
     /// Core dependency relationships (only keep important ones)
-    #[serde(default)]
+    #[serde(default, alias = "dependencies", alias = "relations", alias = "items")]
     pub core_dependencies: Vec<CoreDependency>,
 
     /// Architecture layer information
-    #[serde(default)]
+    #[serde(default, alias = "layers", alias = "architecture")]
     pub architecture_layers: Vec<ArchitectureLayer>,
 
     /// Key issues and recommendations
-    #[serde(default)]
+    #[serde(
+        default,
+        alias = "insights",
+        alias = "observations",
+        alias = "recommendations"
+    )]
     pub key_insights: Vec<String>,
 }
 
 /// Core dependency (simplified version)
-#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema, Default)]
 pub struct CoreDependency {
     /// Source component
-    #[serde(deserialize_with = "deserialize_string_or_array")]
+    #[serde(
+        default,
+        alias = "source",
+        alias = "origin",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub from: String,
 
     /// Target component
-    #[serde(deserialize_with = "deserialize_string_or_array")]
+    #[serde(
+        default,
+        alias = "target",
+        alias = "destination",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub to: String,
 
     /// Dependency type
-    #[serde(default)]
+    #[serde(default, alias = "type", alias = "kind", alias = "category")]
     pub dependency_type: DependencyType,
 
     /// Importance score (1-5, only keep important ones)
@@ -111,20 +126,33 @@ pub struct CoreDependency {
     pub importance: u8,
 
     /// Brief description
-    #[serde(default, deserialize_with = "deserialize_optional_string_or_array")]
+    #[serde(
+        default,
+        alias = "desc",
+        alias = "summary",
+        deserialize_with = "deserialize_optional_string_or_array"
+    )]
     pub description: Option<String>,
 }
 
 /// Architecture layer
-#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema, Default)]
 pub struct ArchitectureLayer {
     /// Layer name
+    #[serde(
+        default,
+        alias = "title",
+        alias = "label",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub name: String,
 
     /// Components in this layer
+    #[serde(default, alias = "items", alias = "elements", alias = "entries")]
     pub components: Vec<String>,
 
     /// Layer level (smaller number means lower level)
+    #[serde(default)]
     pub level: u8,
 }
 

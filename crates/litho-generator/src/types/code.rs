@@ -122,22 +122,35 @@ where
 }
 
 /// Code basic information
-#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema, Default)]
 pub struct CodeDossier {
     /// Code file name
-    #[serde(deserialize_with = "deserialize_string_or_array")]
+    #[serde(
+        default,
+        alias = "title",
+        alias = "label",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub name: String,
     /// File path
+    #[serde(default)]
     pub file_path: PathBuf,
     /// Source code summary
     #[schemars(skip)]
     #[serde(default)]
     pub source_summary: String,
     /// Purpose type
+    #[serde(default, alias = "type", alias = "kind", alias = "category")]
     pub code_purpose: CodePurpose,
     /// Importance score
+    #[serde(default)]
     pub importance_score: f64,
-    #[serde(default, deserialize_with = "deserialize_optional_string_or_array")]
+    #[serde(
+        default,
+        alias = "desc",
+        alias = "summary",
+        deserialize_with = "deserialize_optional_string_or_array"
+    )]
     pub description: Option<String>,
     #[serde(default, deserialize_with = "deserialize_strings_or_named")]
     pub functions: Vec<String>,
@@ -147,11 +160,18 @@ pub struct CodeDossier {
 }
 
 /// Intelligent insight information of code file
-#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema, Default)]
 pub struct CodeInsight {
     /// Code basic information
+    #[serde(default)]
     pub code_dossier: CodeDossier,
-    #[serde(deserialize_with = "deserialize_string_or_array")]
+    #[serde(
+        default,
+        alias = "description",
+        alias = "desc",
+        alias = "summary",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub detailed_description: String,
     /// Responsibilities
     #[serde(default)]
@@ -162,23 +182,44 @@ pub struct CodeInsight {
     /// Dependency information
     #[serde(default)]
     pub dependencies: Vec<Dependency>,
+    #[serde(default)]
     pub complexity_metrics: CodeComplexity,
 }
 
 /// Interface information
-#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema, Default)]
 pub struct InterfaceInfo {
-    #[serde(deserialize_with = "deserialize_string_or_array")]
+    #[serde(
+        default,
+        alias = "title",
+        alias = "label",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub name: String,
-    #[serde(default, deserialize_with = "deserialize_string_or_array")]
+    #[serde(
+        default,
+        alias = "type",
+        alias = "kind",
+        alias = "category",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub interface_type: String, // "function", "method", "class", "trait", etc.
     #[serde(default = "default_visibility")]
     pub visibility: String, // "public", "private", "protected"
-    #[serde(default)]
+    #[serde(default, alias = "args", alias = "params")]
     pub parameters: Vec<ParameterInfo>,
-    #[serde(default, deserialize_with = "deserialize_optional_string_or_array")]
+    #[serde(
+        default,
+        alias = "returns",
+        deserialize_with = "deserialize_optional_string_or_array"
+    )]
     pub return_type: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_optional_string_or_array")]
+    #[serde(
+        default,
+        alias = "desc",
+        alias = "summary",
+        deserialize_with = "deserialize_optional_string_or_array"
+    )]
     pub description: Option<String>,
 }
 
@@ -191,30 +232,61 @@ fn default_visibility() -> String {
 }
 
 /// Parameter information
-#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema, Default)]
 pub struct ParameterInfo {
-    #[serde(deserialize_with = "deserialize_string_or_array")]
+    #[serde(
+        default,
+        alias = "title",
+        alias = "label",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub name: String,
-    #[serde(deserialize_with = "deserialize_string_or_array")]
+    #[serde(
+        default,
+        alias = "type",
+        alias = "kind",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub param_type: String,
     #[serde(default)]
     pub is_optional: bool,
-    #[serde(default, deserialize_with = "deserialize_optional_string_or_array")]
+    #[serde(
+        default,
+        alias = "desc",
+        alias = "summary",
+        deserialize_with = "deserialize_optional_string_or_array"
+    )]
     pub description: Option<String>,
 }
 
 /// Dependency information
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 pub struct Dependency {
-    #[serde(deserialize_with = "deserialize_string_or_array")]
+    #[serde(
+        default,
+        alias = "title",
+        alias = "label",
+        alias = "module",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub name: String,
-    #[serde(default, deserialize_with = "deserialize_optional_string_or_array")]
+    #[serde(
+        default,
+        alias = "location",
+        alias = "file",
+        deserialize_with = "deserialize_optional_string_or_array"
+    )]
     pub path: Option<String>,
     #[serde(default)]
     pub is_external: bool,
     #[serde(default)]
     pub line_number: Option<usize>,
-    #[serde(default = "default_dependency_type")]
+    #[serde(
+        default = "default_dependency_type",
+        alias = "type",
+        alias = "kind",
+        alias = "category"
+    )]
     pub dependency_type: String, // "import", "use", "include", "require", etc.
     #[serde(default, deserialize_with = "deserialize_optional_string_or_array")]
     pub version: Option<String>,
@@ -237,11 +309,15 @@ impl Display for Dependency {
 }
 
 /// Component complexity metrics
-#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema, Default)]
 pub struct CodeComplexity {
+    #[serde(default)]
     pub cyclomatic_complexity: f64,
+    #[serde(default)]
     pub lines_of_code: usize,
+    #[serde(default)]
     pub number_of_functions: usize,
+    #[serde(default)]
     pub number_of_classes: usize,
 }
 

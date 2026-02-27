@@ -124,7 +124,8 @@ impl Display for AgentType {
 // =========================== Specific Agent Result Types ===========================
 
 /// Project type
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "snake_case")]
 pub enum ProjectType {
     FrontendApp,
     BackendService,
@@ -134,173 +135,391 @@ pub enum ProjectType {
     CLITool,
     MobileApp,
     DesktopApp,
+    #[default]
+    #[serde(other)]
     Other,
 }
 
 /// User persona
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 pub struct UserPersona {
+    #[serde(
+        default,
+        alias = "title",
+        alias = "label",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub name: String,
+    #[serde(
+        default,
+        alias = "desc",
+        alias = "summary",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub description: String,
+    #[serde(default, alias = "requirements", alias = "goals")]
     pub needs: Vec<String>,
 }
 
 /// External system
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 pub struct ExternalSystem {
+    #[serde(
+        default,
+        alias = "title",
+        alias = "label",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub name: String,
+    #[serde(
+        default,
+        alias = "desc",
+        alias = "summary",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub description: String,
+    #[serde(
+        default,
+        alias = "type",
+        alias = "kind",
+        alias = "category",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub interaction_type: String,
 }
 
 /// System boundary
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 pub struct SystemBoundary {
+    #[serde(default, deserialize_with = "deserialize_string_or_array")]
     pub scope: String,
+    #[serde(default, alias = "includes", alias = "elements", alias = "entries")]
     pub included_components: Vec<String>,
+    #[serde(default, alias = "excludes")]
     pub excluded_components: Vec<String>,
 }
 
 /// Project objective research result
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 pub struct SystemContextReport {
+    #[serde(
+        default,
+        alias = "title",
+        alias = "name",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub project_name: String,
+    #[serde(
+        default,
+        alias = "desc",
+        alias = "summary",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub project_description: String,
+    #[serde(default)]
     pub project_type: ProjectType,
+    #[serde(default, deserialize_with = "deserialize_string_or_array")]
     pub business_value: String,
+    #[serde(default, alias = "users", alias = "personas")]
     pub target_users: Vec<UserPersona>,
+    #[serde(default, alias = "external_dependencies", alias = "integrations")]
     pub external_systems: Vec<ExternalSystem>,
+    #[serde(default)]
     pub system_boundary: SystemBoundary,
+    #[serde(default)]
     pub confidence_score: f64,
 }
 
 /// Sub-module definition - represents specific implementation modules within a larger module
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 pub struct SubModule {
     /// Sub-module name, should be concise and clear, reflecting specific functionality
+    #[serde(
+        default,
+        alias = "title",
+        alias = "label",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub name: String,
     /// Sub-module function description, explaining the specific role and responsibilities
+    #[serde(
+        default,
+        alias = "desc",
+        alias = "summary",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub description: String,
     /// Related code file path list, containing all code files implementing this sub-module's functionality
+    #[serde(default, alias = "files", alias = "paths")]
     pub code_paths: Vec<String>,
     /// Core function list, listing the main functions and operations provided by this sub-module
+    #[serde(default, alias = "functions", alias = "methods")]
     pub key_functions: Vec<String>,
     /// Importance score (1-10), assessing the importance of this sub-module in the overall system
+    #[serde(default)]
     pub importance: f64,
 }
 
 /// Functional domain module - represents high-level business domain or functional domain
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 pub struct DomainModule {
-    /// Domain module name, should reflect high-level business or functional domain, e.g., "User Management Domain", "Data Processing Domain", "Configuration Management Domain"
+    /// Domain module name, should reflect high-level business or functional domain
+    #[serde(
+        default,
+        alias = "title",
+        alias = "label",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub name: String,
     /// Domain module description, detailing the domain's responsibilities, core value, and role in the system
+    #[serde(
+        default,
+        alias = "desc",
+        alias = "summary",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub description: String,
-    /// Domain type, identifying the domain's layer in system architecture, e.g., "Core Business Domain", "Infrastructure Domain", "Tool Support Domain"
+    /// Domain type, identifying the domain's layer in system architecture
+    #[serde(
+        default,
+        alias = "type",
+        alias = "kind",
+        alias = "category",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub domain_type: String,
-    /// Sub-module list, containing all specific implementation modules under this domain, reflecting functional decomposition within the domain
+    /// Sub-module list, containing all specific implementation modules under this domain
+    #[serde(default, alias = "modules", alias = "items", alias = "elements")]
     pub sub_modules: Vec<SubModule>,
-    /// Related code file path list, containing all code files implementing this domain module's functionality
+    /// Related code file path list, containing all code files implementing this domain module
+    #[serde(default, alias = "files", alias = "paths")]
     pub code_paths: Vec<String>,
-    /// Domain importance score (1-10), assessing the strategic importance of this domain in the overall system
+    /// Domain importance score (1-10)
+    #[serde(default)]
     pub importance: f64,
-    /// Domain complexity score (1-10), assessing the technical complexity and implementation difficulty of this domain
+    /// Domain complexity score (1-10)
+    #[serde(default)]
     pub complexity: f64,
 }
 
 /// Inter-domain relationship - represents dependency and collaboration relationships between different domain modules
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 pub struct DomainRelation {
     /// Source domain module name, representing the initiator of the dependency relationship
+    #[serde(
+        default,
+        alias = "source",
+        alias = "from",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub from_domain: String,
     /// Target domain module name, representing the receiver of the dependency relationship
+    #[serde(
+        default,
+        alias = "target",
+        alias = "to",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub to_domain: String,
-    /// Relationship type, describing the specific relationship between two domains, e.g., "Data Dependency", "Service Call", "Configuration Dependency", "Tool Support"
+    /// Relationship type
+    #[serde(
+        default,
+        alias = "type",
+        alias = "kind",
+        alias = "category",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub relation_type: String,
-    /// Dependency strength (1-10), assessing the coupling degree between two domains, 10 indicates strong dependency, 1 indicates weak dependency
+    /// Dependency strength (1-10)
+    #[serde(default)]
     pub strength: f64,
-    /// Relationship description, detailing the specific interaction methods and dependency content between two domains
+    /// Relationship description
+    #[serde(
+        default,
+        alias = "desc",
+        alias = "summary",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub description: String,
 }
 
 /// Process step - represents a single execution step in the workflow
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 pub struct BusinessFlowStep {
     /// Step number, indicating the execution order of this step in the overall process
+    #[serde(default)]
     pub step: usize,
     /// Involved domain module name, identifying the primary domain executing this step
+    #[serde(default, deserialize_with = "deserialize_string_or_array")]
     pub domain_module: String,
-    /// Involved sub-module name (optional), if the step involves a specific sub-module, specify the particular sub-module
+    /// Involved sub-module name (optional)
+    #[serde(default, deserialize_with = "deserialize_optional_string_or_array")]
     pub sub_module: Option<String>,
-    /// Specific operation description, explaining the specific functional operation or technical action executed in this step
+    /// Specific operation description
+    #[serde(
+        default,
+        alias = "action",
+        alias = "desc",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub operation: String,
-    /// Code entry point (optional), pointing to the main code location or function implementing this step
+    /// Code entry point (optional)
+    #[serde(default, deserialize_with = "deserialize_optional_string_or_array")]
     pub code_entry_point: Option<String>,
 }
 
 /// Core process - represents key functional scenarios and execution paths in the system
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 pub struct BusinessFlow {
-    /// Process name, should reflect specific functional scenario, e.g., "Project Analysis Process", "Code Insight Generation Process"
+    /// Process name
+    #[serde(
+        default,
+        alias = "title",
+        alias = "label",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub name: String,
-    /// Process description, detailing the functional process's objectives, trigger conditions, and expected results
+    /// Process description
+    #[serde(
+        default,
+        alias = "desc",
+        alias = "summary",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub description: String,
-    /// Process step list, steps arranged in execution order, reflecting the complete functional execution path
+    /// Process step list, steps arranged in execution order
+    #[serde(default, alias = "items", alias = "elements", alias = "entries")]
     pub steps: Vec<BusinessFlowStep>,
-    /// Process entry point, explaining the startup method or trigger condition of this functional process
+    /// Process entry point
+    #[serde(default, deserialize_with = "deserialize_string_or_array")]
     pub entry_point: String,
-    /// Process importance score (1-10), assessing the importance of this functional process in the system
+    /// Process importance score (1-10)
+    #[serde(default)]
     pub importance: f64,
-    /// Number of involved domains, counting the number of domain modules this process spans, reflecting process complexity
+    /// Number of involved domains
+    #[serde(default)]
     pub involved_domains_count: usize,
 }
 
 /// Core component analysis result
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 pub struct KeyModuleReport {
     /// Domain name
+    #[serde(default, deserialize_with = "deserialize_string_or_array")]
     pub domain_name: String,
     /// Module name
+    #[serde(
+        default,
+        alias = "name",
+        alias = "title",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub module_name: String,
     /// Explain the project's current technical solution
+    #[serde(
+        default,
+        alias = "description",
+        alias = "desc",
+        alias = "summary",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub module_description: String,
     /// Explain the defined interfaces and interaction methods
+    #[serde(
+        default,
+        alias = "interface",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub interaction: String,
     /// Explain technical details
+    #[serde(
+        default,
+        alias = "details",
+        alias = "technical_details",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub implementation: String,
+    #[serde(default, alias = "files", alias = "paths")]
     pub associated_files: Vec<String>,
+    #[serde(
+        default,
+        alias = "flowchart",
+        alias = "mermaid",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub flowchart_mermaid: String,
+    #[serde(
+        default,
+        alias = "sequence",
+        alias = "sequence_diagram",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub sequence_diagram_mermaid: String,
 }
 
 /// Domain module analysis result from high-level architecture perspective
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 pub struct DomainModulesReport {
-    /// Identified domain module list, high-level functional modules divided by domain, each domain can contain multiple sub-modules
+    /// Identified domain module list
+    #[serde(default, alias = "modules", alias = "items", alias = "elements")]
     pub domain_modules: Vec<DomainModule>,
-    /// Inter-domain relationship list, describing dependencies, collaboration, and interaction relationships between different domain modules
+    /// Inter-domain relationship list
+    #[serde(
+        default,
+        alias = "relations",
+        alias = "relationships",
+        alias = "dependencies"
+    )]
     pub domain_relations: Vec<DomainRelation>,
-    /// Core business process list, identifying important functional scenarios and execution paths in the system
+    /// Core business process list
+    #[serde(default, alias = "flows", alias = "workflows", alias = "processes")]
     pub business_flows: Vec<BusinessFlow>,
-    /// Architecture layer summary, summarizing the overall architectural characteristics and technology selection from a macro perspective
+    /// Architecture layer summary
+    #[serde(
+        default,
+        alias = "summary",
+        alias = "desc",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub architecture_summary: String,
-    /// Analysis confidence score (1-10), assessing the credibility and accuracy of this analysis result
+    /// Analysis confidence score (1-10)
+    #[serde(default)]
     pub confidence_score: f64,
 }
 
 /// Workflow research result
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WorkflowReport {
-    // System main workflow
+    /// System main workflow
     pub main_workflow: Workflow,
-    // Other important workflows
+    /// Other important workflows
+    #[serde(default, alias = "workflows", alias = "items", alias = "elements")]
     pub other_important_workflows: Vec<Workflow>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 pub struct Workflow {
+    #[serde(
+        default,
+        alias = "title",
+        alias = "label",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub name: String,
+    #[serde(
+        default,
+        alias = "desc",
+        alias = "summary",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub description: String,
+    #[serde(
+        default,
+        alias = "flowchart",
+        alias = "mermaid",
+        alias = "diagram",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub flowchart_mermaid: String,
 }
 
@@ -308,88 +527,252 @@ pub struct Workflow {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct BoundaryAnalysisReport {
     /// CLI boundary interface
+    #[serde(default, alias = "cli", alias = "commands")]
     pub cli_boundaries: Vec<CLIBoundary>,
-    /// Network API boundary interface for external invocation (including HTTP, RPC, and other protocols)
+    /// Network API boundary interface for external invocation
+    #[serde(default, alias = "api", alias = "apis", alias = "endpoints")]
     pub api_boundaries: Vec<APIBoundary>,
     /// Page routing
+    #[serde(default, alias = "routes", alias = "routing")]
     pub router_boundaries: Vec<RouterBoundary>,
     /// Integration suggestions
+    #[serde(default, alias = "suggestions", alias = "integrations")]
     pub integration_suggestions: Vec<IntegrationSuggestion>,
     /// Analysis confidence score (1-10)
+    #[serde(default)]
     pub confidence_score: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 pub struct CLIBoundary {
+    #[serde(
+        default,
+        alias = "name",
+        alias = "cmd",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub command: String,
+    #[serde(
+        default,
+        alias = "desc",
+        alias = "summary",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub description: String,
+    #[serde(default, alias = "args", alias = "parameters")]
     pub arguments: Vec<CLIArgument>,
+    #[serde(default, alias = "flags")]
     pub options: Vec<CLIOption>,
+    #[serde(default, alias = "usage", alias = "samples")]
     pub examples: Vec<String>,
+    #[serde(
+        default,
+        alias = "location",
+        alias = "file",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub source_location: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 pub struct CLIArgument {
-    #[serde(default, deserialize_with = "deserialize_string_or_array")]
+    #[serde(
+        default,
+        alias = "title",
+        alias = "label",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub name: String,
-    #[serde(default, deserialize_with = "deserialize_string_or_array")]
+    #[serde(
+        default,
+        alias = "desc",
+        alias = "summary",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub description: String,
     #[serde(default)]
     pub required: bool,
-    #[serde(default, deserialize_with = "deserialize_optional_string_or_array")]
+    #[serde(
+        default,
+        alias = "default",
+        deserialize_with = "deserialize_optional_string_or_array"
+    )]
     pub default_value: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_string_or_array")]
+    #[serde(
+        default,
+        alias = "type",
+        alias = "kind",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub value_type: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 pub struct CLIOption {
-    #[serde(default, deserialize_with = "deserialize_string_or_array")]
+    #[serde(
+        default,
+        alias = "title",
+        alias = "label",
+        alias = "flag",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub name: String,
-    #[serde(default, deserialize_with = "deserialize_optional_string_or_array")]
+    #[serde(
+        default,
+        alias = "short",
+        alias = "alias",
+        deserialize_with = "deserialize_optional_string_or_array"
+    )]
     pub short_name: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_string_or_array")]
+    #[serde(
+        default,
+        alias = "desc",
+        alias = "summary",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub description: String,
     #[serde(default)]
     pub required: bool,
-    #[serde(default, deserialize_with = "deserialize_optional_string_or_array")]
+    #[serde(
+        default,
+        alias = "default",
+        deserialize_with = "deserialize_optional_string_or_array"
+    )]
     pub default_value: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_string_or_array")]
+    #[serde(
+        default,
+        alias = "type",
+        alias = "kind",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub value_type: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 pub struct APIBoundary {
+    #[serde(
+        default,
+        alias = "url",
+        alias = "path",
+        alias = "route",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub endpoint: String,
+    #[serde(
+        default,
+        alias = "http_method",
+        alias = "verb",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub method: String,
+    #[serde(
+        default,
+        alias = "desc",
+        alias = "summary",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub description: String,
+    #[serde(default, deserialize_with = "deserialize_optional_string_or_array")]
     pub request_format: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_string_or_array")]
     pub response_format: Option<String>,
+    #[serde(
+        default,
+        alias = "auth",
+        deserialize_with = "deserialize_optional_string_or_array"
+    )]
     pub authentication: Option<String>,
+    #[serde(
+        default,
+        alias = "location",
+        alias = "file",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub source_location: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 pub struct RouterBoundary {
+    #[serde(
+        default,
+        alias = "route",
+        alias = "url",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub path: String,
+    #[serde(
+        default,
+        alias = "desc",
+        alias = "summary",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub description: String,
+    #[serde(
+        default,
+        alias = "location",
+        alias = "file",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub source_location: String,
+    #[serde(default, alias = "parameters", alias = "args")]
     pub params: Vec<RouterParam>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 pub struct RouterParam {
+    #[serde(
+        default,
+        alias = "name",
+        alias = "param",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub key: String,
+    #[serde(
+        default,
+        alias = "type",
+        alias = "kind",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub value_type: String,
+    #[serde(
+        default,
+        alias = "desc",
+        alias = "summary",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub description: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 pub struct IntegrationSuggestion {
+    #[serde(
+        default,
+        alias = "type",
+        alias = "kind",
+        alias = "category",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub integration_type: String,
+    #[serde(
+        default,
+        alias = "desc",
+        alias = "summary",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub description: String,
+    #[serde(
+        default,
+        alias = "example",
+        alias = "code",
+        deserialize_with = "deserialize_string_or_array"
+    )]
     pub example_code: String,
+    #[serde(
+        default,
+        alias = "practices",
+        alias = "tips",
+        alias = "recommendations"
+    )]
     pub best_practices: Vec<String>,
 }
 

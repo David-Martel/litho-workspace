@@ -1,7 +1,23 @@
 //! Ollama Structured Output Wrapper
 //!
 //! Ollama does not support native structured output (unlike OpenAI), so this module
-//! provides a wrapper to parse JSON from Ollama's text responses and validate against schemas
+//! provides a wrapper to parse JSON from Ollama's text responses and validate against schemas.
+//!
+//! ## LLM failure recovery (ported from deepwiki-rs Patches 3, 5, 8)
+//!
+//! Local 7B–8B models frequently produce malformed or wrapped output:
+//!
+//! - **Schema wrapper**: The model echoes the JSON Schema instead of data.
+//!   Detected by `$schema`/`$defs`/`properties` keys → unwrapped via
+//!   `unwrap_schema_wrapper`.
+//!
+//! - **Envelope wrappers**: The data object is nested under `result`, `data`,
+//!   or `output` keys (sometimes double-encoded as a JSON string).
+//!   Stripped by `unwrap_envelope` from [`crate::llm::serde_helpers`].
+//!
+//! - **Type coercion**: Field-level helpers in `serde_helpers` handle
+//!   `String` where `Vec<String>` was expected, numbers where strings were
+//!   expected, and `null` defaulting.
 
 use anyhow::{Context, Result};
 use regex::Regex;
@@ -10,6 +26,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::LazyLock;
+
+use crate::llm::serde_helpers::unwrap_envelope;
 
 /// JSON code block regex pattern
 static JSON_CODE_BLOCK_REGEX: LazyLock<Regex> =
@@ -93,7 +111,12 @@ where
         prompt
     }
 
-    /// Try to execute extraction once
+    /// Try to execute extraction once.
+    ///
+    /// Applies a layered unwrapping pipeline before deserialization:
+    /// 1. Parse raw text to `serde_json::Value` (4-strategy text parsing).
+    /// 2. Strip JSON Schema wrapper (`$schema`/`properties`/`required`).
+    /// 3. Strip response envelope wrappers (`result`/`data`/`output`).
     async fn try_extract(&self, prompt: &str, attempt: usize) -> Result<T> {
         let response = self
             .agent
@@ -105,9 +128,13 @@ where
             .parse_json_response(&response, attempt)
             .context("Failed to parse JSON from Ollama response")?;
 
-        // Unwrap JSON Schema wrapper if present (Ollama 7B-8B models often
-        // wrap their response in a JSON Schema structure with $schema/properties/required)
+        // Pass 1: Unwrap JSON Schema wrapper (Ollama 7B-8B models often wrap
+        // their response in a JSON Schema structure with $schema/properties/required).
         parsed = Self::unwrap_schema_wrapper(parsed);
+
+        // Pass 2: Unwrap common response envelope keys (result / data / output).
+        // Some models nest the actual payload one level deeper.
+        parsed = unwrap_envelope(parsed);
 
         self.validate_json(&parsed)?;
 
@@ -123,7 +150,17 @@ where
         Ok(result)
     }
 
-    /// Parse JSON response using multiple strategies
+    /// Parse JSON response using multiple strategies.
+    ///
+    /// Strategies are tried in order of increasing cost:
+    ///
+    /// 1. **Direct**: parse the raw response as JSON.
+    /// 2. **Code block**: extract from a ```` ```json ... ``` ```` fence.
+    /// 3. **First object**: scan for the first balanced `{…}` in the text.
+    /// 4. **Clean**: strip leading/trailing fence markers and retry.
+    /// 5. **Double-encoded**: if the cleaned text is a JSON string whose
+    ///    contents parse as an object, unwrap the extra layer of encoding.
+    ///    Some 7B models emit `"{\"foo\": 1}"` instead of `{"foo": 1}`.
     fn parse_json_response(&self, response: &str, attempt: usize) -> Result<Value> {
         // Strategy 1: Try direct parsing
         if let Ok(json) = serde_json::from_str::<Value>(response) {
@@ -144,15 +181,27 @@ where
             }
         }
 
-        // Strategy 4: Clean and try parsing
+        // Strategy 4: Clean fence markers and try parsing
         let cleaned = self.clean_response(response);
-        serde_json::from_str::<Value>(&cleaned).with_context(|| {
-            let preview = response.chars().take(200).collect::<String>();
-            format!(
-                "Failed to parse JSON from Ollama response (attempt {}). Response preview: {}",
-                attempt, preview
-            )
-        })
+        if let Ok(parsed) = serde_json::from_str::<Value>(&cleaned) {
+            return Ok(parsed);
+        }
+
+        // Strategy 5: Detect double-encoded JSON — the model returned a JSON
+        // string whose content is itself a JSON object, e.g. `"{\"x\":1}"`.
+        if let Ok(Value::String(inner)) = serde_json::from_str::<Value>(&cleaned) {
+            if let Ok(parsed) = serde_json::from_str::<Value>(&inner) {
+                if parsed.is_object() || parsed.is_array() {
+                    return Ok(parsed);
+                }
+            }
+        }
+
+        Err(anyhow::anyhow!(
+            "Failed to parse JSON from Ollama response (attempt {}). Response preview: {}",
+            attempt,
+            response.chars().take(200).collect::<String>()
+        ))
     }
 
     /// Extract JSON from markdown code blocks
