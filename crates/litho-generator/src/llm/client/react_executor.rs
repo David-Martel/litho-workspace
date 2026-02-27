@@ -3,9 +3,9 @@
 use anyhow::Result;
 use rig::completion::{AssistantContent, Message, PromptError};
 
-use crate::i18n::TargetLanguage;
-use super::react::{ReActConfig, ReActResponse};
 use super::providers::ProviderAgent;
+use super::react::{ReActConfig, ReActResponse};
+use crate::i18n::TargetLanguage;
 
 /// ReAct executor
 pub struct ReActExecutor;
@@ -70,7 +70,11 @@ impl ReActExecutor {
                 if config.verbose {
                     println!("   ❌ ReAct Agent error: {:?}", e);
                 }
-                Err(anyhow::anyhow!("ReAct Agent task execution failed (model: {}): {}", model_name, e))
+                Err(anyhow::anyhow!(
+                    "ReAct Agent task execution failed (model: {}): {}",
+                    model_name,
+                    e
+                ))
             }
         }
     }

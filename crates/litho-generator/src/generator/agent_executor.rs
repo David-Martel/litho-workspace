@@ -27,12 +27,20 @@ pub async fn prompt(context: &GeneratorContext, params: AgentExecuteParams) -> R
         .get::<serde_json::Value>(cache_scope, &prompt_key)
         .await?
     {
-        let msg = context.config.target_language.msg_cache_hit().replace("{}", log_tag);
+        let msg = context
+            .config
+            .target_language
+            .msg_cache_hit()
+            .replace("{}", log_tag);
         println!("{}", msg);
         return Ok(cached_reply.to_string());
     }
 
-    let msg = context.config.target_language.msg_ai_analyzing().replace("{}", log_tag);
+    let msg = context
+        .config
+        .target_language
+        .msg_ai_analyzing()
+        .replace("{}", log_tag);
     println!("{}", msg);
 
     let reply = context
@@ -74,12 +82,20 @@ pub async fn prompt_with_tools(
         .get::<serde_json::Value>(cache_scope, &prompt_key)
         .await?
     {
-        let msg = context.config.target_language.msg_cache_hit().replace("{}", log_tag);
+        let msg = context
+            .config
+            .target_language
+            .msg_cache_hit()
+            .replace("{}", log_tag);
         println!("{}", msg);
         return Ok(cached_reply.to_string());
     }
 
-    let msg = context.config.target_language.msg_ai_analyzing().replace("{}", log_tag);
+    let msg = context
+        .config
+        .target_language
+        .msg_ai_analyzing()
+        .replace("{}", log_tag);
     println!("{}", msg);
 
     let reply = context
@@ -122,12 +138,20 @@ where
         .get::<T>(cache_scope, &prompt_key)
         .await?
     {
-        let msg = context.config.target_language.msg_cache_hit().replace("{}", log_tag);
+        let msg = context
+            .config
+            .target_language
+            .msg_cache_hit()
+            .replace("{}", log_tag);
         println!("{}", msg);
         return Ok(cached_reply);
     }
 
-    let msg = context.config.target_language.msg_ai_analyzing().replace("{}", log_tag);
+    let msg = context
+        .config
+        .target_language
+        .msg_ai_analyzing()
+        .replace("{}", log_tag);
     println!("{}", msg);
 
     let reply = context

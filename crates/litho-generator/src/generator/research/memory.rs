@@ -1,5 +1,5 @@
-use serde_json::Value;
 use crate::generator::context::GeneratorContext;
+use serde_json::Value;
 
 pub struct MemoryScope;
 
@@ -16,11 +16,13 @@ pub trait MemoryRetriever {
 impl MemoryRetriever for GeneratorContext {
     /// Store research results
     async fn store_research(&self, agent_type: &str, result: Value) -> anyhow::Result<()> {
-        self.store_to_memory(MemoryScope::STUDIES_RESEARCH, agent_type, result).await
+        self.store_to_memory(MemoryScope::STUDIES_RESEARCH, agent_type, result)
+            .await
     }
 
     /// Get research results
     async fn get_research(&self, agent_type: &str) -> Option<Value> {
-        self.get_from_memory(MemoryScope::STUDIES_RESEARCH, agent_type).await
+        self.get_from_memory(MemoryScope::STUDIES_RESEARCH, agent_type)
+            .await
     }
 }

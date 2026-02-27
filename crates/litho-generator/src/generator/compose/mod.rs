@@ -22,7 +22,10 @@ pub struct DocumentationComposer;
 impl DocumentationComposer {
     pub async fn execute(&self, context: &GeneratorContext, doc_tree: &mut DocTree) -> Result<()> {
         println!("\n🤖 Executing documentation generation process...");
-        println!("📝 Target language: {}", context.config.target_language.display_name());
+        println!(
+            "📝 Target language: {}",
+            context.config.target_language.display_name()
+        );
 
         let overview_editor = OverviewEditor::default();
         overview_editor.execute(context).await?;
@@ -58,8 +61,16 @@ impl DocumentationComposer {
         {
             insights.iter().any(|insight| {
                 matches!(insight.code_dossier.code_purpose, CodePurpose::Database)
-                    || insight.code_dossier.file_path.to_string_lossy().ends_with(".sql")
-                    || insight.code_dossier.file_path.to_string_lossy().ends_with(".sqlproj")
+                    || insight
+                        .code_dossier
+                        .file_path
+                        .to_string_lossy()
+                        .ends_with(".sql")
+                    || insight
+                        .code_dossier
+                        .file_path
+                        .to_string_lossy()
+                        .ends_with(".sqlproj")
             })
         } else {
             false

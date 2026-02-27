@@ -73,7 +73,10 @@ impl CodeAnalyze {
             }
         }
 
-        println!("✓ Concurrent code analysis completed, successfully analyzed {} files", code_insights.len());
+        println!(
+            "✓ Concurrent code analysis completed, successfully analyzed {} files",
+            code_insights.len()
+        );
         Ok(code_insights)
     }
 }

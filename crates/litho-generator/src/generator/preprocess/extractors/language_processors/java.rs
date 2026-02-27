@@ -32,23 +32,23 @@ impl LanguageProcessor for JavaProcessor {
     fn supported_extensions(&self) -> Vec<&'static str> {
         vec!["java"]
     }
-    
+
     fn extract_dependencies(&self, content: &str, file_path: &Path) -> Vec<Dependency> {
         let mut dependencies = Vec::new();
         let source_file = file_path.to_string_lossy().to_string();
-        
+
         for (line_num, line) in content.lines().enumerate() {
             // Extract import statements
             if let Some(captures) = self.import_regex.captures(line) {
                 if let Some(import_path) = captures.get(1) {
                     let import_str = import_path.as_str().trim();
-                    let is_external = import_str.starts_with("java.") || 
-                                    import_str.starts_with("javax.") ||
-                                    !import_str.contains(".");
-                    
+                    let is_external = import_str.starts_with("java.")
+                        || import_str.starts_with("javax.")
+                        || !import_str.contains(".");
+
                     // Parse dependency name
                     let dependency_name = self.extract_dependency_name(import_str);
-                    
+
                     dependencies.push(Dependency {
                         name: dependency_name,
                         path: Some(source_file.clone()),
@@ -59,7 +59,7 @@ impl LanguageProcessor for JavaProcessor {
                     });
                 }
             }
-            
+
             // Extract package statement
             if let Some(captures) = self.package_regex.captures(line) {
                 if let Some(package_name) = captures.get(1) {
@@ -74,19 +74,17 @@ impl LanguageProcessor for JavaProcessor {
                 }
             }
         }
-        
+
         dependencies
     }
-    
+
     fn determine_component_type(&self, file_path: &Path, content: &str) -> String {
-        let file_name = file_path.file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("");
-        
+        let file_name = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+
         if file_name.ends_with("Test.java") || file_name.ends_with("Tests.java") {
             return "java_test".to_string();
         }
-        
+
         if content.contains("interface ") {
             "java_interface".to_string()
         } else if content.contains("enum ") {
@@ -99,26 +97,34 @@ impl LanguageProcessor for JavaProcessor {
             "java_file".to_string()
         }
     }
-    
+
     fn is_important_line(&self, line: &str) -> bool {
         let trimmed = line.trim();
-        
-        if trimmed.starts_with("public class ") || trimmed.starts_with("class ") ||
-           trimmed.starts_with("interface ") || trimmed.starts_with("enum ") ||
-           trimmed.starts_with("public ") || trimmed.starts_with("private ") ||
-           trimmed.starts_with("protected ") || trimmed.starts_with("import ") ||
-           trimmed.starts_with("package ") {
+
+        if trimmed.starts_with("public class ")
+            || trimmed.starts_with("class ")
+            || trimmed.starts_with("interface ")
+            || trimmed.starts_with("enum ")
+            || trimmed.starts_with("public ")
+            || trimmed.starts_with("private ")
+            || trimmed.starts_with("protected ")
+            || trimmed.starts_with("import ")
+            || trimmed.starts_with("package ")
+        {
             return true;
         }
-        
-        if trimmed.contains("TODO") || trimmed.contains("FIXME") || 
-           trimmed.contains("NOTE") || trimmed.contains("HACK") {
+
+        if trimmed.contains("TODO")
+            || trimmed.contains("FIXME")
+            || trimmed.contains("NOTE")
+            || trimmed.contains("HACK")
+        {
             return true;
         }
-        
+
         false
     }
-    
+
     fn language_name(&self) -> &'static str {
         "Java"
     }
@@ -126,22 +132,26 @@ impl LanguageProcessor for JavaProcessor {
     fn extract_interfaces(&self, content: &str, _file_path: &Path) -> Vec<InterfaceInfo> {
         let mut interfaces = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
-        
+
         for (i, line) in lines.iter().enumerate() {
             // Extract class definitions
             if let Some(captures) = self.class_regex.captures(line) {
                 let visibility = captures.get(1).map(|m| m.as_str()).unwrap_or("package");
                 let is_abstract = captures.get(2).is_some();
                 let is_final = captures.get(3).is_some();
-                let name = captures.get(4).map(|m| m.as_str()).unwrap_or("").to_string();
-                
+                let name = captures
+                    .get(4)
+                    .map(|m| m.as_str())
+                    .unwrap_or("")
+                    .to_string();
+
                 let mut interface_type = "class".to_string();
                 if is_abstract {
                     interface_type = "abstract_class".to_string();
                 } else if is_final {
                     interface_type = "final_class".to_string();
                 }
-                
+
                 interfaces.push(InterfaceInfo {
                     name,
                     interface_type,
@@ -151,12 +161,16 @@ impl LanguageProcessor for JavaProcessor {
                     description: self.extract_javadoc(&lines, i),
                 });
             }
-            
+
             // Extract interface definitions
             if let Some(captures) = self.interface_regex.captures(line) {
                 let visibility = captures.get(1).map(|m| m.as_str()).unwrap_or("package");
-                let name = captures.get(2).map(|m| m.as_str()).unwrap_or("").to_string();
-                
+                let name = captures
+                    .get(2)
+                    .map(|m| m.as_str())
+                    .unwrap_or("")
+                    .to_string();
+
                 interfaces.push(InterfaceInfo {
                     name,
                     interface_type: "interface".to_string(),
@@ -166,12 +180,16 @@ impl LanguageProcessor for JavaProcessor {
                     description: self.extract_javadoc(&lines, i),
                 });
             }
-            
+
             // Extract enum definitions
             if let Some(captures) = self.enum_regex.captures(line) {
                 let visibility = captures.get(1).map(|m| m.as_str()).unwrap_or("package");
-                let name = captures.get(2).map(|m| m.as_str()).unwrap_or("").to_string();
-                
+                let name = captures
+                    .get(2)
+                    .map(|m| m.as_str())
+                    .unwrap_or("")
+                    .to_string();
+
                 interfaces.push(InterfaceInfo {
                     name,
                     interface_type: "enum".to_string(),
@@ -181,22 +199,34 @@ impl LanguageProcessor for JavaProcessor {
                     description: self.extract_javadoc(&lines, i),
                 });
             }
-            
+
             // Extract method definitions
             if let Some(captures) = self.method_regex.captures(line) {
                 let visibility = captures.get(1).map(|m| m.as_str()).unwrap_or("package");
                 let is_static = captures.get(2).is_some();
                 let is_final = captures.get(3).is_some();
-                let return_type = captures.get(4).map(|m| m.as_str()).unwrap_or("").to_string();
-                let name = captures.get(5).map(|m| m.as_str()).unwrap_or("").to_string();
+                let return_type = captures
+                    .get(4)
+                    .map(|m| m.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let name = captures
+                    .get(5)
+                    .map(|m| m.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 let params_str = captures.get(6).map(|m| m.as_str()).unwrap_or("");
-                
+
                 // Skip some Java keywords
-                if return_type == "if" || return_type == "for" || return_type == "while" || 
-                   return_type == "switch" || return_type == "try" {
+                if return_type == "if"
+                    || return_type == "for"
+                    || return_type == "while"
+                    || return_type == "switch"
+                    || return_type == "try"
+                {
                     continue;
                 }
-                
+
                 let parameters = self.parse_java_parameters(params_str);
                 let mut interface_type = "method".to_string();
                 if is_static {
@@ -204,7 +234,7 @@ impl LanguageProcessor for JavaProcessor {
                 } else if is_final {
                     interface_type = "final_method".to_string();
                 }
-                
+
                 interfaces.push(InterfaceInfo {
                     name,
                     interface_type,
@@ -214,17 +244,21 @@ impl LanguageProcessor for JavaProcessor {
                     description: self.extract_javadoc(&lines, i),
                 });
             }
-            
+
             // Extract constructors
             if let Some(captures) = self.constructor_regex.captures(line) {
                 let visibility = captures.get(1).map(|m| m.as_str()).unwrap_or("package");
-                let name = captures.get(2).map(|m| m.as_str()).unwrap_or("").to_string();
+                let name = captures
+                    .get(2)
+                    .map(|m| m.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 let params_str = captures.get(3).map(|m| m.as_str()).unwrap_or("");
-                
+
                 // Simple check if it's a constructor (name starts with uppercase)
                 if name.chars().next().map_or(false, |c| c.is_uppercase()) {
                     let parameters = self.parse_java_parameters(params_str);
-                    
+
                     interfaces.push(InterfaceInfo {
                         name,
                         interface_type: "constructor".to_string(),
@@ -236,7 +270,7 @@ impl LanguageProcessor for JavaProcessor {
                 }
             }
         }
-        
+
         interfaces
     }
 }
@@ -245,18 +279,18 @@ impl JavaProcessor {
     /// Parse Java method parameters
     fn parse_java_parameters(&self, params_str: &str) -> Vec<ParameterInfo> {
         let mut parameters = Vec::new();
-        
+
         if params_str.trim().is_empty() {
             return parameters;
         }
-        
+
         // Simple parameter parsing, handling basic cases
         for param in params_str.split(',') {
             let param = param.trim();
             if param.is_empty() {
                 continue;
             }
-            
+
             // Parse parameter format: Type name or final Type name
             let parts: Vec<&str> = param.split_whitespace().collect();
             if parts.len() >= 2 {
@@ -265,14 +299,14 @@ impl JavaProcessor {
                 } else {
                     (parts[0].to_string(), parts[1].to_string())
                 };
-                
+
                 // Handle generic types
                 let clean_type = if param_type.contains('<') {
                     param_type
                 } else {
                     param_type
                 };
-                
+
                 parameters.push(ParameterInfo {
                     name,
                     param_type: clean_type,
@@ -281,19 +315,19 @@ impl JavaProcessor {
                 });
             }
         }
-        
+
         parameters
     }
-    
+
     /// Extract Javadoc comments
     fn extract_javadoc(&self, lines: &[&str], current_line: usize) -> Option<String> {
         let mut doc_lines = Vec::new();
         let mut in_javadoc = false;
-        
+
         // Search upward for Javadoc comments
         for i in (0..current_line).rev() {
             let line = lines[i].trim();
-            
+
             if line.ends_with("*/") {
                 in_javadoc = true;
                 if line.starts_with("/**") {
@@ -326,7 +360,7 @@ impl JavaProcessor {
                 break;
             }
         }
-        
+
         if doc_lines.is_empty() {
             None
         } else {

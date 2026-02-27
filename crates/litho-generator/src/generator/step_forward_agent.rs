@@ -198,7 +198,10 @@ impl DataFormatter {
                 insight.code_dossier.importance_score
             ));
             if !insight.detailed_description.is_empty() {
-                content.push_str(&format!("   Detailed description: {}\n", &insight.detailed_description));
+                content.push_str(&format!(
+                    "   Detailed description: {}\n",
+                    &insight.detailed_description
+                ));
             }
             if config.include_source_code {
                 content.push_str(&format!(
@@ -270,23 +273,28 @@ impl DataFormatter {
         }
 
         // Find a good truncation point at the end of a line
-        let truncated: String = content
-            .chars()
-            .take(target_len)
-            .collect();
+        let truncated: String = content.chars().take(target_len).collect();
 
         // Find the last newline character to avoid breaking mid-line
         let safe_end = truncated.rfind('\n').unwrap_or(target_len);
         let result = if safe_end > 100 {
-            format!("{}\n\n[Content truncated due to size limitations]",
-                    &truncated[..safe_end])
+            format!(
+                "{}\n\n[Content truncated due to size limitations]",
+                &truncated[..safe_end]
+            )
         } else {
-            format!("{}\n\n[Content truncated due to size limitations]",
-                    truncated)
+            format!(
+                "{}\n\n[Content truncated due to size limitations]",
+                truncated
+            )
         };
 
-        println!("   🚨 Emergency truncation for [{}]: reduced from {} to {} characters",
-                content_type, content.len(), result.len());
+        println!(
+            "   🚨 Emergency truncation for [{}]: reduced from {} to {} characters",
+            content_type,
+            content.len(),
+            result.len()
+        );
 
         Ok(result)
     }
@@ -341,7 +349,10 @@ impl DataFormatter {
                 }
                 Err(e) => {
                     // If compression fails, try to truncate content to a reasonable size
-                    println!("   ⚠️ Compression failed for [{}]: {}, attempting emergency truncation", content_type, e);
+                    println!(
+                        "   ⚠️ Compression failed for [{}]: {}, attempting emergency truncation",
+                        content_type, e
+                    );
                     self.emergency_truncate(content, content_type)
                 }
             }
@@ -380,7 +391,13 @@ impl GeneratorPromptBuilder {
     ) -> Result<(String, String)> {
         let system_prompt = self.template.system_prompt.clone();
         let user_prompt = self
-            .build_standard_user_prompt(context, data_sources, custom_content, include_timestamp, agent_filter)
+            .build_standard_user_prompt(
+                context,
+                data_sources,
+                custom_content,
+                include_timestamp,
+                agent_filter,
+            )
             .await?;
         Ok((system_prompt, user_prompt))
     }
@@ -433,7 +450,11 @@ impl GeneratorPromptBuilder {
                             let formatted = self.formatter.format_project_structure(&structure);
                             let compressed = self
                                 .formatter
-                                .compress_content_if_needed(context, &formatted, "Project Structure")
+                                .compress_content_if_needed(
+                                    context,
+                                    &formatted,
+                                    "Project Structure",
+                                )
                                 .await?;
                             prompt.push_str(&compressed);
                         }
@@ -489,10 +510,15 @@ impl GeneratorPromptBuilder {
                         .await
                     {
                         let cat_names = categories.join(", ");
-                        let formatted = format!("### External Knowledge ({})\n{}\n\n", cat_names, knowledge);
+                        let formatted =
+                            format!("### External Knowledge ({})\n{}\n\n", cat_names, knowledge);
                         let compressed = self
                             .formatter
-                            .compress_content_if_needed(context, &formatted, &format!("Knowledge: {}", cat_names))
+                            .compress_content_if_needed(
+                                context,
+                                &formatted,
+                                &format!("Knowledge: {}", cat_names),
+                            )
                             .await?;
                         prompt.push_str(&compressed);
                     }
@@ -549,7 +575,10 @@ pub trait StepForwardAgent: Send + Sync {
 
     /// Optional custom prompt content provider hook
     /// Returns custom prompt content, will be inserted into the research materials reference section of standard prompt
-    async fn provide_custom_prompt_content(&self, _context: &GeneratorContext) -> Result<Option<String>> {
+    async fn provide_custom_prompt_content(
+        &self,
+        _context: &GeneratorContext,
+    ) -> Result<Option<String>> {
         Ok(None)
     }
 
@@ -570,12 +599,19 @@ pub trait StepForwardAgent: Send + Sync {
             match source {
                 DataSource::MemoryData { scope, key } => {
                     if !context.has_memory_data(scope, key).await {
-                        return Err(anyhow!("Required data source {}:{} is not available", scope, key));
+                        return Err(anyhow!(
+                            "Required data source {}:{} is not available",
+                            scope,
+                            key
+                        ));
                     }
                 }
                 DataSource::ResearchResult(agent_type) => {
                     if context.get_research(agent_type).await.is_none() {
-                        return Err(anyhow!("Required research result {} is not available", agent_type));
+                        return Err(anyhow!(
+                            "Required research result {} is not available",
+                            agent_type
+                        ));
                     }
                 }
                 DataSource::ExternalKnowledgeByCategory(_) => {
@@ -602,7 +638,13 @@ pub trait StepForwardAgent: Send + Sync {
         let include_timestamp = self.should_include_timestamp();
 
         let (system_prompt, user_prompt) = prompt_builder
-            .build_prompts(context, &all_sources, custom_content, include_timestamp, Some(agent_type_value.as_str()))
+            .build_prompts(
+                context,
+                &all_sources,
+                custom_content,
+                include_timestamp,
+                Some(agent_type_value.as_str()),
+            )
             .await?;
 
         let system_prompt = format!("{}\n\n{}", system_prompt, language_instruction);

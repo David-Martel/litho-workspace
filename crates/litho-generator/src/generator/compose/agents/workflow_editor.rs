@@ -32,7 +32,10 @@ impl StepForwardAgent for WorkflowEditor {
                 DataSource::CODE_INSIGHTS,
             ],
             // Use workflow docs for workflow documentation
-            optional_sources: vec![DataSource::knowledge_categories(vec!["workflow", "architecture"])],
+            optional_sources: vec![DataSource::knowledge_categories(vec![
+                "workflow",
+                "architecture",
+            ])],
         }
     }
 

@@ -370,16 +370,19 @@ impl StructureExtractor {
                     "package" => score += 0.15,
                     "lock" => score += 0.05,
                     // Style files
-                    "css" | "scss" | "sass" | "less" | "styl" | "wxss"  => score += 0.1,
+                    "css" | "scss" | "sass" | "less" | "styl" | "wxss" => score += 0.1,
                     // Template files
                     "html" | "htm" | "hbs" | "mustache" | "ejs" => score += 0.1,
                     _ => {}
                 }
             }
-            
+
             // Bonus for database-related paths
             let path_str = file.path.to_string_lossy().to_lowercase();
-            if path_str.contains("database") || path_str.contains("schema") || path_str.contains("migrations") {
+            if path_str.contains("database")
+                || path_str.contains("schema")
+                || path_str.contains("migrations")
+            {
                 score += 0.15;
             }
 
@@ -430,41 +433,46 @@ impl StructureExtractor {
         });
 
         let max_parallel = self.context.config.llm.max_parallels.max(1);
-        let indexed_results = stream::iter(core_files.into_iter().enumerate().map(|(idx, file)| {
-            let file = file.clone();
-            async move {
-                let code_purpose = self.determine_code_purpose(&file).await;
+        let indexed_results =
+            stream::iter(core_files.into_iter().enumerate().map(|(idx, file)| {
+                let file = file.clone();
+                async move {
+                    let code_purpose = self.determine_code_purpose(&file).await;
 
-                // Extract interface information
-                let interfaces = self.extract_file_interfaces(&file).await.unwrap_or_default();
-                let interface_names: Vec<String> = interfaces.iter().map(|i| i.name.clone()).collect();
+                    // Extract interface information
+                    let interfaces = self
+                        .extract_file_interfaces(&file)
+                        .await
+                        .unwrap_or_default();
+                    let interface_names: Vec<String> =
+                        interfaces.iter().map(|i| i.name.clone()).collect();
 
-                // Extract core code summary
-                let source_summary = read_code_source(
-                    &self.language_processor,
-                    &structure.root_path,
-                    &file.path,
-                    &self.context.config.target_language,
-                );
+                    // Extract core code summary
+                    let source_summary = read_code_source(
+                        &self.language_processor,
+                        &structure.root_path,
+                        &file.path,
+                        &self.context.config.target_language,
+                    );
 
-                (
-                    idx,
-                    CodeDossier {
-                        name: file.name.clone(),
-                        file_path: file.path.clone(),
-                        source_summary,
-                        code_purpose,
-                        importance_score: file.importance_score,
-                        description: None,     // Filled later through LLM analysis
-                        functions: Vec::new(), // Filled later through code analysis
-                        interfaces: interface_names, // Interface names extracted from code analysis
-                    },
-                )
-            }
-        }))
-        .buffer_unordered(max_parallel)
-        .collect::<Vec<_>>()
-        .await;
+                    (
+                        idx,
+                        CodeDossier {
+                            name: file.name.clone(),
+                            file_path: file.path.clone(),
+                            source_summary,
+                            code_purpose,
+                            importance_score: file.importance_score,
+                            description: None, // Filled later through LLM analysis
+                            functions: Vec::new(), // Filled later through code analysis
+                            interfaces: interface_names, // Interface names extracted from code analysis
+                        },
+                    )
+                }
+            }))
+            .buffer_unordered(max_parallel)
+            .collect::<Vec<_>>()
+            .await;
 
         let mut indexed_results = indexed_results;
         indexed_results.sort_by_key(|(idx, _)| *idx);

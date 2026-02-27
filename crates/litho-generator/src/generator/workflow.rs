@@ -96,7 +96,10 @@ pub async fn launch(c: &Config) -> Result<()> {
     context
         .store_to_memory(TimingScope::TIMING, TimingKeys::RESEARCH, research_time)
         .await?;
-    println!("\n=== Project in-depth research completed (Duration: {:.2}s) ===", research_time);
+    println!(
+        "\n=== Project in-depth research completed (Duration: {:.2}s) ===",
+        research_time
+    );
 
     // Execute document generation process
     let compose_start = Instant::now();
@@ -109,7 +112,10 @@ pub async fn launch(c: &Config) -> Result<()> {
     context
         .store_to_memory(TimingScope::TIMING, TimingKeys::COMPOSE, compose_time)
         .await?;
-    println!("\n=== Document generation completed (Duration: {:.2}s) ===", compose_time);
+    println!(
+        "\n=== Document generation completed (Duration: {:.2}s) ===",
+        compose_time
+    );
 
     // Execute document storage
     let output_start = Instant::now();
@@ -124,7 +130,10 @@ pub async fn launch(c: &Config) -> Result<()> {
     context
         .store_to_memory(TimingScope::TIMING, TimingKeys::OUTPUT, output_time)
         .await?;
-    println!("\n=== Document storage completed (Duration: {:.2}s) ===", output_time);
+    println!(
+        "\n=== Document storage completed (Duration: {:.2}s) ===",
+        output_time
+    );
 
     // Record total execution time
     let total_time = overall_start.elapsed().as_secs_f64();
@@ -132,7 +141,10 @@ pub async fn launch(c: &Config) -> Result<()> {
         .store_to_memory(TimingScope::TIMING, TimingKeys::TOTAL_EXECUTION, total_time)
         .await?;
 
-    println!("\n🎉 All processes execution completed! Total duration: {:.2}s", total_time);
+    println!(
+        "\n🎉 All processes execution completed! Total duration: {:.2}s",
+        total_time
+    );
 
     Ok(())
 }

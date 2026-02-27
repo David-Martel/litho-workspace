@@ -192,7 +192,11 @@ impl BoundaryEditor {
                         .as_ref()
                         .map(|s| format!(", {}", s))
                         .unwrap_or_default();
-                    let required_text = if option.required { "required" } else { "optional" };
+                    let required_text = if option.required {
+                        "required"
+                    } else {
+                        "optional"
+                    };
                     let default_text = option
                         .default_value
                         .as_ref()
@@ -262,7 +266,10 @@ impl BoundaryEditor {
         for router in router_boundaries {
             content.push_str(&format!("### {}\n\n", router.path));
             content.push_str(&format!("**Description**: {}\n\n", router.description));
-            content.push_str(&format!("**Source File**: `{}`\n\n", router.source_location));
+            content.push_str(&format!(
+                "**Source File**: `{}`\n\n",
+                router.source_location
+            ));
 
             if !router.params.is_empty() {
                 content.push_str("**Parameters**:\n\n");

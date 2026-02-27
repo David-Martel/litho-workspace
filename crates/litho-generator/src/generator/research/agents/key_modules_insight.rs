@@ -43,7 +43,10 @@ impl StepForwardAgent for KeyModulesInsight {
                 DataSource::ResearchResult(AgentType::DomainModulesDetector.to_string()),
             ],
             // Use architecture and database docs for module insights
-            optional_sources: vec![DataSource::knowledge_categories(vec!["architecture", "database"])],
+            optional_sources: vec![DataSource::knowledge_categories(vec![
+                "architecture",
+                "database",
+            ])],
         }
     }
 
@@ -104,7 +107,10 @@ impl KeyModulesInsight {
         );
 
         // 2. Perform concurrent analysis for each domain module
-        println!("🚀 Starting concurrent analysis, max parallelism: {}", max_parallels);
+        println!(
+            "🚀 Starting concurrent analysis, max parallelism: {}",
+            max_parallels
+        );
 
         // Create concurrent tasks
         let analysis_futures: Vec<_> = domain_modules
@@ -137,11 +143,18 @@ impl KeyModulesInsight {
                         .await?;
                     successful_analyses += 1;
                     reports.push(report);
-                    println!("✅ Domain module analysis: {} completed and stored", domain_name);
+                    println!(
+                        "✅ Domain module analysis: {} completed and stored",
+                        domain_name
+                    );
                 }
                 Err(e) => {
                     let msg = context.config.target_language.msg_domain_analysis_failed();
-                    println!("{}", msg.replace("{}", &domain_name).replace("{}", &e.to_string()));
+                    println!(
+                        "{}",
+                        msg.replace("{}", &domain_name)
+                            .replace("{}", &e.to_string())
+                    );
                     // Continue processing other domains without interrupting the entire flow
                 }
             }

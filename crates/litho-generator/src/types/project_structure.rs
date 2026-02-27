@@ -1,6 +1,6 @@
 use std::{collections::HashMap, path::PathBuf};
 
-use serde::{de::Deserializer, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::Deserializer};
 
 use crate::types::{DirectoryInfo, FileInfo};
 

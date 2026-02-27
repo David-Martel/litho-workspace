@@ -123,7 +123,9 @@ impl Args {
 
         let mut config = if let Some(config_path) = &self.config {
             // If config file path is explicitly specified, load from that path
-            let msg = target_lang.msg_config_read_error().replace("{:?}", &format!("{:?}", config_path));
+            let msg = target_lang
+                .msg_config_read_error()
+                .replace("{:?}", &format!("{:?}", config_path));
             return Config::from_file(config_path).expect(&msg);
         } else {
             // If no config file is explicitly specified, try loading from default location
@@ -132,7 +134,9 @@ impl Args {
                 .join("litho.toml");
 
             if default_config_path.exists() {
-                let msg = target_lang.msg_config_read_error().replace("{:?}", &format!("{:?}", default_config_path));
+                let msg = target_lang
+                    .msg_config_read_error()
+                    .replace("{:?}", &format!("{:?}", default_config_path));
                 return Config::from_file(&default_config_path).expect(&msg);
             } else {
                 // Default config file doesn't exist, use default values
@@ -155,7 +159,9 @@ impl Args {
             if let Ok(provider) = provider_str.parse::<LLMProvider>() {
                 config.llm.provider = provider;
             } else {
-                let msg = target_lang.msg_unknown_provider().replace("{}", &provider_str);
+                let msg = target_lang
+                    .msg_unknown_provider()
+                    .replace("{}", &provider_str);
                 eprintln!("{}", msg);
             }
         }
@@ -193,7 +199,9 @@ impl Args {
             if let Ok(target_language) = target_language_str.parse::<TargetLanguage>() {
                 config.target_language = target_language;
             } else {
-                let msg = target_lang.msg_unknown_language().replace("{}", &target_language_str);
+                let msg = target_lang
+                    .msg_unknown_language()
+                    .replace("{}", &target_language_str);
                 eprintln!("{}", msg);
             }
         }

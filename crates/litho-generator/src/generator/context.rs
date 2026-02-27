@@ -5,12 +5,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-use crate::{
-    cache::CacheManager, 
-    config::Config, 
-    llm::client::LLMClient, 
-    memory::Memory,
-};
+use crate::{cache::CacheManager, config::Config, llm::client::LLMClient, memory::Memory};
 
 #[derive(Clone)]
 pub struct GeneratorContext {
@@ -60,7 +55,7 @@ impl GeneratorContext {
         let memory = self.memory.read().await;
         memory.get_usage_stats()
     }
-    
+
     /// Load external knowledge for multiple categories
     pub async fn load_external_knowledge_by_categories(
         &self,
@@ -68,20 +63,22 @@ impl GeneratorContext {
         agent_filter: Option<&str>,
     ) -> Option<String> {
         use crate::integrations::KnowledgeSyncer;
-        
+
         match KnowledgeSyncer::new(self.config.clone()) {
             Ok(syncer) => {
                 let mut combined = String::new();
                 let mut found_any = false;
-                
+
                 for category in categories {
-                    if let Ok(Some(knowledge)) = syncer.load_cached_knowledge_by_category(category, agent_filter) {
+                    if let Ok(Some(knowledge)) =
+                        syncer.load_cached_knowledge_by_category(category, agent_filter)
+                    {
                         combined.push_str(&knowledge);
                         combined.push_str("\n\n");
                         found_any = true;
                     }
                 }
-                
+
                 if found_any {
                     println!("📚 Loaded knowledge from categories: {:?}", categories);
                     Some(combined)

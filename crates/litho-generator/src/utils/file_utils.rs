@@ -60,10 +60,11 @@ pub fn is_test_file(path: &Path) -> bool {
     }
 
     // C# test files
-    if file_name.ends_with("test.cs") 
+    if file_name.ends_with("test.cs")
         || file_name.ends_with("tests.cs")
         || file_name.ends_with(".test.cs")
-        || file_name.ends_with(".tests.cs") {
+        || file_name.ends_with(".tests.cs")
+    {
         return true;
     }
 

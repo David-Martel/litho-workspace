@@ -32,7 +32,12 @@ impl StepForwardAgent for ArchitectureEditor {
                 DataSource::ResearchResult(ResearchAgentType::WorkflowResearcher.to_string()),
             ],
             // Use architecture, deployment, database and ADR docs
-            optional_sources: vec![DataSource::knowledge_categories(vec!["architecture", "deployment", "database", "adr"])],
+            optional_sources: vec![DataSource::knowledge_categories(vec![
+                "architecture",
+                "deployment",
+                "database",
+                "adr",
+            ])],
         }
     }
 

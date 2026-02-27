@@ -27,7 +27,10 @@ where
     T: JsonSchema + Serialize + for<'de> Deserialize<'de>,
 {
     /// Create a new Ollama extractor
-    pub fn new(agent: Agent<rig::providers::ollama::CompletionModel<reqwest::Client>>, max_retries: u32) -> Self {
+    pub fn new(
+        agent: Agent<rig::providers::ollama::CompletionModel<reqwest::Client>>,
+        max_retries: u32,
+    ) -> Self {
         Self {
             agent,
             max_retries,
@@ -63,8 +66,8 @@ where
     /// Build enhanced prompt with schema and instructions
     fn build_prompt(&self, base_prompt: &str, previous_error: Option<&str>) -> String {
         let schema = schemars::schema_for!(T);
-        let schema_json = serde_json::to_string_pretty(&schema)
-            .unwrap_or_else(|_| "{}".to_string());
+        let schema_json =
+            serde_json::to_string_pretty(&schema).unwrap_or_else(|_| "{}".to_string());
 
         let mut prompt = format!(
             "{}\n\n**CRITICAL: YOU MUST RETURN VALID JSON**\n\nYou MUST return the result as a valid JSON object that strictly follows this schema:\n\n```json\n{}\n```\n\n",
@@ -72,7 +75,9 @@ where
         );
 
         prompt.push_str("Requirements:\n");
-        prompt.push_str("1. Return a pure JSON object with the DATA, not the schema definition itself\n");
+        prompt.push_str(
+            "1. Return a pure JSON object with the DATA, not the schema definition itself\n",
+        );
         prompt.push_str("2. Do NOT include $schema, $defs, title, or type:object wrapper - return the data directly\n");
         prompt.push_str("3. All required fields must be present at the top level\n");
         prompt.push_str("4. Field types must match schema exactly\n");
@@ -107,8 +112,8 @@ where
         self.validate_json(&parsed)?;
 
         let result: T = serde_json::from_value(parsed.clone()).with_context(|| {
-            let json_str = serde_json::to_string_pretty(&parsed)
-                .unwrap_or_else(|_| "invalid".to_string());
+            let json_str =
+                serde_json::to_string_pretty(&parsed).unwrap_or_else(|_| "invalid".to_string());
             format!(
                 "Failed to deserialize JSON to target type on attempt {}. JSON structure: {}",
                 attempt, json_str

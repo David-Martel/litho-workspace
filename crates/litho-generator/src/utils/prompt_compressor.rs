@@ -106,7 +106,11 @@ impl PromptCompressor {
             .get_compression_cache(content, content_type)
             .await
         {
-            let msg = context.config.target_language.msg_cache_compression_hit().replace("{}", content_type);
+            let msg = context
+                .config
+                .target_language
+                .msg_cache_compression_hit()
+                .replace("{}", content_type);
             println!("{}", msg);
             let compressed_estimation = self.token_estimator.estimate_tokens(&cached_result);
             let actual_ratio =
@@ -243,9 +247,15 @@ Output only the condensed information, with zero additional comments or explanat
 
         for pattern in &self.compression_config.preserve_patterns {
             let instruction = match pattern {
-                PreservePattern::FunctionSignatures => "Preserve all function signatures and method definitions",
-                PreservePattern::TypeDefinitions => "Preserve all type definitions and data structures",
-                PreservePattern::ImportStatements => "Preserve important import and dependency declarations",
+                PreservePattern::FunctionSignatures => {
+                    "Preserve all function signatures and method definitions"
+                }
+                PreservePattern::TypeDefinitions => {
+                    "Preserve all type definitions and data structures"
+                }
+                PreservePattern::ImportStatements => {
+                    "Preserve important import and dependency declarations"
+                }
                 PreservePattern::InterfaceDefinitions => "Preserve all interface definitions",
                 PreservePattern::ErrorHandling => "Preserve error handling related logic",
                 PreservePattern::Configuration => "Preserve configuration related information",
@@ -266,7 +276,10 @@ Output only the condensed information, with zero additional comments or explanat
             compressed_tokens: estimation.estimated_tokens,
             compression_ratio: 1.0,
             was_compressed: false,
-            compression_summary: format!("Content not compressed, token count: {}", estimation.estimated_tokens),
+            compression_summary: format!(
+                "Content not compressed, token count: {}",
+                estimation.estimated_tokens
+            ),
         }
     }
 }

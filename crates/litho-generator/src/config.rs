@@ -127,6 +127,10 @@ pub struct Config {
     #[serde(default)]
     pub knowledge: KnowledgeConfig,
 
+    /// QMD retrieval integration used to seed research memory
+    #[serde(default)]
+    pub qmd: QmdRetrieverConfig,
+
     /// Architecture meta description file path
     pub architecture_meta_path: Option<PathBuf>,
 }
@@ -188,6 +192,77 @@ pub struct CacheConfig {
 pub struct KnowledgeConfig {
     /// Local documentation files configuration
     pub local_docs: Option<LocalDocsConfig>,
+}
+
+/// QMD retrieval integration settings for research memory seeding.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct QmdRetrieverConfig {
+    /// Enable QMD retrieval before research agents run.
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// QMD binary name/path.
+    #[serde(default = "default_qmd_bin")]
+    pub bin: String,
+
+    /// QMD command mode: query/search/vsearch.
+    #[serde(default = "default_qmd_mode")]
+    pub mode: String,
+
+    /// Optional index name.
+    #[serde(default)]
+    pub index: Option<String>,
+
+    /// Max hits returned per query.
+    #[serde(default = "default_qmd_limit")]
+    pub limit: usize,
+
+    /// Queries used to seed research memory.
+    #[serde(default)]
+    pub queries: Vec<String>,
+
+    /// Memory key used under studies_research scope.
+    #[serde(default = "default_qmd_store_key")]
+    pub store_key: String,
+
+    /// Max snippets retained per query.
+    #[serde(default = "default_qmd_max_snippets")]
+    pub max_snippets_per_query: usize,
+}
+
+impl Default for QmdRetrieverConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            bin: default_qmd_bin(),
+            mode: default_qmd_mode(),
+            index: None,
+            limit: default_qmd_limit(),
+            queries: Vec::new(),
+            store_key: default_qmd_store_key(),
+            max_snippets_per_query: default_qmd_max_snippets(),
+        }
+    }
+}
+
+fn default_qmd_bin() -> String {
+    "qmd".to_string()
+}
+
+fn default_qmd_mode() -> String {
+    "query".to_string()
+}
+
+fn default_qmd_limit() -> usize {
+    8
+}
+
+fn default_qmd_store_key() -> String {
+    "QmdRetriever".to_string()
+}
+
+fn default_qmd_max_snippets() -> usize {
+    6
 }
 
 /// Document category for organizing external knowledge
@@ -499,7 +574,9 @@ impl Config {
                         // Try to extract <AssemblyName> or <PackageId> from XML
                         for line in content.lines() {
                             let line = line.trim();
-                            if line.starts_with("<AssemblyName>") && line.ends_with("</AssemblyName>") {
+                            if line.starts_with("<AssemblyName>")
+                                && line.ends_with("</AssemblyName>")
+                            {
                                 let name = line
                                     .trim_start_matches("<AssemblyName>")
                                     .trim_end_matches("</AssemblyName>");
@@ -632,6 +709,7 @@ impl Default for Config {
             llm: LLMConfig::default(),
             cache: CacheConfig::default(),
             knowledge: KnowledgeConfig::default(),
+            qmd: QmdRetrieverConfig::default(),
         }
     }
 }

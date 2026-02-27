@@ -1,17 +1,15 @@
-use crate::generator::{
-    {
-        step_forward_agent::{StepForwardAgent, AgentDataConfig, DataSource, PromptTemplate, LLMCallMode, FormatterConfig},
-    },
-};
 use crate::generator::research::memory::MemoryScope;
 use crate::generator::research::types::{AgentType, WorkflowReport};
+use crate::generator::step_forward_agent::{
+    AgentDataConfig, DataSource, FormatterConfig, LLMCallMode, PromptTemplate, StepForwardAgent,
+};
 
 #[derive(Default)]
 pub struct WorkflowResearcher;
 
 impl StepForwardAgent for WorkflowResearcher {
     type Output = WorkflowReport;
-    
+
     fn agent_type(&self) -> String {
         AgentType::WorkflowResearcher.to_string()
     }
@@ -29,13 +27,16 @@ impl StepForwardAgent for WorkflowResearcher {
             required_sources: vec![
                 DataSource::ResearchResult(AgentType::SystemContextResearcher.to_string()),
                 DataSource::ResearchResult(AgentType::DomainModulesDetector.to_string()),
-                DataSource::CODE_INSIGHTS
+                DataSource::CODE_INSIGHTS,
             ],
             // Use workflow docs for business process analysis
-            optional_sources: vec![DataSource::knowledge_categories(vec!["workflow", "architecture"])],
+            optional_sources: vec![DataSource::knowledge_categories(vec![
+                "workflow",
+                "architecture",
+            ])],
         }
     }
-    
+
     fn prompt_template(&self) -> PromptTemplate {
         PromptTemplate {
             system_prompt: r#"Analyze the project's core functional workflows, focusing from a functional perspective without being limited to excessive technical details.

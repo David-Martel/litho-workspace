@@ -5,12 +5,12 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::fs;
 
+pub mod fixer;
 pub mod summary_generator;
 pub mod summary_outlet;
-pub mod fixer;
 
-pub use summary_outlet::SummaryOutlet;
 pub use fixer::MermaidFixer;
+pub use summary_outlet::SummaryOutlet;
 
 pub trait Outlet {
     async fn save(&self, context: &GeneratorContext) -> Result<()>;
@@ -109,7 +109,10 @@ impl Outlet for DiskOutlet {
             }
         }
 
-        println!("💾 Document save completed, output directory: {}", output_dir.display());
+        println!(
+            "💾 Document save completed, output directory: {}",
+            output_dir.display()
+        );
 
         // Automatically fix mermaid charts after document save
         if let Err(e) = MermaidFixer::auto_fix_after_output(context).await {

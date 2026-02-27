@@ -5,8 +5,8 @@ use std::{
 
 use schemars::JsonSchema;
 use serde::{
-    de::{SeqAccess, Visitor},
     Deserialize, Deserializer, Serialize,
+    de::{SeqAccess, Visitor},
 };
 
 /// Deserializes a `String` that also accepts arrays or objects.
@@ -45,9 +45,7 @@ where
 }
 
 /// Deserializes an `Option<String>` that also accepts arrays or objects.
-fn deserialize_optional_string_or_array<'de, D>(
-    deserializer: D,
-) -> Result<Option<String>, D::Error>
+fn deserialize_optional_string_or_array<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -175,7 +173,7 @@ pub struct InterfaceInfo {
     #[serde(default, deserialize_with = "deserialize_string_or_array")]
     pub interface_type: String, // "function", "method", "class", "trait", etc.
     #[serde(default = "default_visibility")]
-    pub visibility: String,     // "public", "private", "protected"
+    pub visibility: String, // "public", "private", "protected"
     #[serde(default)]
     pub parameters: Vec<ParameterInfo>,
     #[serde(default, deserialize_with = "deserialize_optional_string_or_array")]
@@ -264,7 +262,12 @@ pub enum CodePurpose {
     #[serde(alias = "Frontend UI component")]
     Widget,
     /// Code module for implementing specific logical functionality
-    #[serde(alias = "feature", alias = "specific_feature", alias = "specific-feature", alias = "Code module for implementing specific logical functionality")]
+    #[serde(
+        alias = "feature",
+        alias = "specific_feature",
+        alias = "specific-feature",
+        alias = "Code module for implementing specific logical functionality"
+    )]
     SpecificFeature,
     /// Data type or model
     #[serde(alias = "Data type or model")]
@@ -276,7 +279,9 @@ pub enum CodePurpose {
     #[serde(alias = "Functional tool code for specific scenarios")]
     Tool,
     /// Common, basic utility functions and classes, providing low-level auxiliary functions unrelated to business logic
-    #[serde(alias = "Common, basic utility functions and classes, providing low-level auxiliary functions unrelated to business logic")]
+    #[serde(
+        alias = "Common, basic utility functions and classes, providing low-level auxiliary functions unrelated to business logic"
+    )]
     Util,
     /// Configuration
     #[serde(alias = "configuration", alias = "Configuration")]
@@ -294,16 +299,24 @@ pub enum CodePurpose {
     #[serde(alias = "Database component")]
     Database,
     /// Service API for external calls, providing calling capabilities based on HTTP, RPC, IPC and other protocols.
-    #[serde(alias = "Service API for external calls, providing calling capabilities based on HTTP, RPC, IPC and other protocols.")]
+    #[serde(
+        alias = "Service API for external calls, providing calling capabilities based on HTTP, RPC, IPC and other protocols."
+    )]
     Api,
     /// Controller component in MVC architecture, responsible for handling business logic
-    #[serde(alias = "Controller component in MVC architecture, responsible for handling business logic")]
+    #[serde(
+        alias = "Controller component in MVC architecture, responsible for handling business logic"
+    )]
     Controller,
     /// Service component in MVC architecture, responsible for handling business rules
-    #[serde(alias = "Service component in MVC architecture, responsible for handling business rules")]
+    #[serde(
+        alias = "Service component in MVC architecture, responsible for handling business rules"
+    )]
     Service,
     /// Collection of related code (functions, classes, resources) with clear boundaries and responsibilities
-    #[serde(alias = "Collection of related code (functions, classes, resources) with clear boundaries and responsibilities")]
+    #[serde(
+        alias = "Collection of related code (functions, classes, resources) with clear boundaries and responsibilities"
+    )]
     Module,
     /// Dependency library
     #[serde(alias = "library", alias = "package", alias = "Dependency library")]
@@ -312,7 +325,11 @@ pub enum CodePurpose {
     #[serde(alias = "testing", alias = "tests", alias = "Test component")]
     Test,
     /// Documentation component
-    #[serde(alias = "documentation", alias = "docs", alias = "Documentation component")]
+    #[serde(
+        alias = "documentation",
+        alias = "docs",
+        alias = "Documentation component"
+    )]
     Doc,
     /// Data Access Layer component
     #[serde(alias = "Data Access Layer component")]
@@ -321,10 +338,18 @@ pub enum CodePurpose {
     #[serde(alias = "Context component")]
     Context,
     /// command-line interface (CLI) commands or message/request handlers
-    #[serde(alias = "command-line interface (CLI) commands or message/request handlers", alias = "command-line interface (CLI) commands or message/request handlers")]
+    #[serde(
+        alias = "command-line interface (CLI) commands or message/request handlers",
+        alias = "command-line interface (CLI) commands or message/request handlers"
+    )]
     Command,
     /// Other uncategorized or unknown
-    #[serde(alias = "unknown", alias = "misc", alias = "miscellaneous", alias = "Other uncategorized or unknown")]
+    #[serde(
+        alias = "unknown",
+        alias = "misc",
+        alias = "miscellaneous",
+        alias = "Other uncategorized or unknown"
+    )]
     Other,
 }
 
@@ -344,10 +369,7 @@ impl CodePurpose {
         let has = |needle: &str| normalized.contains(needle);
         let has_compact = |needle: &str| compact.contains(needle);
 
-        if has("project execution entry")
-            || has_compact("entry")
-            || (has("main") && has("entry"))
-        {
+        if has("project execution entry") || has_compact("entry") || (has("main") && has("entry")) {
             return CodePurpose::Entry;
         }
         if has("intelligent agent") || has("agent") {
@@ -370,26 +392,16 @@ impl CodePurpose {
         {
             return CodePurpose::SpecificFeature;
         }
-        if has("data type")
-            || has("model")
-            || has("schema")
-            || has("entity")
-        {
+        if has("data type") || has("model") || has("schema") || has("entity") {
             return CodePurpose::Model;
         }
-        if has("interface definition")
-            || has("types")
-            || has("type definition")
-        {
+        if has("interface definition") || has("types") || has("type definition") {
             return CodePurpose::Types;
         }
         if has("tool") || has("utility tool") {
             return CodePurpose::Tool;
         }
-        if has("utility")
-            || has("helper")
-            || has("low-level auxiliary")
-        {
+        if has("utility") || has("helper") || has("low-level auxiliary") {
             return CodePurpose::Util;
         }
         if has("configuration") || has("config") || has("settings") {
@@ -404,38 +416,22 @@ impl CodePurpose {
         if has("router") || has("routing") {
             return CodePurpose::Router;
         }
-        if has("database")
-            || has("sql")
-            || has("storage")
-            || has("repository")
-        {
+        if has("database") || has("sql") || has("storage") || has("repository") {
             return CodePurpose::Database;
         }
-        if has("api")
-            || has("http")
-            || has("rpc")
-            || has("endpoint")
-            || has("service api")
-        {
+        if has("api") || has("http") || has("rpc") || has("endpoint") || has("service api") {
             return CodePurpose::Api;
         }
         if has("controller") {
             return CodePurpose::Controller;
         }
-        if has("service")
-            && !has("service api")
-            && !has("api service")
-        {
+        if has("service") && !has("service api") && !has("api service") {
             return CodePurpose::Service;
         }
         if has("module") {
             return CodePurpose::Module;
         }
-        if has("dependency library")
-            || has("library")
-            || has("third party")
-            || has("package")
-        {
+        if has("dependency library") || has("library") || has("third party") || has("package") {
             return CodePurpose::Lib;
         }
         if has("test") || has("spec") {
@@ -444,27 +440,16 @@ impl CodePurpose {
         if has("documentation") || has("doc") || has("readme") {
             return CodePurpose::Doc;
         }
-        if has("data access layer")
-            || has("dao")
-            || has("repository")
-            || has("persistence")
-        {
+        if has("data access layer") || has("dao") || has("repository") || has("persistence") {
             return CodePurpose::Dao;
         }
         if has("context") {
             return CodePurpose::Context;
         }
-        if has("command line")
-            || has("cli")
-            || has("handler")
-            || has("command")
-        {
+        if has("command line") || has("cli") || has("handler") || has("command") {
             return CodePurpose::Command;
         }
-        if has("other")
-            || has("unknown")
-            || has("misc")
-        {
+        if has("other") || has("unknown") || has("misc") {
             return CodePurpose::Other;
         }
         CodePurpose::Other
@@ -700,28 +685,19 @@ mod tests {
     fn test_sql_file_classification() {
         // .sqlproj files should always be classified as Database
         assert_eq!(
-            CodePurposeMapper::map_by_path_and_name(
-                "/src/MyProject.sqlproj",
-                "MyProject.sqlproj"
-            ),
+            CodePurposeMapper::map_by_path_and_name("/src/MyProject.sqlproj", "MyProject.sqlproj"),
             CodePurpose::Database
         );
 
         // .sql files should always be classified as Database
         assert_eq!(
-            CodePurposeMapper::map_by_path_and_name(
-                "/src/CreateTable.sql",
-                "CreateTable.sql"
-            ),
+            CodePurposeMapper::map_by_path_and_name("/src/CreateTable.sql", "CreateTable.sql"),
             CodePurpose::Database
         );
 
         // Even in root directory
         assert_eq!(
-            CodePurposeMapper::map_by_path_and_name(
-                "/Schema.sql",
-                "Schema.sql"
-            ),
+            CodePurposeMapper::map_by_path_and_name("/Schema.sql", "Schema.sql"),
             CodePurpose::Database
         );
 
@@ -739,10 +715,7 @@ mod tests {
     fn test_sql_file_in_database_folder() {
         // SQL files in /database/ folder should still be Database
         assert_eq!(
-            CodePurposeMapper::map_by_path_and_name(
-                "/src/database/schema.sql",
-                "schema.sql"
-            ),
+            CodePurposeMapper::map_by_path_and_name("/src/database/schema.sql", "schema.sql"),
             CodePurpose::Database
         );
     }
@@ -751,10 +724,7 @@ mod tests {
     fn test_path_based_classification() {
         // Files in /database/ folder
         assert_eq!(
-            CodePurposeMapper::map_by_path_and_name(
-                "/src/database/connection.cs",
-                "connection.cs"
-            ),
+            CodePurposeMapper::map_by_path_and_name("/src/database/connection.cs", "connection.cs"),
             CodePurpose::Database
         );
 

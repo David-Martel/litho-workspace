@@ -33,7 +33,12 @@ impl StepForwardAgent for ArchitectureResearcher {
                 DataSource::PROJECT_STRUCTURE,
                 DataSource::DEPENDENCY_ANALYSIS,
                 // Use architecture, deployment, database and ADR docs for architecture analysis
-                DataSource::knowledge_categories(vec!["architecture", "deployment", "database", "adr"]),
+                DataSource::knowledge_categories(vec![
+                    "architecture",
+                    "deployment",
+                    "database",
+                    "adr",
+                ]),
             ],
         }
     }

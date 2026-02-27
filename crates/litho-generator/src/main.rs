@@ -28,7 +28,10 @@ async fn main() -> Result<()> {
 }
 
 /// Handle CLI subcommands
-async fn handle_subcommand(command: cli::Commands, config_path: Option<std::path::PathBuf>) -> Result<()> {
+async fn handle_subcommand(
+    command: cli::Commands,
+    config_path: Option<std::path::PathBuf>,
+) -> Result<()> {
     match command {
         cli::Commands::SyncKnowledge { config, force } => {
             sync_knowledge(config.or(config_path), force).await

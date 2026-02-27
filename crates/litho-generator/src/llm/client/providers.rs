@@ -105,9 +105,7 @@ impl ProviderClient {
                 ProviderAgent::OpenAI(agent)
             }
             ProviderClient::Moonshot(client) => {
-                let mut builder = client
-                    .agent(model)
-                    .preamble(system_prompt);
+                let mut builder = client.agent(model).preamble(system_prompt);
 
                 if let Some(temp) = config.temperature {
                     builder = builder.temperature(temp);
@@ -117,9 +115,7 @@ impl ProviderClient {
                 ProviderAgent::Moonshot(agent)
             }
             ProviderClient::DeepSeek(client) => {
-                let mut builder = client
-                    .agent(model)
-                    .preamble(system_prompt);
+                let mut builder = client.agent(model).preamble(system_prompt);
 
                 if let Some(temp) = config.temperature {
                     builder = builder.temperature(temp);
@@ -129,9 +125,7 @@ impl ProviderClient {
                 ProviderAgent::DeepSeek(agent)
             }
             ProviderClient::Mistral(client) => {
-                let mut builder = client
-                    .agent(model)
-                    .preamble(system_prompt);
+                let mut builder = client.agent(model).preamble(system_prompt);
 
                 if let Some(temp) = config.temperature {
                     builder = builder.temperature(temp);
@@ -141,9 +135,7 @@ impl ProviderClient {
                 ProviderAgent::Mistral(agent)
             }
             ProviderClient::OpenRouter(client) => {
-                let mut builder = client
-                    .agent(model)
-                    .preamble(system_prompt);
+                let mut builder = client.agent(model).preamble(system_prompt);
 
                 if let Some(temp) = config.temperature {
                     builder = builder.temperature(temp);
@@ -268,9 +260,7 @@ impl ProviderClient {
                 ProviderAgent::DeepSeek(agent)
             }
             ProviderClient::Mistral(client) => {
-                let mut builder = client
-                    .agent(model)
-                    .preamble(system_prompt);
+                let mut builder = client.agent(model).preamble(system_prompt);
 
                 if let Some(temp) = config.temperature {
                     builder = builder.temperature(temp);
@@ -285,9 +275,7 @@ impl ProviderClient {
                 ProviderAgent::Mistral(agent)
             }
             ProviderClient::OpenRouter(client) => {
-                let mut builder = client
-                    .agent(model)
-                    .preamble(system_prompt);
+                let mut builder = client.agent(model).preamble(system_prompt);
 
                 if let Some(temp) = config.temperature {
                     builder = builder.temperature(temp);

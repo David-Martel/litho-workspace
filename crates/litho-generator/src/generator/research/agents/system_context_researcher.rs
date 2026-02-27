@@ -1,10 +1,8 @@
-use crate::generator::{
-    step_forward_agent::{
-        AgentDataConfig, DataSource, FormatterConfig, LLMCallMode, PromptTemplate, StepForwardAgent,
-    }
-};
 use crate::generator::research::memory::MemoryScope;
 use crate::generator::research::types::{AgentType, SystemContextReport};
+use crate::generator::step_forward_agent::{
+    AgentDataConfig, DataSource, FormatterConfig, LLMCallMode, PromptTemplate, StepForwardAgent,
+};
 
 /// Project Objective Researcher - Responsible for analyzing the project's core objectives, functional value, and system boundaries
 #[derive(Default)]

@@ -152,9 +152,15 @@ impl LLMClient {
 
         let response = self
             .retry_with_backoff(|| async {
-                ReActExecutor::execute(&agent, user_prompt, &react_config, &self.config.target_language, &model_name)
-                    .await
-                    .map_err(|e| e.into())
+                ReActExecutor::execute(
+                    &agent,
+                    user_prompt,
+                    &react_config,
+                    &self.config.target_language,
+                    &model_name,
+                )
+                .await
+                .map_err(|e| e.into())
             })
             .await?;
 

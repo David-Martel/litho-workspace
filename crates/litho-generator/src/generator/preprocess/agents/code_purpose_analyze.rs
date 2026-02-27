@@ -3,11 +3,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-use crate::{
-    types::code::{CodePurpose, CodePurposeMapper},
-};
 use crate::generator::agent_executor::{AgentExecuteParams, extract};
 use crate::generator::context::GeneratorContext;
+use crate::types::code::{CodePurpose, CodePurposeMapper};
 
 /// AI component type analysis result
 #[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
@@ -32,8 +30,8 @@ impl CodePurposeEnhancer {
         context: &GeneratorContext,
         file_path: &Path,
         file_name: &str,
-        file_content: &str) -> Result<CodePurpose>
-    {
+        file_content: &str,
+    ) -> Result<CodePurpose> {
         // First use rule mapping
         let rule_based_type =
             CodePurposeMapper::map_by_path_and_name(&file_path.to_string_lossy(), file_name);
@@ -45,14 +43,19 @@ impl CodePurposeEnhancer {
 
         // If there's AI analyzer and file content, use AI enhanced analysis
         let prompt_sys = "You are a professional code architecture analyst specializing in analyzing component types of code files.".to_string();
-        let prompt_user = self.build_code_purpose_analysis_prompt(file_path, file_content, file_name);
+        let prompt_user =
+            self.build_code_purpose_analysis_prompt(file_path, file_content, file_name);
 
-        let analyze_result = extract::<AICodePurposeAnalysis>(context, AgentExecuteParams {
-            prompt_sys,
-            prompt_user,
-            cache_scope: "ai_code_purpose".to_string(),
-            log_tag: file_name.to_string(),
-        }).await;
+        let analyze_result = extract::<AICodePurposeAnalysis>(
+            context,
+            AgentExecuteParams {
+                prompt_sys,
+                prompt_user,
+                cache_scope: "ai_code_purpose".to_string(),
+                log_tag: file_name.to_string(),
+            },
+        )
+        .await;
 
         return match analyze_result {
             Ok(ai_analysis) => {
@@ -71,7 +74,7 @@ impl CodePurposeEnhancer {
                 // AI analysis failed, use rule result
                 Ok(rule_based_type)
             }
-        }
+        };
     }
 
     /// Build component type analysis prompt

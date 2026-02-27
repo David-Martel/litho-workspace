@@ -288,12 +288,24 @@ impl SummaryContentGenerator {
             "- **Cache Hit Rate**: {:.1}%\n",
             stats.hit_rate * 100.0
         ));
-        content.push_str(&format!("- **Total Operations**: {}\n", stats.total_operations));
+        content.push_str(&format!(
+            "- **Total Operations**: {}\n",
+            stats.total_operations
+        ));
         content.push_str(&format!("- **Cache Hits**: {} times\n", stats.cache_hits));
-        content.push_str(&format!("- **Cache Misses**: {} times\n", stats.cache_misses));
-        content.push_str(&format!("- **Cache Writes**: {} times\n", stats.cache_writes));
+        content.push_str(&format!(
+            "- **Cache Misses**: {} times\n",
+            stats.cache_misses
+        ));
+        content.push_str(&format!(
+            "- **Cache Writes**: {} times\n",
+            stats.cache_writes
+        ));
         if stats.cache_errors > 0 {
-            content.push_str(&format!("- **Cache Errors**: {} times\n", stats.cache_errors));
+            content.push_str(&format!(
+                "- **Cache Errors**: {} times\n",
+                stats.cache_errors
+            ));
         }
 
         content.push_str("\n### Savings\n");
@@ -307,7 +319,10 @@ impl SummaryContentGenerator {
             stats.output_tokens_saved,
             stats.input_tokens_saved + stats.output_tokens_saved
         ));
-        content.push_str(&format!("- **Estimated Cost Savings**: ${:.4}\n", stats.cost_saved));
+        content.push_str(&format!(
+            "- **Estimated Cost Savings**: ${:.4}\n",
+            stats.cost_saved
+        ));
         if stats.performance_improvement > 0.0 {
             content.push_str(&format!(
                 "- **Performance Improvement**: {:.1}%\n",
@@ -443,7 +458,10 @@ impl SummaryContentGenerator {
         let stats = &data.cache_stats;
 
         // Core metrics
-        content.push_str(&format!("**Cache Hit Rate**: {:.1}% ", stats.hit_rate * 100.0));
+        content.push_str(&format!(
+            "**Cache Hit Rate**: {:.1}% ",
+            stats.hit_rate * 100.0
+        ));
         if stats.hit_rate >= 0.8 {
             content.push_str("🟢 Excellent\n");
         } else if stats.hit_rate >= 0.5 {
@@ -467,13 +485,19 @@ impl SummaryContentGenerator {
         // Efficiency assessment
         if timing.total_execution_time > 0.0 && stats.inference_time_saved > 0.0 {
             let efficiency_ratio = stats.inference_time_saved / timing.total_execution_time;
-            content.push_str(&format!("**Efficiency Improvement**: {:.1}x\n", efficiency_ratio));
+            content.push_str(&format!(
+                "**Efficiency Improvement**: {:.1}x\n",
+                efficiency_ratio
+            ));
         }
 
         // Cost-benefit analysis
         if stats.cost_saved > 0.0 {
             let cost_per_second = stats.cost_saved / timing.total_execution_time;
-            content.push_str(&format!("**Cost-Benefit**: ${:.6}/second\n", cost_per_second));
+            content.push_str(&format!(
+                "**Cost-Benefit**: ${:.6}/second\n",
+                cost_per_second
+            ));
         }
         content.push_str("\n");
 
@@ -564,7 +588,10 @@ impl SummaryContentGenerator {
 
         // Data completeness assessment
         let data_completeness = (collected_count as f64 / 4.0) * 100.0;
-        content.push_str(&format!("**Data Completeness**: {:.1}% ", data_completeness));
+        content.push_str(&format!(
+            "**Data Completeness**: {:.1}% ",
+            data_completeness
+        ));
         if data_completeness == 100.0 {
             content.push_str("🟢 Complete\n");
         } else if data_completeness >= 75.0 {
@@ -574,7 +601,10 @@ impl SummaryContentGenerator {
         }
 
         // Cache efficiency assessment
-        content.push_str(&format!("**Cache Efficiency**: {:.1}% ", stats.hit_rate * 100.0));
+        content.push_str(&format!(
+            "**Cache Efficiency**: {:.1}% ",
+            stats.hit_rate * 100.0
+        ));
         if stats.hit_rate >= 0.8 {
             content.push_str("🟢 Efficient\n");
         } else if stats.hit_rate >= 0.5 {

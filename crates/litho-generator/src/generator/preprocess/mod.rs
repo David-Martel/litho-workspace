@@ -76,7 +76,10 @@ impl Generator<PreprocessingResult> for PreProcessAgent {
             .identify_core_codes(&project_structure)
             .await?;
 
-        println!("   Identified {} main source code files", important_codes.len());
+        println!(
+            "   Identified {} main source code files",
+            important_codes.len()
+        );
 
         // 4. Analyze core components using AI
         println!("🤖 Analyzing core files using AI...");
@@ -94,7 +97,10 @@ impl Generator<PreprocessingResult> for PreProcessAgent {
 
         let processing_time = start_time.elapsed().as_secs_f64();
 
-        println!("✅ Project preprocessing completed, took {:.2} seconds", processing_time);
+        println!(
+            "✅ Project preprocessing completed, took {:.2} seconds",
+            processing_time
+        );
 
         // 6. Store preprocessing results to Memory
         context

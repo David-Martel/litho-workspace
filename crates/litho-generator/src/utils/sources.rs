@@ -2,8 +2,7 @@ use std::path::PathBuf;
 
 use crate::{
     generator::preprocess::extractors::language_processors::LanguageProcessorManager,
-    i18n::TargetLanguage,
-    types::code::CodeInsight,
+    i18n::TargetLanguage, types::code::CodeInsight,
 };
 
 pub fn read_code_source(
@@ -223,8 +222,8 @@ fn recursive_find_file(project_path: &PathBuf, file_name: &str) -> Option<std::p
 
     // Define search extensions
     let extensions = vec![
-        "rs", "py", "js", "ts", "jsx", "tsx", "vue", "svelte", "kt", "java", "mjs", "cjs",
-        "cs", "csx",
+        "rs", "py", "js", "ts", "jsx", "tsx", "vue", "svelte", "kt", "java", "mjs", "cjs", "cs",
+        "csx",
     ];
 
     // Recursive search function

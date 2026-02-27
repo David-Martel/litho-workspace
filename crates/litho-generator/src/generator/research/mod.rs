@@ -9,6 +9,6 @@
 // F (Micro, C3, C4): BoundariesInsight: Categorize by focused Purpose, extract explanations of code that belongs to boundary types.
 
 pub mod agents;
+pub mod memory;
 pub mod orchestrator;
 pub mod types;
-pub mod memory;

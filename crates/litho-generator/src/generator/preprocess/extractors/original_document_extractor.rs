@@ -1,19 +1,17 @@
-use anyhow::Result;
-use tokio::fs::read_to_string;
 use crate::generator::context::GeneratorContext;
 use crate::types::original_document::OriginalDocument;
+use anyhow::Result;
+use tokio::fs::read_to_string;
 
 pub async fn extract(context: &GeneratorContext) -> Result<OriginalDocument> {
     let readme = match read_to_string(context.config.project_path.join("README.md")).await {
         Ok(content) => {
             let trimmed_content = trim_markdown(&content);
             Some(trimmed_content)
-        },
-        Err(_) => None
+        }
+        Err(_) => None,
     };
-    Ok(OriginalDocument {
-        readme,
-    })
+    Ok(OriginalDocument { readme })
 }
 
 fn trim_markdown(markdown: &str) -> String {

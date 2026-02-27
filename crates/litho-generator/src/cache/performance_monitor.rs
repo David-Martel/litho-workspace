@@ -114,11 +114,19 @@ impl CachePerformanceMonitor {
         let msg = match &self.target_language {
             TargetLanguage::Chinese => format!(
                 "   💰 缓存命中 [{}] - 节省推理时间: {:.2}秒, 节省tokens: {}输入+{}输出, 估算节省成本: ${:.4}",
-                category, inference_time_saved.as_secs_f64(), token_usage.input_tokens, token_usage.output_tokens, estimated_cost_saved
+                category,
+                inference_time_saved.as_secs_f64(),
+                token_usage.input_tokens,
+                token_usage.output_tokens,
+                estimated_cost_saved
             ),
             _ => format!(
                 "   💰 Cache hit [{}] - Time saved: {:.2}s, Tokens saved: {} input + {} output, Cost saved: ${:.4}",
-                category, inference_time_saved.as_secs_f64(), token_usage.input_tokens, token_usage.output_tokens, estimated_cost_saved
+                category,
+                inference_time_saved.as_secs_f64(),
+                token_usage.input_tokens,
+                token_usage.output_tokens,
+                estimated_cost_saved
             ),
         };
         println!("{}", msg);
@@ -127,21 +135,29 @@ impl CachePerformanceMonitor {
     /// Record cache miss
     pub fn record_cache_miss(&self, category: &str) {
         self.metrics.cache_misses.fetch_add(1, Ordering::Relaxed);
-        let msg = self.target_language.msg_cache_miss().replace("{}", category);
+        let msg = self
+            .target_language
+            .msg_cache_miss()
+            .replace("{}", category);
         println!("{}", msg);
     }
 
     /// Record cache write
     pub fn record_cache_write(&self, category: &str) {
         self.metrics.cache_writes.fetch_add(1, Ordering::Relaxed);
-        let msg = self.target_language.msg_cache_write().replace("{}", category);
+        let msg = self
+            .target_language
+            .msg_cache_write()
+            .replace("{}", category);
         println!("{}", msg);
     }
 
     /// Record cache error
     pub fn record_cache_error(&self, category: &str, error: &str) {
         self.metrics.cache_errors.fetch_add(1, Ordering::Relaxed);
-        let msg = self.target_language.msg_cache_error()
+        let msg = self
+            .target_language
+            .msg_cache_error()
             .replace("{}", category)
             .replacen("{}", error, 1);
         eprintln!("{}", msg);

@@ -43,7 +43,10 @@ impl Outlet for SummaryOutlet {
             SummaryContentGenerator::generate_content(&summary_data, SummaryMode::Full);
         let full_path = output_dir.join(&self.full_file_path);
         fs::write(&full_path, full_content)?;
-        println!("💾 Saved full version summary report: {}", full_path.display());
+        println!(
+            "💾 Saved full version summary report: {}",
+            full_path.display()
+        );
 
         // If brief version needs to be generated
         if self.generate_both {
@@ -51,7 +54,10 @@ impl Outlet for SummaryOutlet {
                 SummaryContentGenerator::generate_content(&summary_data, SummaryMode::Brief);
             let brief_path = output_dir.join(&self.brief_file_path);
             fs::write(&brief_path, brief_content)?;
-            println!("💾 Saved brief version summary report: {}", brief_path.display());
+            println!(
+                "💾 Saved brief version summary report: {}",
+                brief_path.display()
+            );
         }
 
         Ok(())

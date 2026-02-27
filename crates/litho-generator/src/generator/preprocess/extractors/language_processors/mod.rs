@@ -115,12 +115,11 @@ impl LanguageProcessorManager {
         let number_of_functions = content.matches("fn ").count()
             + content.matches("def ").count()
             + content.matches("function ").count()
-            + content.matches("async ").count();  // C# async methods
+            + content.matches("async ").count(); // C# async methods
 
-        let number_of_classes =
-            content.matches("class ").count() 
+        let number_of_classes = content.matches("class ").count()
             + content.matches("struct ").count()
-            + content.matches("interface ").count();  // C# interfaces
+            + content.matches("interface ").count(); // C# interfaces
 
         // Simplified cyclomatic complexity calculation
         let cyclomatic_complexity = 1.0

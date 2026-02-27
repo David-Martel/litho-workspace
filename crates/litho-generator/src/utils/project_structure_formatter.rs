@@ -152,7 +152,13 @@ impl DirectoryTree {
     }
 
     /// Recursively render directory node
-    fn render_directory_node(&self, node: &DirectoryNode, prefix: &str, is_last: bool, result: &mut String) {
+    fn render_directory_node(
+        &self,
+        node: &DirectoryNode,
+        prefix: &str,
+        is_last: bool,
+        result: &mut String,
+    ) {
         if !node.name.is_empty() {
             let connector = if is_last { "└── " } else { "├── " };
             result.push_str(&format!("{}{}{}/\n", prefix, connector, node.name));
@@ -310,49 +316,49 @@ mod tests {
         };
 
         let result = ProjectStructureFormatter::format_as_directory_tree(&structure);
-        
+
         // Check basic format
         assert!(result.contains("### Project Directory Structure"));
         assert!(result.contains("test_project"));
         assert!(result.contains("/test"));
-        
+
         // Check directory structure (should only include directories, not files)
         assert!(result.contains("src/"));
         assert!(result.contains("utils/"));
         assert!(result.contains("tests/"));
         assert!(result.contains("docs/"));
-        
+
         // Ensure filenames are not included
         assert!(!result.contains("main.rs"));
         assert!(!result.contains("lib.rs"));
         assert!(!result.contains("mod.rs"));
         assert!(!result.contains("integration_test.rs"));
         assert!(!result.contains("README.md"));
-        
+
         println!("Directory tree output:\n{}", result);
     }
 
     #[test]
     fn test_directory_tree_structure() {
         let mut dir_tree = DirectoryTree::new();
-        
+
         // Insert some directory paths
         dir_tree.insert_directory(&PathBuf::from("src"));
         dir_tree.insert_directory(&PathBuf::from("src/utils"));
         dir_tree.insert_directory(&PathBuf::from("tests"));
         dir_tree.insert_directory(&PathBuf::from("docs"));
-        
+
         let result = dir_tree.to_tree_string();
-        
+
         // Check tree structure
         assert!(result.contains("src/"));
         assert!(result.contains("utils/"));
         assert!(result.contains("tests/"));
         assert!(result.contains("docs/"));
-        
+
         // Check tree connectors
         assert!(result.contains("├──") || result.contains("└──"));
-        
+
         println!("Tree structure:\n{}", result);
     }
 }

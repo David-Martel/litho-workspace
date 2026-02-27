@@ -1,5 +1,5 @@
 use schemars::JsonSchema;
-use serde::{de::Deserializer, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::Deserializer};
 use std::fmt::Display;
 
 use crate::i18n::TargetLanguage;
@@ -39,9 +39,7 @@ where
 }
 
 /// Optional variant: returns `None` for null/empty, `Some(String)` otherwise.
-fn deserialize_optional_string_or_array<'de, D>(
-    deserializer: D,
-) -> Result<Option<String>, D::Error>
+fn deserialize_optional_string_or_array<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
 where
     D: Deserializer<'de>,
 {

@@ -121,8 +121,14 @@ Please return the analysis results in structured JSON format."#
         println!("✅ Boundary interface analysis completed:");
         println!("   - CLI commands: {} items", result.cli_boundaries.len());
         println!("   - API interfaces: {} items", result.api_boundaries.len());
-        println!("   - Router routes: {} items", result.router_boundaries.len());
-        println!("   - Integration suggestions: {} items", result.integration_suggestions.len());
+        println!(
+            "   - Router routes: {} items",
+            result.router_boundaries.len()
+        );
+        println!(
+            "   - Integration suggestions: {} items",
+            result.integration_suggestions.len()
+        );
         println!("   - Confidence: {:.1}/10", result.confidence_score);
 
         Ok(())
@@ -257,11 +263,17 @@ impl BoundaryAnalyzer {
         ));
 
         if !insight.detailed_description.is_empty() {
-            content.push_str(&format!("- **Description**: {}\n", insight.detailed_description));
+            content.push_str(&format!(
+                "- **Description**: {}\n",
+                insight.detailed_description
+            ));
         }
 
         if !insight.responsibilities.is_empty() {
-            content.push_str(&format!("- **Responsibilities**: {:?}\n", insight.responsibilities));
+            content.push_str(&format!(
+                "- **Responsibilities**: {:?}\n",
+                insight.responsibilities
+            ));
         }
 
         if !insight.interfaces.is_empty() {

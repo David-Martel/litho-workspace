@@ -1,8 +1,5 @@
 use schemars::JsonSchema;
-use serde::{
-    de::Deserializer,
-    Deserialize, Serialize,
-};
+use serde::{Deserialize, Serialize, de::Deserializer};
 
 /// Deserializes a `String` that also accepts arrays or objects.
 /// Ollama models sometimes return `["a", "b"]` or `[{name: "a"}]` or `[]`
@@ -40,9 +37,7 @@ where
 }
 
 /// Deserializes an `Option<String>` that also accepts arrays or objects.
-fn deserialize_optional_string_or_array<'de, D>(
-    deserializer: D,
-) -> Result<Option<String>, D::Error>
+fn deserialize_optional_string_or_array<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -137,7 +132,17 @@ pub struct ArchitectureLayer {
 #[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 pub enum DependencyType {
     /// Import dependency (use, import statements)
-    #[serde(alias = "import", alias = "Include", alias = "include", alias = "Header", alias = "header", alias = "Use", alias = "use", alias = "Require", alias = "require")]
+    #[serde(
+        alias = "import",
+        alias = "Include",
+        alias = "include",
+        alias = "Header",
+        alias = "header",
+        alias = "Use",
+        alias = "use",
+        alias = "Require",
+        alias = "require"
+    )]
     Import,
     /// Function call dependency
     #[serde(alias = "function_call", alias = "Call", alias = "call")]
@@ -146,13 +151,27 @@ pub enum DependencyType {
     #[serde(alias = "inheritance", alias = "Extends", alias = "extends")]
     Inheritance,
     /// Composition relationship
-    #[serde(alias = "composition", alias = "Contains", alias = "contains", alias = "Aggregation", alias = "aggregation")]
+    #[serde(
+        alias = "composition",
+        alias = "Contains",
+        alias = "contains",
+        alias = "Aggregation",
+        alias = "aggregation"
+    )]
     Composition,
     /// Data flow dependency
     #[serde(alias = "data_flow", alias = "Data", alias = "data")]
     DataFlow,
     /// Module dependency
-    #[serde(alias = "module", alias = "Library", alias = "library", alias = "Package", alias = "package", alias = "Dependency", alias = "dependency")]
+    #[serde(
+        alias = "module",
+        alias = "Library",
+        alias = "library",
+        alias = "Package",
+        alias = "package",
+        alias = "Dependency",
+        alias = "dependency"
+    )]
     Module,
     /// Unknown or unrecognized type (catch-all)
     #[serde(other)]

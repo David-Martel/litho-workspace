@@ -1,15 +1,15 @@
 use anyhow::{Context, Result, anyhow};
-use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
-use std::fs;
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use futures::future::join_all;
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tokio::sync::Semaphore;
 
 use crate::config::{Config, LocalDocsConfig};
-use crate::integrations::local_docs::{LocalDocsProcessor, LocalDocMetadata};
+use crate::integrations::local_docs::{LocalDocMetadata, LocalDocsProcessor};
 use std::time::Instant;
 
 /// Metadata about synced knowledge
@@ -36,7 +36,10 @@ impl KnowledgeSyncer {
     /// Sync all configured knowledge sources
     pub async fn sync_all(&self) -> Result<()> {
         let target_lang = self.config.target_language.display_name();
-        println!("🔄 Syncing external knowledge sources (target language: {})...", target_lang);
+        println!(
+            "🔄 Syncing external knowledge sources (target language: {})...",
+            target_lang
+        );
 
         let mut synced_any = false;
 
@@ -61,15 +64,12 @@ impl KnowledgeSyncer {
     async fn sync_local_docs(&self, config: &LocalDocsConfig) -> Result<()> {
         println!("\n📄 Processing local documentation files...");
 
-        let cache_dir = config
-            .cache_dir
-            .clone()
-            .unwrap_or_else(|| {
-                self.config
-                    .internal_path
-                    .join("knowledge")
-                    .join("local_docs")
-            });
+        let cache_dir = config.cache_dir.clone().unwrap_or_else(|| {
+            self.config
+                .internal_path
+                .join("knowledge")
+                .join("local_docs")
+        });
 
         tokio::fs::create_dir_all(&cache_dir)
             .await
@@ -88,10 +88,14 @@ impl KnowledgeSyncer {
         // Process categorized documents
         for category in &config.categories {
             let category_started = Instant::now();
-            println!("\n  📁 Processing category: {} ({})", category.name, category.description);
-            
-            let files = LocalDocsProcessor::expand_glob_patterns(&category.paths, Some(project_root));
-            
+            println!(
+                "\n  📁 Processing category: {} ({})",
+                category.name, category.description
+            );
+
+            let files =
+                LocalDocsProcessor::expand_glob_patterns(&category.paths, Some(project_root));
+
             // Determine chunking config for this category
             let chunking_config = category.chunking.clone().or(default_chunking.clone());
             let semaphore = Arc::new(Semaphore::new(parallelism));
@@ -110,7 +114,10 @@ impl KnowledgeSyncer {
                         Err(e) => {
                             return (
                                 file_path,
-                                Err(anyhow!("failed to acquire local-doc semaphore permit: {}", e)),
+                                Err(anyhow!(
+                                    "failed to acquire local-doc semaphore permit: {}",
+                                    e
+                                )),
                             );
                         }
                     };
@@ -136,20 +143,24 @@ impl KnowledgeSyncer {
                     Ok(doc_metas) => {
                         let is_chunked = doc_metas.len() > 1;
                         if is_chunked {
-                            println!("    ✓ [{}] {} (chunked into {} parts)", 
-                                category.name, file_path.display(), doc_metas.len());
+                            println!(
+                                "    ✓ [{}] {} (chunked into {} parts)",
+                                category.name,
+                                file_path.display(),
+                                doc_metas.len()
+                            );
                             chunked_count += 1;
                         } else {
                             println!("    ✓ [{}] {}", category.name, file_path.display());
                         }
-                        
+
                         for doc_meta in doc_metas {
                             // Add to category-specific map
                             categories_map
                                 .entry(category.name.clone())
                                 .or_default()
                                 .push(doc_meta.clone());
-                            
+
                             // Also add to all_docs for combined access
                             all_docs.push(doc_meta);
                         }
@@ -183,7 +194,10 @@ impl KnowledgeSyncer {
             .context("Failed to write metadata")?;
 
         if chunked_count > 0 {
-            println!("✅ Processed {} files ({} chunked into multiple parts)", processed_count, chunked_count);
+            println!(
+                "✅ Processed {} files ({} chunked into multiple parts)",
+                processed_count, chunked_count
+            );
         } else {
             println!("✅ Processed {} local documentation files", processed_count);
         }
@@ -198,15 +212,12 @@ impl KnowledgeSyncer {
                 return Ok(false);
             }
 
-            let cache_dir = local_docs_config
-                .cache_dir
-                .clone()
-                .unwrap_or_else(|| {
-                    self.config
-                        .internal_path
-                        .join("knowledge")
-                        .join("local_docs")
-                });
+            let cache_dir = local_docs_config.cache_dir.clone().unwrap_or_else(|| {
+                self.config
+                    .internal_path
+                    .join("knowledge")
+                    .join("local_docs")
+            });
 
             let metadata_file = cache_dir.join("_metadata.json");
 
@@ -229,20 +240,24 @@ impl KnowledgeSyncer {
                 let mut current_files: HashSet<PathBuf> = HashSet::new();
                 let project_root = self.config.project_path.as_path();
                 for category in &local_docs_config.categories {
-                    let files = LocalDocsProcessor::expand_glob_patterns(&category.paths, Some(project_root));
+                    let files = LocalDocsProcessor::expand_glob_patterns(
+                        &category.paths,
+                        Some(project_root),
+                    );
                     for file_path in files {
                         current_files.insert(Self::normalize_path(&file_path));
                     }
                 }
 
                 // Detect new or removed files quickly
-                if current_files.symmetric_difference(&cached_files).next().is_some() {
+                if current_files
+                    .symmetric_difference(&cached_files)
+                    .next()
+                    .is_some()
+                {
                     return Ok(true);
                 }
-                
-                
-                
-                
+
                 // Check if any source file has been modified
                 for doc in &metadata.local_docs {
                     let source_path = PathBuf::from(&doc.file_path);
@@ -265,11 +280,11 @@ impl KnowledgeSyncer {
 
         Ok(false)
     }
-    
+
     fn normalize_path(path: &Path) -> PathBuf {
         fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
     }
-    
+
     /// Load cached knowledge for a specific category
     pub fn load_cached_knowledge_by_category(
         &self,
@@ -281,15 +296,12 @@ impl KnowledgeSyncer {
             _ => return Ok(None),
         };
 
-        let cache_dir = local_docs_config
-            .cache_dir
-            .clone()
-            .unwrap_or_else(|| {
-                self.config
-                    .internal_path
-                    .join("knowledge")
-                    .join("local_docs")
-            });
+        let cache_dir = local_docs_config.cache_dir.clone().unwrap_or_else(|| {
+            self.config
+                .internal_path
+                .join("knowledge")
+                .join("local_docs")
+        });
 
         let metadata_file = cache_dir.join("_metadata.json");
         if !metadata_file.exists() {
@@ -324,15 +336,12 @@ impl KnowledgeSyncer {
             filtered_docs.len()
         );
 
-        let formatted = LocalDocsProcessor::format_for_llm_with_options(
-            &filtered_docs,
-            Some(&header),
-            false,
-        );
+        let formatted =
+            LocalDocsProcessor::format_for_llm_with_options(&filtered_docs, Some(&header), false);
 
         Ok(Some(formatted))
     }
-    
+
     /// Format category name for display
     fn format_category_name(category: &str) -> String {
         match category {
@@ -343,8 +352,14 @@ impl KnowledgeSyncer {
             "adr" => "Architecture Decision Records".to_string(),
             "workflow" => "Workflow & Business Process".to_string(),
             "general" => "General".to_string(),
-            other => other.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default() 
-                + &other.chars().skip(1).collect::<String>(),
+            other => {
+                other
+                    .chars()
+                    .next()
+                    .map(|c| c.to_uppercase().to_string())
+                    .unwrap_or_default()
+                    + &other.chars().skip(1).collect::<String>()
+            }
         }
     }
 
@@ -355,7 +370,9 @@ impl KnowledgeSyncer {
                 if doc.target_agents.is_empty() {
                     true
                 } else {
-                    doc.target_agents.iter().any(|configured| configured == agent)
+                    doc.target_agents
+                        .iter()
+                        .any(|configured| configured == agent)
                 }
             }
         }

@@ -32,12 +32,12 @@ impl StepForwardAgent for DatabaseOverviewAnalyzer {
 
     fn data_config(&self) -> AgentDataConfig {
         AgentDataConfig {
-            required_sources: vec![
-                DataSource::PROJECT_STRUCTURE,
-                DataSource::CODE_INSIGHTS,
-            ],
+            required_sources: vec![DataSource::PROJECT_STRUCTURE, DataSource::CODE_INSIGHTS],
             // Use database documentation for additional context
-            optional_sources: vec![DataSource::knowledge_categories(vec!["database", "architecture"])],
+            optional_sources: vec![DataSource::knowledge_categories(vec![
+                "database",
+                "architecture",
+            ])],
         }
     }
 
@@ -124,12 +124,21 @@ Please return the analysis results in structured JSON format."#
         _context: &GeneratorContext,
     ) -> Result<()> {
         println!("✅ Database overview analysis completed:");
-        println!("   - Database projects: {} items", result.database_projects.len());
+        println!(
+            "   - Database projects: {} items",
+            result.database_projects.len()
+        );
         println!("   - Tables: {} items", result.tables.len());
         println!("   - Views: {} items", result.views.len());
-        println!("   - Stored procedures: {} items", result.stored_procedures.len());
+        println!(
+            "   - Stored procedures: {} items",
+            result.stored_procedures.len()
+        );
         println!("   - Functions: {} items", result.database_functions.len());
-        println!("   - Table relationships: {} items", result.table_relationships.len());
+        println!(
+            "   - Table relationships: {} items",
+            result.table_relationships.len()
+        );
         println!("   - Data flows: {} items", result.data_flows.len());
         println!("   - Confidence: {:.1}/10", result.confidence_score);
 
@@ -173,12 +182,20 @@ impl DatabaseOverviewAnalyzer {
             let source_len = insight.code_dossier.source_summary.len();
             if source_len > 10000 {
                 // If source summary is very large, truncate it to first 10KB
-                let truncated: String = insight.code_dossier.source_summary.chars().take(10000).collect();
+                let truncated: String = insight
+                    .code_dossier
+                    .source_summary
+                    .chars()
+                    .take(10000)
+                    .collect();
                 insight.code_dossier.source_summary = truncated;
 
                 // Add a note that the content was truncated
                 if !insight.code_dossier.source_summary.is_empty() {
-                    insight.code_dossier.source_summary.push_str("\n\n[Content truncated for analysis]");
+                    insight
+                        .code_dossier
+                        .source_summary
+                        .push_str("\n\n[Content truncated for analysis]");
                 }
             }
         }
@@ -233,17 +250,28 @@ impl DatabaseOverviewAnalyzer {
         let mut dao_files = Vec::new();
 
         for insight in insights {
-            let path = insight.code_dossier.file_path.to_string_lossy().to_lowercase();
+            let path = insight
+                .code_dossier
+                .file_path
+                .to_string_lossy()
+                .to_lowercase();
 
             if path.ends_with(".sqlproj") {
                 projects.push(insight);
             } else if path.ends_with(".sql") {
                 // Categorize SQL files by content/path
-                if path.contains("table") || insight.code_dossier.name.to_lowercase().contains("table") {
+                if path.contains("table")
+                    || insight.code_dossier.name.to_lowercase().contains("table")
+                {
                     tables.push(insight);
-                } else if path.contains("view") || insight.code_dossier.name.to_lowercase().contains("view") {
+                } else if path.contains("view")
+                    || insight.code_dossier.name.to_lowercase().contains("view")
+                {
                     views.push(insight);
-                } else if path.contains("procedure") || path.contains("storedproc") || path.contains("sproc") {
+                } else if path.contains("procedure")
+                    || path.contains("storedproc")
+                    || path.contains("sproc")
+                {
                     procedures.push(insight);
                 } else if path.contains("function") {
                     functions.push(insight);
@@ -367,11 +395,21 @@ impl DatabaseOverviewAnalyzer {
         }
 
         // Add source summary if available (only for high-importance files)
-        if !insight.code_dossier.source_summary.is_empty() && insight.code_dossier.importance_score > 0.5 {
+        if !insight.code_dossier.source_summary.is_empty()
+            && insight.code_dossier.importance_score > 0.5
+        {
             content.push_str("  - Source Preview:\n");
-            content.push_str(&format!("    ```{}\n", self.determine_code_language(&insight.code_dossier.file_path)));
+            content.push_str(&format!(
+                "    ```{}\n",
+                self.determine_code_language(&insight.code_dossier.file_path)
+            ));
             // Limit to first 150 chars to reduce token usage
-            let preview: String = insight.code_dossier.source_summary.chars().take(150).collect();
+            let preview: String = insight
+                .code_dossier
+                .source_summary
+                .chars()
+                .take(150)
+                .collect();
             for line in preview.lines().take(8) {
                 content.push_str(&format!("    {}\n", line));
             }

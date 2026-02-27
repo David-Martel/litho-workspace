@@ -148,7 +148,10 @@ impl AgentToolFileExplorer {
 
         if !search_path.exists() {
             return Ok(FileExplorerResult {
-                insights: vec![format!("Search path does not exist: {}", search_path.display())],
+                insights: vec![format!(
+                    "Search path does not exist: {}",
+                    search_path.display()
+                )],
                 ..Default::default()
             });
         }

@@ -84,7 +84,10 @@ If available:
     ) -> Result<()> {
         // Simplified storage logic
         println!("✅ Domain architecture analysis completed:");
-        println!("   - Identified domain modules: {}", result.domain_modules.len());
+        println!(
+            "   - Identified domain modules: {}",
+            result.domain_modules.len()
+        );
 
         let total_sub_modules: usize = result
             .domain_modules
