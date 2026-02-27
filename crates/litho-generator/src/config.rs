@@ -73,6 +73,7 @@ impl std::str::FromStr for LLMProvider {
 
 /// Application configuration
 #[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(default)]
 pub struct Config {
     /// Project name
     pub project_name: Option<String>,
@@ -142,6 +143,7 @@ pub struct Config {
 
 /// LLM model configuration
 #[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(default)]
 pub struct LLMConfig {
     /// LLM Provider type
     pub provider: LLMProvider,
@@ -193,6 +195,7 @@ pub struct LLMConfig {
 
 /// Cache configuration
 #[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(default)]
 pub struct CacheConfig {
     /// Whether to enable cache
     pub enabled: bool,
