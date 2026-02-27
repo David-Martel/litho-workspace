@@ -199,9 +199,7 @@ mod tests {
     fn empty_input_returns_empty() {
         let ext = RustExtractor::new();
         assert!(ext.extract_interfaces("", Path::new("lib.rs")).is_empty());
-        assert!(ext
-            .extract_dependencies("", Path::new("lib.rs"))
-            .is_empty());
+        assert!(ext.extract_dependencies("", Path::new("lib.rs")).is_empty());
     }
 
     #[test]

@@ -1,5 +1,5 @@
-use litho_extract::extractors::rust::RustExtractor;
 use litho_extract::extractors::Extractor;
+use litho_extract::extractors::rust::RustExtractor;
 use std::path::Path;
 
 #[test]

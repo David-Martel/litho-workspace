@@ -189,9 +189,7 @@ mod tests {
     fn empty_input_returns_empty() {
         let ext = CSharpExtractor::new();
         assert!(ext.extract_interfaces("", Path::new("Foo.cs")).is_empty());
-        assert!(ext
-            .extract_dependencies("", Path::new("Foo.cs"))
-            .is_empty());
+        assert!(ext.extract_dependencies("", Path::new("Foo.cs")).is_empty());
     }
 
     #[test]
@@ -203,7 +201,11 @@ public class Greeter {
 "#;
         let ext = CSharpExtractor::new();
         let ifaces = ext.extract_interfaces(code, Path::new("Greeter.cs"));
-        assert!(ifaces.iter().any(|i| i.name == "Greeter" && i.kind == "class"));
+        assert!(
+            ifaces
+                .iter()
+                .any(|i| i.name == "Greeter" && i.kind == "class")
+        );
     }
 
     #[test]

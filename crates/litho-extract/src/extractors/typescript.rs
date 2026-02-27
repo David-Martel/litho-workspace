@@ -23,10 +23,7 @@ fn node_text<'a>(node: tree_sitter::Node<'_>, source_bytes: &'a [u8]) -> &'a str
     node.utf8_text(source_bytes).unwrap_or("")
 }
 
-fn first_identifier_child(
-    node: tree_sitter::Node<'_>,
-    source_bytes: &[u8],
-) -> Option<String> {
+fn first_identifier_child(node: tree_sitter::Node<'_>, source_bytes: &[u8]) -> Option<String> {
     // Try field name first
     if let Some(n) = node.child_by_field_name("name") {
         let text = node_text(n, source_bytes);
@@ -184,9 +181,10 @@ mod tests {
     fn empty_input_returns_empty() {
         let ext = TypeScriptExtractor::new();
         assert!(ext.extract_interfaces("", Path::new("index.ts")).is_empty());
-        assert!(ext
-            .extract_dependencies("", Path::new("index.ts"))
-            .is_empty());
+        assert!(
+            ext.extract_dependencies("", Path::new("index.ts"))
+                .is_empty()
+        );
     }
 
     #[test]
@@ -202,8 +200,16 @@ class Animal {
 "#;
         let ext = TypeScriptExtractor::new();
         let ifaces = ext.extract_interfaces(code, Path::new("src/index.ts"));
-        assert!(ifaces.iter().any(|i| i.name == "greet" && i.kind == "function"));
-        assert!(ifaces.iter().any(|i| i.name == "Animal" && i.kind == "class"));
+        assert!(
+            ifaces
+                .iter()
+                .any(|i| i.name == "greet" && i.kind == "function")
+        );
+        assert!(
+            ifaces
+                .iter()
+                .any(|i| i.name == "Animal" && i.kind == "class")
+        );
     }
 
     #[test]

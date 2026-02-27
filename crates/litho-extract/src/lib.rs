@@ -58,19 +58,14 @@ pub fn extract_with_config(
         let classification = classify::classify_file(&df.path, has_main);
 
         let mut cx = complexity::compute_complexity(&content, &df.language);
-        cx.functions = interfaces
-            .iter()
-            .filter(|i| i.kind == "function")
-            .count();
+        cx.functions = interfaces.iter().filter(|i| i.kind == "function").count();
         cx.classes = interfaces
             .iter()
             .filter(|i| matches!(i.kind.as_str(), "struct" | "class" | "trait" | "enum"))
             .count();
 
         total_loc += cx.lines_of_code;
-        *lang_counts
-            .entry(format!("{:?}", df.language))
-            .or_insert(0) += 1;
+        *lang_counts.entry(format!("{:?}", df.language)).or_insert(0) += 1;
 
         let path_str = df.path.to_string_lossy().to_string();
         all_deps.push((path_str, deps.clone()));
@@ -121,11 +116,7 @@ pub fn extract_with_config(
     })
 }
 
-fn extract_interfaces_for_language(
-    lang: &Language,
-    content: &str,
-    path: &Path,
-) -> Vec<Interface> {
+fn extract_interfaces_for_language(lang: &Language, content: &str, path: &Path) -> Vec<Interface> {
     use extractors::Extractor as _;
     match lang {
         Language::Rust => extractors::rust::RustExtractor::new().extract_interfaces(content, path),

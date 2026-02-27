@@ -10,32 +10,57 @@ use litho_core::types::{ComplexityMetrics, Language};
 /// The `functions` and `classes` fields are initialised to 0 here; the caller
 /// is expected to fill them in from the interface list after extraction.
 pub fn compute_complexity(content: &str, language: &Language) -> ComplexityMetrics {
-    let non_blank = content
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .count();
+    let non_blank = content.lines().filter(|l| !l.trim().is_empty()).count();
 
     let branch_keywords: &[&str] = match language {
         Language::Rust => &[
-            " if ", " for ", " while ", " match ", " else if ", "else {", "?",
+            " if ",
+            " for ",
+            " while ",
+            " match ",
+            " else if ",
+            "else {",
+            "?",
         ],
-        Language::Python => &[
-            " if ", " for ", " while ", " elif ", " except ", " with ",
-        ],
+        Language::Python => &[" if ", " for ", " while ", " elif ", " except ", " with "],
         Language::TypeScript | Language::JavaScript => &[
-            " if ", " for ", " while ", " switch ", " catch ", " else if ",
-            " case ", " ? ", "&&", "||",
+            " if ",
+            " for ",
+            " while ",
+            " switch ",
+            " catch ",
+            " else if ",
+            " case ",
+            " ? ",
+            "&&",
+            "||",
         ],
         Language::CSharp => &[
-            " if ", " for ", " foreach ", " while ", " switch ", " catch ",
-            " case ", " else if ",
+            " if ",
+            " for ",
+            " foreach ",
+            " while ",
+            " switch ",
+            " catch ",
+            " case ",
+            " else if ",
         ],
         Language::Java => &[
-            " if ", " for ", " while ", " switch ", " catch ", " case ",
+            " if ",
+            " for ",
+            " while ",
+            " switch ",
+            " catch ",
+            " case ",
             " else if ",
         ],
         Language::Go => &[
-            " if ", " for ", " switch ", " select ", " case ", " else if ",
+            " if ",
+            " for ",
+            " switch ",
+            " select ",
+            " case ",
+            " else if ",
         ],
         _ => &[" if ", " for ", " while ", " switch ", " case "],
     };

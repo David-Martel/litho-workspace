@@ -98,17 +98,11 @@ mod tests {
 
     #[test]
     fn detects_python() {
-        assert_eq!(
-            detect_language(Path::new("script.py")),
-            Language::Python
-        );
+        assert_eq!(detect_language(Path::new("script.py")), Language::Python);
     }
 
     #[test]
     fn detects_unknown() {
-        assert_eq!(
-            detect_language(Path::new("README.md")),
-            Language::Unknown
-        );
+        assert_eq!(detect_language(Path::new("README.md")), Language::Unknown);
     }
 }
