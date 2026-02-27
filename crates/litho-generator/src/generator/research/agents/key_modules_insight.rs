@@ -169,12 +169,23 @@ impl KeyModulesInsight {
 }
 
 impl KeyModulesInsight {
-    // Get domain module data
+    // Get domain module data.
+    //
+    // Returns an empty Vec when the DomainModulesDetector result is absent
+    // instead of propagating an error.  The caller (`execute_multi_domain_analysis`)
+    // already handles an empty list by returning an appropriate error message,
+    // so crashing here would just produce a worse diagnostic.
     async fn get_domain_modules(&self, context: &GeneratorContext) -> Result<Vec<DomainModule>> {
-        let domain_report = context
+        let Some(domain_report) = context
             .get_research(&AgentType::DomainModulesDetector.to_string())
             .await
-            .ok_or_else(|| anyhow!("DomainModulesDetector result is not available"))?;
+        else {
+            eprintln!(
+                "Warning: DomainModulesDetector result is not available; \
+                 skipping domain-level module analysis"
+            );
+            return Ok(Vec::new());
+        };
 
         let domain_modules_report: DomainModulesReport = serde_json::from_value(domain_report)?;
         Ok(domain_modules_report.domain_modules)

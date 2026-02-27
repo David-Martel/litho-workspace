@@ -1,6 +1,31 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize, de::Deserializer};
 
+/// Deserializes a `u8` that may arrive as a float, integer, or numeric string.
+///
+/// LLMs frequently return importance scores as floats (e.g. `0.8`, `3.5`)
+/// even when the schema documents them as integers.  This helper coerces the
+/// value safely:
+///
+/// - Float  → rounded to the nearest integer, then clamped to `[0, 255]`
+/// - Integer → used directly (clamped)
+/// - String  → parsed as `f64` first, then rounded
+/// - Anything else (null, bool, array, object) → returns `0`
+fn deserialize_u8_or_float<'de, D>(deserializer: D) -> Result<u8, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let val = serde_json::Value::deserialize(deserializer)?;
+    let as_f64 = match &val {
+        serde_json::Value::Number(n) => n.as_f64(),
+        serde_json::Value::String(s) => s.trim().parse::<f64>().ok(),
+        _ => None,
+    };
+    Ok(as_f64
+        .map(|f| f.round().clamp(0.0, 255.0) as u8)
+        .unwrap_or(0))
+}
+
 /// Deserializes a `String` that also accepts arrays or objects.
 /// Ollama models sometimes return `["a", "b"]` or `[{name: "a"}]` or `[]`
 /// where a single `String` is expected. Arrays are joined with ", ".
@@ -121,8 +146,12 @@ pub struct CoreDependency {
     #[serde(default, alias = "type", alias = "kind", alias = "category")]
     pub dependency_type: DependencyType,
 
-    /// Importance score (1-5, only keep important ones)
-    #[serde(default)]
+    /// Importance score (1-5, only keep important ones).
+    ///
+    /// LLMs sometimes return a float (e.g. `0.8`) instead of an integer here.
+    /// The custom deserializer rounds and clamps the value to `u8` so that
+    /// fractional scores from the model do not crash deserialization.
+    #[serde(default, deserialize_with = "deserialize_u8_or_float")]
     pub importance: u8,
 
     /// Brief description

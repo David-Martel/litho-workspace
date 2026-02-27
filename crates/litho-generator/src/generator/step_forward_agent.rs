@@ -595,6 +595,17 @@ pub trait StepForwardAgent: Send + Sync {
         let agent_type_value = self.agent_type();
 
         // 2. Check if required data sources are available (automatic validation)
+        //
+        // MemoryData sources are hard-required: if the preprocessing artifact is
+        // absent the agent cannot produce meaningful output, so we fail fast.
+        //
+        // ResearchResult sources are treated as soft-required: a sub-agent in a
+        // parallel research tier may fail or be skipped (e.g. when the upstream
+        // LLM call times out or the model returns unparseable output).  Crashing
+        // the entire pipeline in that case is worse than continuing with the data
+        // that *is* available.  We emit a warning and let the agent proceed; its
+        // own data-assembly step will handle the absent value gracefully (typically
+        // by omitting the section from the prompt).
         for source in &config.required_sources {
             match source {
                 DataSource::MemoryData { scope, key } => {
@@ -608,10 +619,12 @@ pub trait StepForwardAgent: Send + Sync {
                 }
                 DataSource::ResearchResult(agent_type) => {
                     if context.get_research(agent_type).await.is_none() {
-                        return Err(anyhow!(
-                            "Required research result {} is not available",
-                            agent_type
-                        ));
+                        eprintln!(
+                            "Warning: research result '{}' is not available for agent '{}'; \
+                             continuing with available data",
+                            agent_type, agent_type_value
+                        );
+                        // Do not return Err — allow the pipeline to continue.
                     }
                 }
                 DataSource::ExternalKnowledgeByCategory(_) => {
