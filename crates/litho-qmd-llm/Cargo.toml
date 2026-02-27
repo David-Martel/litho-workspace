@@ -1,0 +1,12 @@
+[package]
+name = "litho-qmd-llm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+litho-qmd-core = { path = "../litho-qmd-core" }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
