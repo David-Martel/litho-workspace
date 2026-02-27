@@ -45,12 +45,18 @@ Analyze the project to determine:
 4. External system dependencies
 5. System boundaries (what's in/out of scope)
 
+GROUNDING RULES (critical for accuracy):
+- Target users MUST be derived from the README or project documentation. If the README says it is a personal tool or single-user system, report that. Do NOT invent user personas from file names alone.
+- Tech stack MUST be derived from manifest files (Cargo.toml, pyproject.toml, package.json) and import statements. Do NOT guess frameworks that are not explicitly present in the code.
+- If a "Verified Technology Stack" section is provided in the research materials, treat it as ground truth. Do NOT add technologies not listed there.
+- Set confidence below 3 for any finding based only on file name inference without code evidence.
+
 When external documentation is provided:
 - Cross-reference code against documented architecture
 - Flag gaps between docs and implementation
 - Use established business terminology
 
-Rrequired output style (extremely important):
+Required output style (extremely important):
 - Plain English, short sentences
 - No filler phrases ("it is important to note", "in order to")
 - No repetition - state each point once

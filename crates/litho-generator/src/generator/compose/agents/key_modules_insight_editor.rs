@@ -133,11 +133,13 @@ impl StepForwardAgent for KeyModuleInsightEditor {
         );
 
         PromptTemplate {
-            system_prompt: r#"You are a software expert skilled at writing technical documentation. Based on the research materials and requirements provided by users, write technical documentation for the technical implementation of corresponding modules in existing projects"#.to_string(),
+            system_prompt: r#"You are a software expert skilled at writing technical documentation. Based on the research materials and requirements provided by users, write technical documentation for the technical implementation of corresponding modules in existing projects.
+
+ACCURACY CONSTRAINT: Every technical claim must reference a specific file path or function from the research materials. Do NOT mention technologies, patterns, or capabilities not evidenced in the code. If data is insufficient, write "Insufficient data available" rather than fabricating content."#.to_string(),
 
             opening_instruction,
 
-            closing_instruction: String::new(),
+            closing_instruction: "Do NOT mention technologies not listed in the research materials. Write 'Insufficient data' rather than fabricating content.".to_string(),
 
             llm_call_mode: LLMCallMode::PromptWithTools,
             formatter_config: FormatterConfig::default(),

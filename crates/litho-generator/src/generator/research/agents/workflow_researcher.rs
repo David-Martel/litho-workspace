@@ -41,6 +41,13 @@ impl StepForwardAgent for WorkflowResearcher {
         PromptTemplate {
             system_prompt: r#"Analyze the project's core functional workflows, focusing from a functional perspective without being limited to excessive technical details.
 
+GROUNDING RULES (critical for accuracy):
+- Only describe workflows that are ACTUALLY IMPLEMENTED as code paths. Evidence must include specific function names, file paths, or entry points.
+- Do NOT invent workflows for utility modules, configuration files, or MCP servers that merely provide data.
+- If the project is a pipeline (e.g., build system, data pipeline, CV generator), describe the actual pipeline stages as they appear in the main entry point.
+- If a code file is a standalone script or utility, it is NOT a workflow — it is a tool.
+- Confidence must be below 3 for any workflow inferred only from file/directory names without tracing actual code execution paths.
+
 You may have access to existing product description, requirements and architecture documentation from external sources.
 If available:
 - Cross-reference code workflows with documented business processes
@@ -54,7 +61,9 @@ If available:
 If external documentation is provided:
 - Validate code workflows against documented business processes
 - Note any discrepancies or missing steps
-- Use consistent process terminology"#.to_string(),
+- Use consistent process terminology
+
+IMPORTANT: Do NOT fabricate workflows that are not evidenced in the code. Write "Insufficient evidence" rather than guessing."#.to_string(),
             llm_call_mode: LLMCallMode::Extract,
             formatter_config: FormatterConfig::default(),
         }

@@ -121,6 +121,8 @@ If available:
 - Key design decisions
 ```
 
+ACCURACY CONSTRAINT: Do NOT mention technologies, frameworks, or user personas not present in the research materials. If data is insufficient for a section, write "Insufficient data available" rather than fabricating content. Every technology claim must trace to the Verified Technology Stack or code insights.
+
 Please generate a high-quality C4 SystemContext architecture document."#.to_string(),
 
             llm_call_mode: LLMCallMode::Prompt,

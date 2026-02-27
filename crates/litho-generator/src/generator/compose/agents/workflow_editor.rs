@@ -162,6 +162,8 @@ Please generate a high-quality core workflow document ensuring:
 - **Business Value**: Clarify the business value and importance of each process step
 - **Knowledge Transfer**: Facilitate quick understanding of system workflows for new team members
 
+ACCURACY CONSTRAINT: Do NOT describe workflows not evidenced in the code. Do NOT mention technologies or frameworks not present in the research materials. If data is insufficient for a section, write "Insufficient data available" rather than fabricating content.
+
 Please generate a high-quality and detailed core workflow documentation based on the research materials that meets the above requirements."#.to_string(),
 
             llm_call_mode: LLMCallMode::PromptWithTools,

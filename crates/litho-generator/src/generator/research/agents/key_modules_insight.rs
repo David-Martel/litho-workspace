@@ -54,16 +54,27 @@ impl StepForwardAgent for KeyModulesInsight {
         PromptTemplate {
             system_prompt: r#"You are a software development expert. Based on the information provided by the user, investigate the technical details of core modules.
 
+For each module, provide a structured analysis covering:
+1. PURPOSE: What problem does this module solve? What is its role in the system?
+2. MECHANISM: How does it work? Describe the key algorithms, data transformations, or control flow.
+3. DATA FLOW: What are the inputs and outputs? How does data move through this module?
+4. DEPENDENCIES: What does this module depend on? What depends on it?
+5. ERROR HANDLING: How does it handle failures, edge cases, or invalid input?
+
+GROUNDING RULES:
+- Every claim must reference a specific file path or function name from the code insights.
+- Do NOT describe capabilities that are not present in the source code.
+- If a module's purpose is unclear from the code, say "Purpose unclear from available code" rather than guessing.
+- Use concrete code references (file paths, function names, type names) over abstract descriptions.
+
 You may have access to existing product description, requirements and architecture documentation from external sources.
 If available:
 - Reference documented component responsibilities and interfaces
 - Validate implementation against documented design patterns
-- Use established terminology for components and modules
-- Identify any gaps between documented and actual component behavior
-- Incorporate design rationale and constraints from the documentation"#
+- Use established terminology for components and modules"#
                 .to_string(),
             opening_instruction: "Based on the following project information and research materials, analyze the core modules:".to_string(),
-            closing_instruction: "".to_string(),
+            closing_instruction: "Do NOT mention technologies not listed in the research materials. Write 'Insufficient data' rather than fabricating content.".to_string(),
             llm_call_mode: LLMCallMode::Extract,
             formatter_config: FormatterConfig::default(),
         }
@@ -291,7 +302,7 @@ impl KeyModulesInsight {
         insights: &[CodeInsight],
     ) -> (String, String) {
         let system_prompt =
-            "Based on the information provided by the user, conduct in-depth and rigorous analysis and provide results in the specified format".to_string();
+            "Based on the information provided by the user, conduct in-depth and rigorous analysis and provide results in the specified format. For each finding, cite the specific file path and function name. Do NOT fabricate capabilities or technologies not evidenced in the code.".to_string();
 
         let user_prompt = format!(
             "## Domain Analysis Task\nAnalyze the core module technical details of the '{}' domain\n\n### Domain Information\n- Domain Name: {}\n- Domain Type: {}\n- Importance: {:.1}/10\n- Complexity: {:.1}/10\n- Description: {}\n\n### Submodule Overview\n{}\n\n### Related Code Insights\n{}\n",

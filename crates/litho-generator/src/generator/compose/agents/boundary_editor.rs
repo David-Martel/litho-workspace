@@ -82,7 +82,9 @@ If available:
 - Include detailed parameter descriptions and usage examples
 - Highlight security considerations and best practices
 - Ensure clear document structure and complete content
-- Validate against external API documentation if available"#
+- Validate against external API documentation if available
+
+ACCURACY CONSTRAINT: Do NOT describe interfaces or endpoints not evidenced in the code. Do NOT mention technologies or protocols not present in the research materials. If data is insufficient for a section, write "Insufficient data available" rather than fabricating content."#
                 .to_string(),
 
             llm_call_mode: crate::generator::step_forward_agent::LLMCallMode::Prompt,

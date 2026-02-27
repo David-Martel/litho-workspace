@@ -226,7 +226,7 @@ impl DataFormatter {
             readme.to_string()
         };
         format!(
-            "### Previous README Content (Manually entered information, may not be accurate, for reference only)\n{}\n\n",
+            "### Project README (Authoritative project description from the repository maintainer)\n{}\n\n",
             content
         )
     }

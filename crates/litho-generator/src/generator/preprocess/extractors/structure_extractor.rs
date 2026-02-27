@@ -423,8 +423,13 @@ impl StructureExtractor {
                 score += 0.15;
             }
 
+            // Bonus for tools/ directory (Python projects often use tools/ as main source)
+            if path_str.contains("/tools/") || path_str.contains("\\tools\\") {
+                score += 0.15;
+            }
+
             file.importance_score = score.min(1.0);
-            file.is_core = score > 0.5;
+            file.is_core = score >= 0.5;
         }
 
         // Calculate directory importance scores

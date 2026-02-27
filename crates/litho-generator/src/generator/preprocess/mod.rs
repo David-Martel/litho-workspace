@@ -124,13 +124,19 @@ impl Generator<PreprocessingResult> for PreProcessAgent {
                 &relationships,
             )
             .await?;
-        context
-            .store_to_memory(
-                MemoryScope::PREPROCESS,
-                ScopedKeys::ORIGINAL_DOCUMENT,
-                &original_document,
-            )
-            .await?;
+        // Store the formatted prompt string (not the struct) so the prompt builder
+        // can deserialize it as String. The previous code stored OriginalDocument which
+        // silently failed to deserialize as String, meaning README was never in prompts.
+        let original_doc_content = original_document.to_prompt_string();
+        if !original_doc_content.trim().is_empty() {
+            context
+                .store_to_memory(
+                    MemoryScope::PREPROCESS,
+                    ScopedKeys::ORIGINAL_DOCUMENT,
+                    &original_doc_content,
+                )
+                .await?;
+        }
 
         Ok(PreprocessingResult {
             original_document,

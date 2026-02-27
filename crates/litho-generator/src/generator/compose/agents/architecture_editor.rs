@@ -174,6 +174,8 @@ Please generate a high-quality C4 architecture document, ensuring:
 - **Decision Support**: Provide strong support materials for technical decisions
 - **Knowledge Transfer**: Facilitate quick understanding of system architecture for new team members
 
+ACCURACY CONSTRAINT: Do NOT mention technologies, frameworks, or architectural patterns not evidenced in the research materials. If data is insufficient for a section, write "Insufficient data available" rather than fabricating content. Every technology claim must trace to the Verified Technology Stack or code insights.
+
 Please generate a high-quality architecture document that meets the above requirements based on the research materials."#.to_string(),
 
             llm_call_mode: LLMCallMode::Prompt,

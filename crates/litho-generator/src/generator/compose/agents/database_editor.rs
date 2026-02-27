@@ -47,9 +47,9 @@ impl StepForwardAgent for DatabaseEditor {
 
     fn prompt_template(&self) -> PromptTemplate {
         PromptTemplate {
-            system_prompt: r#"You are a professional database documentation expert, focused on generating clear, detailed database schema and structure documentation."#.to_string(),
+            system_prompt: r#"You are a professional database documentation expert, focused on generating clear, detailed database schema and structure documentation. Do NOT fabricate database schemas, tables, or relationships not present in the analysis results."#.to_string(),
             opening_instruction: "Based on the following database analysis results, generate database overview documentation:".to_string(),
-            closing_instruction: "".to_string(),
+            closing_instruction: "ACCURACY CONSTRAINT: Only document database structures actually found in the code. Write 'Insufficient data' rather than fabricating content.".to_string(),
             llm_call_mode: crate::generator::step_forward_agent::LLMCallMode::Prompt,
             formatter_config: crate::generator::step_forward_agent::FormatterConfig::default(),
         }
