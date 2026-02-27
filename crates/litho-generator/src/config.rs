@@ -209,7 +209,7 @@ pub struct LLMConfig {
 
 fn default_context_window() -> u32 {
     32768
-
+}
 
 /// Cache configuration
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -778,7 +778,7 @@ impl Default for LLMConfig {
             retry_delay_ms: 5000,
             timeout_seconds: 300,
             disable_preset_tools: false,
-            max_parallels: 3,
+            max_parallels: 8,
             codex_binary_path: std::env::var("CODEX_BINARY_PATH")
                 .ok()
                 .filter(|s| !s.is_empty()),

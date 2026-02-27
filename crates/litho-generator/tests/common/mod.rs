@@ -26,6 +26,7 @@ pub fn test_llm_config() -> LLMConfig {
         max_parallels: 1,
         codex_binary_path: None,
         codex_as_fallback: false,
+        context_window: 32768,
     }
 }
 

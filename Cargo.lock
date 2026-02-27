@@ -5503,7 +5503,9 @@ dependencies = [
  "ignore",
  "litho-qmd-core",
  "litho-qmd-llm",
+ "native-tls",
  "postgres",
+ "postgres-native-tls",
  "postgres_rustls",
  "r2d2",
  "r2d2_postgres",
@@ -6920,6 +6922,18 @@ dependencies = [
  "futures-util",
  "log",
  "tokio",
+ "tokio-postgres",
+]
+
+[[package]]
+name = "postgres-native-tls"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac73153d92e4bde922bd6f1dfba7f1ab8132266c031153b55e20a1521cd36d49"
+dependencies = [
+ "native-tls",
+ "tokio",
+ "tokio-native-tls",
  "tokio-postgres",
 ]
 

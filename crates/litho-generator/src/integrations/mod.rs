@@ -4,4 +4,3 @@ pub mod local_docs;
 pub mod manifest;
 
 pub use knowledge_sync::KnowledgeSyncer;
-pub use manifest::DocumentationManifest;

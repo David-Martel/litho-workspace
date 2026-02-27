@@ -135,7 +135,7 @@ impl OllamaNativeClient {
         // Context window – the most critical parameter.
         // Configurable via `context_window` in litho.toml [llm] section.
         // Gemma3 12B-IT-QAT supports up to 131072; default is 32768.
-        opts = opts.num_ctx(config.context_window as i32);
+        opts = opts.num_ctx(config.context_window as u64);
 
         // Generation limit.
         opts = opts.num_predict(config.max_tokens as i32);

@@ -59,6 +59,7 @@ impl LLMClient {
     }
 
     /// Whether we should prefer the native ollama-rs path.
+    #[allow(dead_code)]
     fn use_native_ollama(&self) -> bool {
         self.ollama_native.is_some()
     }

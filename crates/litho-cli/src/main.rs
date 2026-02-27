@@ -13,7 +13,6 @@
 use anyhow::Context as _;
 use clap::{Parser, Subcommand, ValueEnum};
 use litho_codex::exec::CodexExecGenerator;
-use litho_codex::provider::DocGenerator as _;
 use litho_core::config::LithoConfig;
 use litho_core::types::ExtractedCodebase;
 use std::path::PathBuf;
@@ -275,7 +274,7 @@ async fn cmd_generate(args: GenerateArgs) -> anyhow::Result<()> {
         extracted.statistics.total_files, extracted.statistics.total_loc
     );
 
-    let mut generator: Box<dyn litho_codex::provider::DocGenerator> = match args.provider {
+    let generator: Box<dyn litho_codex::provider::DocGenerator> = match args.provider {
         Provider::CodexLib => Box::new(litho_codex::exec::CodexLibGenerator {
             model: args.model.unwrap_or_else(|| {
                 litho_core::env::LithoEnv::codex_model().unwrap_or_default()
