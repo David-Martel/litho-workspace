@@ -139,6 +139,14 @@ pub struct Config {
 
     /// Architecture meta description file path
     pub architecture_meta_path: Option<PathBuf>,
+
+    /// Output format: "md" (default) or "html"
+    #[serde(default = "default_output_format")]
+    pub output_format: String,
+}
+
+fn default_output_format() -> String {
+    "md".to_string()
 }
 
 /// LLM model configuration
@@ -191,7 +199,17 @@ pub struct LLMConfig {
     /// `model_powerful` fail. Defaults to `true`.
     #[serde(default = "default_codex_as_fallback")]
     pub codex_as_fallback: bool,
+
+    /// Context window size (tokens) for models that support explicit `num_ctx`.
+    /// Used by the native ollama-rs provider. Defaults to 32768.
+    /// Gemma3 12B-IT-QAT supports up to 131072.
+    #[serde(default = "default_context_window")]
+    pub context_window: u32,
 }
+
+fn default_context_window() -> u32 {
+    32768
+
 
 /// Cache configuration
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -734,6 +752,7 @@ impl Default for Config {
             cache: CacheConfig::default(),
             knowledge: KnowledgeConfig::default(),
             qmd: QmdRetrieverConfig::default(),
+            output_format: default_output_format(),
         }
     }
 }
@@ -750,7 +769,10 @@ impl Default for LLMConfig {
             api_base_url: std::env::var("LITHO_API_BASE_URL").unwrap_or_default(),
             model_efficient: String::new(),
             model_powerful: String::new(),
-            max_tokens: 131072,
+            // 4096 is a safe default for local models (qwen2.5-coder:7b has 32K
+            // context window; 131072 caused 4× oversubscription and truncated/malformed
+            // responses).  Cloud providers can override via litho.toml.
+            max_tokens: 4096,
             temperature: Some(0.1),
             retry_attempts: 3,
             retry_delay_ms: 5000,
@@ -761,6 +783,7 @@ impl Default for LLMConfig {
                 .ok()
                 .filter(|s| !s.is_empty()),
             codex_as_fallback: true,
+            context_window: default_context_window(),
         }
     }
 }
@@ -995,5 +1018,30 @@ mod tests {
         cfg.project_name = Some("   ".to_string());
         cfg.project_path = PathBuf::from("/a/b/my-app");
         assert_eq!(cfg.get_project_name(), "my-app");
+    }
+
+    // -----------------------------------------------------------------------
+    // output_format unit tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn config_default_output_format_is_md() {
+        let cfg = Config::default();
+        assert_eq!(cfg.output_format, "md");
+    }
+
+    #[test]
+    fn config_output_format_serde_default() {
+        // When output_format is missing from JSON, serde should use the default "md"
+        let json = r#"{"project_path":".", "output_path":"./out", "internal_path":"./.litho"}"#;
+        let cfg: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(cfg.output_format, "md");
+    }
+
+    #[test]
+    fn config_output_format_html_from_json() {
+        let json = r#"{"project_path":".", "output_path":"./out", "internal_path":"./.litho", "output_format":"html"}"#;
+        let cfg: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(cfg.output_format, "html");
     }
 }

@@ -18,5 +18,6 @@ split-debuginfo = "packed"
 
 [profile.release]
 split-debuginfo = "packed"
-lto = "thin"
-codegen-units = 4
+# lto = "thin" — disabled: causes rustc stack overflow on rig-core 0.23
+# codegen-units = 4
+codegen-units = 16

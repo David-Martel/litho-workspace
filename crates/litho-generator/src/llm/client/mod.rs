@@ -6,13 +6,14 @@ use serde::{Deserialize, Serialize};
 use std::future::Future;
 
 use crate::{
-    config::Config,
+    config::{Config, LLMProvider},
     llm::client::{codex_provider::CodexRsClient, utils::evaluate_befitting_model},
 };
 
 mod agent_builder;
 pub mod codex_provider;
 mod ollama_extractor;
+pub mod ollama_native;
 pub mod providers;
 mod react;
 mod react_executor;
@@ -32,13 +33,34 @@ use summary_reasoner::SummaryReasoner;
 pub struct LLMClient {
     config: Config,
     client: ProviderClient,
+    /// Native ollama-rs client (populated when provider == Ollama).
+    /// Used for extract() and prompt_without_react() to get native API
+    /// access with num_ctx control and Gemma3 tool-calling support.
+    ollama_native: Option<ollama_native::OllamaNativeClient>,
 }
 
 impl LLMClient {
     /// Create a new LLM client
     pub fn new(config: Config) -> Result<Self> {
         let client = ProviderClient::new(&config.llm)?;
-        Ok(Self { client, config })
+
+        // Build the native ollama-rs client when the provider is Ollama.
+        let ollama_native = if config.llm.provider == LLMProvider::Ollama {
+            Some(ollama_native::OllamaNativeClient::from_config(&config.llm)?)
+        } else {
+            None
+        };
+
+        Ok(Self {
+            client,
+            config,
+            ollama_native,
+        })
+    }
+
+    /// Whether we should prefer the native ollama-rs path.
+    fn use_native_ollama(&self) -> bool {
+        self.ollama_native.is_some()
     }
 
     /// Get Agent builder
@@ -80,6 +102,16 @@ impl LLMClient {
     where
         T: JsonSchema + for<'a> Deserialize<'a> + Serialize + Send + Sync + 'static,
     {
+        // Prefer native ollama-rs path for Ollama provider — gives us num_ctx
+        // control and avoids the OpenAI-compat layer limitations.
+        if let Some(ref native) = self.ollama_native {
+            let (befitting_model, _) =
+                evaluate_befitting_model(&self.config.llm, system_prompt, user_prompt);
+            return native
+                .extract::<T>(&befitting_model, system_prompt, user_prompt, &self.config.llm)
+                .await;
+        }
+
         let (befitting_model, fallover_model) =
             evaluate_befitting_model(&self.config.llm, system_prompt, user_prompt);
 
@@ -168,6 +200,14 @@ impl LLMClient {
 
     /// Intelligent dialogue method (using default ReAct configuration)
     pub async fn prompt(&self, system_prompt: &str, user_prompt: &str) -> Result<String> {
+        // When using native ollama-rs, demote to simple chat — the ReAct tool
+        // loop depends on rig-core agent types that bypass num_ctx control.
+        // The tools (file_reader, file_explorer, time) are not essential for
+        // documentation generation quality.
+        if self.ollama_native.is_some() {
+            return self.prompt_without_react(system_prompt, user_prompt).await;
+        }
+
         let react_config = ReActConfig::default();
         let response = self
             .prompt_with_react(system_prompt, user_prompt, react_config)
@@ -275,6 +315,14 @@ impl LLMClient {
         system_prompt: &str,
         user_prompt: &str,
     ) -> Result<String> {
+        // Prefer native ollama-rs path when available.
+        if let Some(ref native) = self.ollama_native {
+            let model = &self.config.llm.model_efficient;
+            return native
+                .chat(model, system_prompt, user_prompt, &self.config.llm)
+                .await;
+        }
+
         let agent_builder = self.get_agent_builder();
         let agent = agent_builder.build_agent_without_tools(system_prompt);
 
