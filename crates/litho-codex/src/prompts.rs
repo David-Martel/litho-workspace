@@ -1,4 +1,8 @@
 use litho_core::types::ExtractedCodebase;
+use serde::Deserialize;
+use std::collections::BTreeMap;
+use std::path::Path;
+use std::process::Command;
 
 /// Build a structured prompt for the given `section` of documentation.
 ///
@@ -125,5 +129,158 @@ Output each section with a ## heading. Use Mermaid diagrams where helpful.
         } else {
             interfaces.join("\n")
         },
+    )
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RetrievedSnippet {
+    pub file: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub snippet: String,
+    #[serde(default)]
+    pub score: f32,
+}
+
+#[derive(Debug, Deserialize)]
+struct RetrievedSearchResponse {
+    #[serde(default)]
+    results: Vec<RetrievedSnippet>,
+}
+
+pub fn build_prompt_with_optional_qmd(
+    codebase: &ExtractedCodebase,
+    section: &str,
+    project_path: &Path,
+) -> String {
+    let base = build_prompt(codebase, section);
+    let snippets = maybe_qmd_retrieval_snippets(codebase, section, project_path);
+    append_qmd_retrieval_context(base, &snippets)
+}
+
+pub fn append_qmd_retrieval_context(base_prompt: String, snippets: &[RetrievedSnippet]) -> String {
+    if snippets.is_empty() {
+        return base_prompt;
+    }
+
+    let mut extra = String::from(
+        "\n\n## Retrieved Evidence (QMD)\nUse these citations when relevant; do not invent sources.\n",
+    );
+    for snippet in snippets.iter().take(8) {
+        let title = if snippet.title.trim().is_empty() {
+            "(untitled)".to_string()
+        } else {
+            snippet.title.trim().to_string()
+        };
+        let condensed = snippet
+            .snippet
+            .replace('\n', " ")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        let clipped = if condensed.len() > 220 {
+            format!("{}...", &condensed[..220])
+        } else {
+            condensed
+        };
+        extra.push_str(&format!(
+            "- `{}` ({title}, score {:.3}): {clipped}\n",
+            snippet.file, snippet.score
+        ));
+    }
+
+    format!("{base_prompt}{extra}")
+}
+
+fn maybe_qmd_retrieval_snippets(
+    codebase: &ExtractedCodebase,
+    section: &str,
+    project_path: &Path,
+) -> Vec<RetrievedSnippet> {
+    if !is_truthy(std::env::var("LITHO_CODEX_QMD_AUGMENT").ok().as_deref()) {
+        return Vec::new();
+    }
+
+    if let Some(mock_json) = std::env::var("LITHO_CODEX_QMD_SNIPPETS_JSON").ok()
+        && let Ok(parsed) = serde_json::from_str::<RetrievedSearchResponse>(&mock_json)
+    {
+        return dedup_snippets(parsed.results);
+    }
+
+    let bin = std::env::var("LITHO_CODEX_QMD_BIN").unwrap_or_else(|_| "qmd".to_string());
+    let mode = std::env::var("LITHO_CODEX_QMD_MODE").unwrap_or_else(|_| "query".to_string());
+    let limit = std::env::var("LITHO_CODEX_QMD_LIMIT")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(8)
+        .clamp(1, 32);
+    let index = std::env::var("LITHO_CODEX_QMD_INDEX")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+    let query = qmd_query_for_section(codebase, section);
+
+    let mut cmd = Command::new(bin);
+    cmd.arg(mode)
+        .arg(query)
+        .arg("--json")
+        .arg("--limit")
+        .arg(limit.to_string())
+        .current_dir(project_path);
+    if let Some(index) = index {
+        cmd.arg("--index").arg(index);
+    }
+
+    let output = match cmd.output() {
+        Ok(out) if out.status.success() => out,
+        _ => return Vec::new(),
+    };
+
+    match serde_json::from_slice::<RetrievedSearchResponse>(&output.stdout) {
+        Ok(parsed) => dedup_snippets(parsed.results),
+        Err(_) => Vec::new(),
+    }
+}
+
+fn qmd_query_for_section(codebase: &ExtractedCodebase, section: &str) -> String {
+    match section {
+        "architecture" => format!(
+            "{} architecture components boundaries interfaces design decisions",
+            codebase.project_name
+        ),
+        "workflows" => format!(
+            "{} workflows request flow lifecycle orchestration sequence",
+            codebase.project_name
+        ),
+        "database" => format!(
+            "{} database schema storage models persistence indexing",
+            codebase.project_name
+        ),
+        _ => format!(
+            "{} architecture workflows boundaries key modules interfaces",
+            codebase.project_name
+        ),
+    }
+}
+
+fn dedup_snippets(snippets: Vec<RetrievedSnippet>) -> Vec<RetrievedSnippet> {
+    let mut by_file = BTreeMap::<String, RetrievedSnippet>::new();
+    for snippet in snippets {
+        let key = snippet.file.clone();
+        match by_file.get(&key) {
+            Some(existing) if existing.score >= snippet.score => {}
+            _ => {
+                by_file.insert(key, snippet);
+            }
+        }
+    }
+    by_file.into_values().collect()
+}
+
+fn is_truthy(value: Option<&str>) -> bool {
+    matches!(
+        value.unwrap_or("").trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
     )
 }

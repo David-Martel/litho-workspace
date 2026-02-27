@@ -1,8 +1,12 @@
-use litho_codex::prompts::build_prompt;
+use litho_codex::prompts::{RetrievedSnippet, append_qmd_retrieval_context, build_prompt};
 use litho_core::types::{ExtractedCodebase, ProjectStats};
 use std::collections::HashMap;
 
-fn make_codebase(name: &str, total_files: usize, languages: HashMap<String, usize>) -> ExtractedCodebase {
+fn make_codebase(
+    name: &str,
+    total_files: usize,
+    languages: HashMap<String, usize>,
+) -> ExtractedCodebase {
     ExtractedCodebase {
         project_name: name.into(),
         files: vec![],
@@ -48,14 +52,16 @@ fn prompt_includes_project_stats() {
 
 #[test]
 fn prompt_includes_python_language() {
-    let codebase = make_codebase(
-        "python-proj",
-        10,
-        [("Python".into(), 10)].into(),
-    );
+    let codebase = make_codebase("python-proj", 10, [("Python".into(), 10)].into());
     let prompt = build_prompt(&codebase, "full");
-    assert!(prompt.contains("Python"), "prompt must include Python language");
-    assert!(prompt.contains("10 files"), "prompt must show correct file count");
+    assert!(
+        prompt.contains("Python"),
+        "prompt must include Python language"
+    );
+    assert!(
+        prompt.contains("10 files"),
+        "prompt must show correct file count"
+    );
 }
 
 #[test]
@@ -104,4 +110,27 @@ fn prompt_includes_loc() {
     };
     let prompt = build_prompt(&codebase, "full");
     assert!(prompt.contains("9999"), "prompt must include total LOC");
+}
+
+#[test]
+fn prompt_append_qmd_retrieval_context_includes_citations() {
+    let base = "# Base Prompt".to_string();
+    let snippets = vec![RetrievedSnippet {
+        file: "crates/litho-book/src/server.rs".to_string(),
+        title: "Search Handler".to_string(),
+        snippet: "Handles /api/search with in-memory and qmd fallback.".to_string(),
+        score: 0.91,
+    }];
+
+    let out = append_qmd_retrieval_context(base, &snippets);
+    assert!(out.contains("Retrieved Evidence (QMD)"));
+    assert!(out.contains("crates/litho-book/src/server.rs"));
+    assert!(out.contains("Search Handler"));
+}
+
+#[test]
+fn prompt_append_qmd_retrieval_context_noop_when_empty() {
+    let base = "# Base Prompt".to_string();
+    let out = append_qmd_retrieval_context(base.clone(), &[]);
+    assert_eq!(out, base);
 }

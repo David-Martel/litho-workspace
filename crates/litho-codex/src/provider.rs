@@ -46,4 +46,11 @@ pub trait DocGenerator: Send + Sync {
         project_path: &Path,
         output_path: &Path,
     ) -> anyhow::Result<Vec<DocumentSection>>;
+
+    /// Checks if the generator is ready to be used (e.g. required binaries are found).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error describing why the generator is not ready.
+    async fn validate_readiness(&self) -> anyhow::Result<()>;
 }

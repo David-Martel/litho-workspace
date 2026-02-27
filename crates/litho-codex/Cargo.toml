@@ -11,3 +11,9 @@ serde_json = { workspace = true }
 anyhow = { workspace = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }
+
+# Codex-RS Library Integration
+codex-exec = { path = "../../external/codex-rs/codex-rs/exec" }
+codex-utils-cli = { path = "../../external/codex-rs/codex-rs/utils/cli" }
+codex-protocol = { path = "../../external/codex-rs/codex-rs/protocol" }
+codex-core = { path = "../../external/codex-rs/codex-rs/core" }
