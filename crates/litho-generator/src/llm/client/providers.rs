@@ -17,6 +17,7 @@ use crate::{
     llm::tools::time::AgentToolTime,
 };
 
+use super::codex_provider::CodexRsClient;
 use super::ollama_extractor::OllamaExtractorWrapper;
 
 /// Unified Provider client enum
@@ -30,6 +31,8 @@ pub enum ProviderClient {
     Anthropic(rig::providers::anthropic::Client),
     Gemini(rig::providers::gemini::Client),
     Ollama(rig::providers::ollama::Client),
+    /// Emergency fallback: local codex-rs subprocess.
+    CodexRs(CodexRsClient),
 }
 
 impl ProviderClient {
@@ -77,6 +80,13 @@ impl ProviderClient {
                     .base_url(&config.api_base_url)
                     .build();
                 Ok(ProviderClient::Ollama(client))
+            }
+            LLMProvider::CodexRs => {
+                let client = CodexRsClient::new(
+                    config.codex_binary_path.as_deref(),
+                    Some(config.timeout_seconds),
+                )?;
+                Ok(ProviderClient::CodexRs(client))
             }
         }
     }
@@ -187,6 +197,13 @@ impl ProviderClient {
 
                 let agent = builder.build();
                 ProviderAgent::Ollama(agent)
+            }
+            ProviderClient::CodexRs(client) => {
+                // CodexRs does not use rig agents; wrap the client directly.
+                ProviderAgent::CodexRs {
+                    client: client.clone(),
+                    system_prompt: system_prompt.to_string(),
+                }
             }
         }
     }
@@ -347,6 +364,13 @@ impl ProviderClient {
                     .build();
                 ProviderAgent::Ollama(agent)
             }
+            ProviderClient::CodexRs(client) => {
+                // The codex binary has no tool-calling interface; use plain prompt mode.
+                ProviderAgent::CodexRs {
+                    client: client.clone(),
+                    system_prompt: system_prompt.to_string(),
+                }
+            }
         }
     }
 
@@ -439,6 +463,11 @@ impl ProviderClient {
 
                 ProviderExtractor::Ollama(wrapper)
             }
+            ProviderClient::CodexRs(client) => ProviderExtractor::CodexRs {
+                client: client.clone(),
+                system_prompt: system_prompt.to_string(),
+                _phantom: std::marker::PhantomData,
+            },
         }
     }
 }
@@ -453,6 +482,11 @@ pub enum ProviderAgent {
     Moonshot(Agent<rig::providers::moonshot::CompletionModel>),
     DeepSeek(Agent<rig::providers::deepseek::CompletionModel>),
     Ollama(Agent<rig::providers::ollama::CompletionModel<reqwest::Client>>),
+    /// Emergency fallback — delegates to the codex-rs subprocess.
+    CodexRs {
+        client: CodexRsClient,
+        system_prompt: String,
+    },
 }
 
 impl ProviderAgent {
@@ -467,6 +501,10 @@ impl ProviderAgent {
             ProviderAgent::Anthropic(agent) => agent.prompt(prompt).await.map_err(|e| e.into()),
             ProviderAgent::Gemini(agent) => agent.prompt(prompt).await.map_err(|e| e.into()),
             ProviderAgent::Ollama(agent) => agent.prompt(prompt).await.map_err(|e| e.into()),
+            ProviderAgent::CodexRs {
+                client,
+                system_prompt,
+            } => client.prompt(system_prompt, prompt).await,
         }
     }
 
@@ -489,6 +527,17 @@ impl ProviderAgent {
             }
             ProviderAgent::Gemini(agent) => agent.prompt(prompt).multi_turn(max_iterations).await,
             ProviderAgent::Ollama(agent) => agent.prompt(prompt).multi_turn(max_iterations).await,
+            ProviderAgent::CodexRs {
+                client,
+                system_prompt,
+            } => {
+                // codex-rs has no native multi-turn; delegate to a single prompt call.
+                use rig::completion::CompletionError;
+                client.prompt(system_prompt, prompt).await.map_err(|e| {
+                    let boxed: Box<dyn std::error::Error + Send + Sync> = e.into();
+                    PromptError::CompletionError(CompletionError::RequestError(boxed))
+                })
+            }
         }
     }
 }
@@ -506,6 +555,12 @@ where
     Moonshot(Extractor<rig::providers::moonshot::CompletionModel, T>),
     DeepSeek(Extractor<rig::providers::deepseek::CompletionModel, T>),
     Ollama(OllamaExtractorWrapper<T>),
+    /// Emergency fallback — delegates JSON extraction to the codex-rs subprocess.
+    CodexRs {
+        client: CodexRsClient,
+        system_prompt: String,
+        _phantom: std::marker::PhantomData<T>,
+    },
 }
 
 impl<T> ProviderExtractor<T>
@@ -539,6 +594,11 @@ where
             ProviderExtractor::Ollama(extractor) => {
                 extractor.extract(prompt).await.map_err(|e| e.into())
             }
+            ProviderExtractor::CodexRs {
+                client,
+                system_prompt,
+                ..
+            } => client.extract::<T>(system_prompt, prompt).await,
         }
     }
 }

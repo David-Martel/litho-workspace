@@ -9,6 +9,13 @@ license = "MIT"
 name = "litho-generator"
 path = "src/main.rs"
 
+[lib]
+name = "litho_generator"
+path = "src/lib.rs"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
 [dependencies]
 litho-core = { workspace = true }
 rig-core = "0.23"
@@ -34,3 +41,4 @@ markdown = "1.0"
 futures = "0.3"
 uuid = { version = "1.0", features = ["v4", "serde"] }
 glob = "0.3"
+tracing = { workspace = true }

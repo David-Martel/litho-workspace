@@ -5,11 +5,15 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::future::Future;
 
-use crate::{config::Config, llm::client::utils::evaluate_befitting_model};
+use crate::{
+    config::Config,
+    llm::client::{codex_provider::CodexRsClient, utils::evaluate_befitting_model},
+};
 
 mod agent_builder;
+pub mod codex_provider;
 mod ollama_extractor;
-mod providers;
+pub mod providers;
 mod react;
 mod react_executor;
 mod summary_reasoner;
@@ -118,6 +122,22 @@ impl LLMClient {
                         .await
                     }
                     None => {
+                        // All primary models exhausted — attempt the CodexRs tertiary
+                        // fallback when it is enabled in config.
+                        if llm_config.codex_as_fallback {
+                            eprintln!(
+                                "[CodexRs] Primary models exhausted ({}). Attempting codex-rs tertiary fallback...",
+                                e
+                            );
+                            if let Ok(result) = Box::pin(self.try_codex_fallback::<T>(
+                                system_prompt,
+                                user_prompt,
+                            ))
+                            .await
+                            {
+                                return Ok(result);
+                            }
+                        }
                         let msg = self.config.target_language.msg_ai_service_error()
                             .replacen("{}", &llm_config.retry_attempts.to_string(), 1)
                             .replacen("{}", &e.to_string(), 1);
@@ -128,6 +148,22 @@ impl LLMClient {
             }
         })
         .await
+    }
+
+    /// Attempt extraction via the local codex-rs binary as a last resort.
+    ///
+    /// Returns `Ok(T)` on success; any error is propagated to the caller so it
+    /// can decide whether to surface the original primary-model error instead.
+    async fn try_codex_fallback<T>(&self, system_prompt: &str, user_prompt: &str) -> Result<T>
+    where
+        T: JsonSchema + for<'a> Deserialize<'a> + Serialize + Send + Sync + 'static,
+    {
+        let llm_config = &self.config.llm;
+        let client = CodexRsClient::new(
+            llm_config.codex_binary_path.as_deref(),
+            Some(llm_config.timeout_seconds),
+        )?;
+        client.extract::<T>(system_prompt, user_prompt).await
     }
 
     /// Intelligent dialogue method (using default ReAct configuration)

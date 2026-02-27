@@ -25,6 +25,9 @@ pub enum LLMProvider {
     Gemini,
     #[serde(rename = "ollama")]
     Ollama,
+    /// Local codex-rs binary — used as an emergency fallback provider.
+    #[serde(rename = "codexrs")]
+    CodexRs,
 }
 
 impl Default for LLMProvider {
@@ -44,6 +47,7 @@ impl std::fmt::Display for LLMProvider {
             LLMProvider::Anthropic => write!(f, "anthropic"),
             LLMProvider::Gemini => write!(f, "gemini"),
             LLMProvider::Ollama => write!(f, "ollama"),
+            LLMProvider::CodexRs => write!(f, "codexrs"),
         }
     }
 }
@@ -61,6 +65,7 @@ impl std::str::FromStr for LLMProvider {
             "anthropic" => Ok(LLMProvider::Anthropic),
             "gemini" => Ok(LLMProvider::Gemini),
             "ollama" => Ok(LLMProvider::Ollama),
+            "codexrs" | "codex-rs" | "codex" => Ok(LLMProvider::CodexRs),
             _ => Err(format!("Unknown provider: {}", s)),
         }
     }
@@ -172,6 +177,18 @@ pub struct LLMConfig {
     pub disable_preset_tools: bool,
 
     pub max_parallels: usize,
+
+    /// Absolute path to the `codex` binary used by the CodexRs fallback provider.
+    ///
+    /// When `None`, the path is auto-detected via `CODEX_BINARY_PATH` env var,
+    /// a sibling of the current executable, or `PATH` lookup.
+    #[serde(default)]
+    pub codex_binary_path: Option<String>,
+
+    /// Enable codex-rs as the tertiary fallback when both `model_efficient` and
+    /// `model_powerful` fail. Defaults to `true`.
+    #[serde(default = "default_codex_as_fallback")]
+    pub codex_as_fallback: bool,
 }
 
 /// Cache configuration
@@ -367,6 +384,10 @@ pub struct LocalDocsConfig {
 }
 
 fn default_true() -> bool {
+    true
+}
+
+fn default_codex_as_fallback() -> bool {
     true
 }
 
@@ -733,6 +754,10 @@ impl Default for LLMConfig {
             timeout_seconds: 300,
             disable_preset_tools: false,
             max_parallels: 3,
+            codex_binary_path: std::env::var("CODEX_BINARY_PATH")
+                .ok()
+                .filter(|s| !s.is_empty()),
+            codex_as_fallback: true,
         }
     }
 }
@@ -744,5 +769,228 @@ impl Default for CacheConfig {
             cache_dir: PathBuf::from(".litho/cache"),
             expire_hours: 8760,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::str::FromStr;
+
+    // -----------------------------------------------------------------------
+    // LLMProvider unit tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn provider_default_is_openai() {
+        assert_eq!(LLMProvider::default(), LLMProvider::OpenAI);
+    }
+
+    #[test]
+    fn provider_from_str_case_insensitive() {
+        assert_eq!(LLMProvider::from_str("OLLAMA").unwrap(), LLMProvider::Ollama);
+        assert_eq!(LLMProvider::from_str("Gemini").unwrap(), LLMProvider::Gemini);
+        assert_eq!(LLMProvider::from_str("codexrs").unwrap(), LLMProvider::CodexRs);
+        assert_eq!(LLMProvider::from_str("codex-rs").unwrap(), LLMProvider::CodexRs);
+    }
+
+    #[test]
+    fn provider_from_str_all_known_strings() {
+        let cases = [
+            ("openai", LLMProvider::OpenAI),
+            ("moonshot", LLMProvider::Moonshot),
+            ("deepseek", LLMProvider::DeepSeek),
+            ("mistral", LLMProvider::Mistral),
+            ("openrouter", LLMProvider::OpenRouter),
+            ("anthropic", LLMProvider::Anthropic),
+            ("gemini", LLMProvider::Gemini),
+            ("ollama", LLMProvider::Ollama),
+            ("codexrs", LLMProvider::CodexRs),
+        ];
+        for (s, expected) in cases {
+            assert_eq!(
+                LLMProvider::from_str(s).unwrap(),
+                expected,
+                "from_str failed for '{}'",
+                s
+            );
+        }
+    }
+
+    #[test]
+    fn provider_from_str_unknown_errors() {
+        assert!(LLMProvider::from_str("bogus").is_err());
+        assert!(LLMProvider::from_str("").is_err());
+    }
+
+    #[test]
+    fn provider_display_matches_serde_rename() {
+        // Display output must match serde rename so that round-trips work via JSON
+        let cases = [
+            (LLMProvider::OpenAI, "openai"),
+            (LLMProvider::Ollama, "ollama"),
+            (LLMProvider::CodexRs, "codexrs"),
+        ];
+        for (variant, expected_str) in cases {
+            assert_eq!(
+                variant.to_string(),
+                expected_str,
+                "Display mismatch for {:?}",
+                variant
+            );
+        }
+    }
+
+    #[test]
+    fn provider_serde_json_round_trip() {
+        for variant in [
+            LLMProvider::OpenAI,
+            LLMProvider::Ollama,
+            LLMProvider::Gemini,
+            LLMProvider::CodexRs,
+        ] {
+            let json = serde_json::to_string(&variant).unwrap();
+            let parsed: LLMProvider = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed, variant);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Config::default unit tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn config_default_paths_are_relative() {
+        let cfg = Config::default();
+        assert_eq!(cfg.project_path, PathBuf::from("."));
+        assert!(cfg.output_path.starts_with("."));
+        assert!(cfg.internal_path.starts_with("."));
+    }
+
+    #[test]
+    fn config_default_excluded_dirs_contains_essentials() {
+        let cfg = Config::default();
+        let dirs: Vec<&str> = cfg.excluded_dirs.iter().map(|s| s.as_str()).collect();
+        assert!(dirs.contains(&"target"), "missing 'target'");
+        assert!(dirs.contains(&".git"), "missing '.git'");
+        assert!(dirs.contains(&"node_modules"), "missing 'node_modules'");
+    }
+
+    #[test]
+    fn config_default_max_file_size_reasonable() {
+        let cfg = Config::default();
+        // 64 KB is the documented default
+        assert_eq!(cfg.max_file_size, 64 * 1024);
+    }
+
+    #[test]
+    fn config_default_core_component_percentage_valid() {
+        let cfg = Config::default();
+        assert!(
+            cfg.core_component_percentage > 0.0 && cfg.core_component_percentage <= 100.0,
+            "percentage out of range: {}",
+            cfg.core_component_percentage
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // CacheConfig unit tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn cache_default_enabled() {
+        let c = CacheConfig::default();
+        assert!(c.enabled);
+    }
+
+    #[test]
+    fn cache_default_expire_hours_positive() {
+        let c = CacheConfig::default();
+        assert!(c.expire_hours > 0);
+    }
+
+    #[test]
+    fn cache_serde_round_trip() {
+        let c = CacheConfig::default();
+        let json = serde_json::to_string(&c).unwrap();
+        let parsed: CacheConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.enabled, c.enabled);
+        assert_eq!(parsed.expire_hours, c.expire_hours);
+        assert_eq!(parsed.cache_dir, c.cache_dir);
+    }
+
+    // -----------------------------------------------------------------------
+    // QmdRetrieverConfig unit tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn qmd_default_disabled() {
+        let q = QmdRetrieverConfig::default();
+        assert!(!q.enabled);
+    }
+
+    #[test]
+    fn qmd_default_bin_and_mode() {
+        let q = QmdRetrieverConfig::default();
+        assert_eq!(q.bin, "qmd");
+        assert_eq!(q.mode, "query");
+    }
+
+    #[test]
+    fn qmd_default_store_key_non_empty() {
+        let q = QmdRetrieverConfig::default();
+        assert!(!q.store_key.is_empty());
+    }
+
+    #[test]
+    fn qmd_serde_round_trip() {
+        let q = QmdRetrieverConfig::default();
+        let json = serde_json::to_string(&q).unwrap();
+        let parsed: QmdRetrieverConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.enabled, q.enabled);
+        assert_eq!(parsed.bin, q.bin);
+        assert_eq!(parsed.mode, q.mode);
+        assert_eq!(parsed.limit, q.limit);
+    }
+
+    // -----------------------------------------------------------------------
+    // ChunkingConfig unit tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn chunking_default_values() {
+        let c = ChunkingConfig::default();
+        assert!(c.enabled);
+        assert_eq!(c.max_chunk_size, 8000);
+        assert_eq!(c.chunk_overlap, 200);
+        assert_eq!(c.strategy, "semantic");
+        assert_eq!(c.min_size_for_chunking, 10000);
+    }
+
+    // -----------------------------------------------------------------------
+    // Config::get_project_name unit tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn get_project_name_returns_explicit_name() {
+        let mut cfg = Config::default();
+        cfg.project_name = Some("my-project".to_string());
+        assert_eq!(cfg.get_project_name(), "my-project");
+    }
+
+    #[test]
+    fn get_project_name_falls_back_to_path_stem() {
+        let mut cfg = Config::default();
+        cfg.project_name = None;
+        cfg.project_path = PathBuf::from("/home/user/cool-app");
+        assert_eq!(cfg.get_project_name(), "cool-app");
+    }
+
+    #[test]
+    fn get_project_name_whitespace_only_falls_back() {
+        let mut cfg = Config::default();
+        cfg.project_name = Some("   ".to_string());
+        cfg.project_path = PathBuf::from("/a/b/my-app");
+        assert_eq!(cfg.get_project_name(), "my-app");
     }
 }
