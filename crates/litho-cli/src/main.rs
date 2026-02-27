@@ -82,13 +82,8 @@ enum OutputFormat {
 
 #[derive(Debug, Parser)]
 struct GenerateArgs {
-    /// Root directory of the project to document.
-    path: PathBuf,
-
     /// Documentation provider to use.
-    ///
-    /// Currently only `codex` (OpenAI Codex-CLI) is supported.
-    #[arg(long, value_enum, default_value_t = Provider::Codex)]
+    #[arg(long, value_enum, default_value_t = Provider::CodexLib)]
     provider: Provider,
 
     /// Directory where generated documentation files are written.
@@ -106,7 +101,10 @@ struct GenerateArgs {
 
 #[derive(Debug, Clone, ValueEnum)]
 enum Provider {
-    Codex,
+    /// Use OpenAI Codex-CLI via direct library call (recommended).
+    CodexLib,
+    /// Use OpenAI Codex-CLI via subprocess execution.
+    CodexExec,
 }
 
 // ---------------------------------------------------------------------------
@@ -115,6 +113,7 @@ enum Provider {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    litho_core::env::LithoEnv::load();
     let cli = Cli::parse();
 
     match cli.command {
@@ -135,9 +134,8 @@ async fn cmd_extract(args: ExtractArgs) -> anyhow::Result<()> {
 
     let extracted = match args.config {
         Some(config_path) => {
-            let cfg = LithoConfig::from_file(&config_path).with_context(|| {
-                format!("failed to load config from {}", config_path.display())
-            })?;
+            let cfg = LithoConfig::from_file(&config_path)
+                .with_context(|| format!("failed to load config from {}", config_path.display()))?;
             litho_extract::extract_with_config(&project_path, &cfg)
         }
         None => litho_extract::extract(&project_path),
@@ -180,7 +178,10 @@ fn print_summary(extracted: &ExtractedCodebase) {
 
     // Top 10 most complex files.
     if !stats.top_complex_files.is_empty() {
-        println!("Top {} most complex file(s):", stats.top_complex_files.len());
+        println!(
+            "Top {} most complex file(s):",
+            stats.top_complex_files.len()
+        );
         for (i, path) in stats.top_complex_files.iter().enumerate() {
             println!("  {:>2}. {}", i + 1, path.display());
         }
@@ -220,12 +221,26 @@ async fn cmd_generate(args: GenerateArgs) -> anyhow::Result<()> {
         extracted.statistics.total_files, extracted.statistics.total_loc
     );
 
-    let generator = match args.provider {
-        Provider::Codex => CodexExecGenerator {
-            model: args.model.unwrap_or_default(),
+    let mut generator: Box<dyn litho_codex::provider::DocGenerator> = match args.provider {
+        Provider::CodexLib => Box::new(litho_codex::exec::CodexLibGenerator {
+            model: args.model.unwrap_or_else(|| {
+                litho_core::env::LithoEnv::codex_model().unwrap_or_default()
+            }),
+        }),
+        Provider::CodexExec => Box::new(CodexExecGenerator {
+            model: args.model.unwrap_or_else(|| {
+                litho_core::env::LithoEnv::codex_model().unwrap_or_default()
+            }),
             sandbox: "read-only".into(),
-        },
+            ..Default::default()
+        }),
     };
+
+    // Fast-fail if the provider isn't ready.
+    generator
+        .validate_readiness()
+        .await
+        .context("documentation provider is not ready")?;
 
     eprintln!("Generating documentation...");
     let sections = generator

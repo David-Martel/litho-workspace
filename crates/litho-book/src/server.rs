@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use std::time::Duration;
 use tower_http::{cors::CorsLayer, services::ServeDir};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use crate::error::LithoBookError;
 use crate::filesystem::{DocumentTree, SearchResult};
@@ -25,6 +25,35 @@ pub struct AppState {
     pub http_client: reqwest::Client,
     pub llm_key: Arc<String>,
     pub llm_api_url: Arc<String>,
+    search_backend: SearchBackend,
+}
+
+#[derive(Clone, Debug)]
+enum SearchBackend {
+    InMemory,
+    Qmd(QmdSearchConfig),
+}
+
+#[derive(Clone, Debug)]
+struct QmdSearchConfig {
+    bin: String,
+    mode: String,
+    index: Option<String>,
+    limit: usize,
+    cwd: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct QmdSearchResponse {
+    results: Vec<QmdSearchHit>,
+}
+
+#[derive(Debug, Deserialize)]
+struct QmdSearchHit {
+    file: String,
+    title: String,
+    score: f32,
+    snippet: String,
 }
 
 #[derive(Deserialize)]
@@ -59,6 +88,99 @@ pub struct StatsResponse {
     pub total_dirs: usize,
     pub total_size: u64,
     pub formatted_size: String,
+}
+
+fn resolve_search_backend() -> SearchBackend {
+    let backend = std::env::var("LITHO_BOOK_SEARCH_BACKEND")
+        .unwrap_or_else(|_| "memory".to_string())
+        .to_lowercase();
+
+    if backend != "qmd" {
+        return SearchBackend::InMemory;
+    }
+
+    let bin = std::env::var("LITHO_BOOK_QMD_BIN").unwrap_or_else(|_| "qmd".to_string());
+    let mode = std::env::var("LITHO_BOOK_QMD_MODE").unwrap_or_else(|_| "query".to_string());
+    let index = std::env::var("LITHO_BOOK_QMD_INDEX")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+    let cwd = std::env::var("LITHO_BOOK_QMD_CWD")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+    let limit = std::env::var("LITHO_BOOK_QMD_LIMIT")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(20)
+        .clamp(1, 200);
+
+    SearchBackend::Qmd(QmdSearchConfig {
+        bin,
+        mode,
+        index,
+        limit,
+        cwd,
+    })
+}
+
+fn qmd_search(config: &QmdSearchConfig, query: &str) -> anyhow::Result<Vec<SearchResult>> {
+    let mut command = std::process::Command::new(&config.bin);
+    command
+        .arg(&config.mode)
+        .arg(query)
+        .arg("--json")
+        .arg("--limit")
+        .arg(config.limit.to_string());
+
+    if let Some(index) = &config.index {
+        command.arg("--index").arg(index);
+    }
+    if let Some(cwd) = &config.cwd {
+        command.current_dir(cwd);
+    }
+
+    let output = command.output()?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("qmd search failed (status {}): {}", output.status, stderr);
+    }
+
+    let parsed: QmdSearchResponse = serde_json::from_slice(&output.stdout)?;
+    let mapped = parsed
+        .results
+        .into_iter()
+        .map(|hit| {
+            let file_name = hit.file.rsplit('/').next().unwrap_or(&hit.file).to_string();
+            let content = hit.snippet;
+            SearchResult {
+                file_path: hit.file,
+                file_name,
+                title: if hit.title.is_empty() {
+                    None
+                } else {
+                    Some(hit.title)
+                },
+                matches: vec![crate::filesystem::SearchMatch {
+                    line_number: 1,
+                    highlighted_content: escape_html(&content),
+                    content,
+                    context_before: None,
+                    context_after: None,
+                }],
+                relevance_score: hit.score,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    Ok(mapped)
+}
+
+fn escape_html(input: &str) -> String {
+    input
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 // AI助手相关的数据结构
@@ -110,6 +232,14 @@ pub struct StreamEvent {
 
 /// Create the main application router
 pub fn create_router(doc_tree: DocumentTree, docs_path: String) -> Router {
+    create_router_with_backend(doc_tree, docs_path, resolve_search_backend())
+}
+
+fn create_router_with_backend(
+    doc_tree: DocumentTree,
+    docs_path: String,
+    search_backend: SearchBackend,
+) -> Router {
     let tree_json = serde_json::to_string(&doc_tree.root).unwrap_or_else(|e| {
         tracing::error!("Failed to serialize document tree: {}", e);
         "{}".to_string()
@@ -133,6 +263,7 @@ pub fn create_router(doc_tree: DocumentTree, docs_path: String) -> Router {
         http_client: reqwest::Client::new(),
         llm_key: Arc::new(llm_key_value),
         llm_api_url: Arc::new(llm_api_url),
+        search_backend,
     };
 
     Router::new()
@@ -216,7 +347,19 @@ async fn search_handler(
 
     debug!("Searching for: {}", query);
 
-    let results = state.doc_tree.search_content(&query);
+    let results = match &state.search_backend {
+        SearchBackend::InMemory => state.doc_tree.search_content(&query),
+        SearchBackend::Qmd(config) => match qmd_search(config, &query) {
+            Ok(results) => results,
+            Err(err) => {
+                warn!(
+                    "QMD search backend failed (falling back to in-memory search): {}",
+                    err
+                );
+                state.doc_tree.search_content(&query)
+            }
+        },
+    };
     let total = results.len();
 
     debug!("Found {} results matching query: {}", total, query);
@@ -357,7 +500,9 @@ async fn call_openai_stream_api(
     Box<dyn std::error::Error + Send + Sync>,
 > {
     if api_url.is_empty() {
-        return Err("LLM API URL not configured. Set LITHO_BOOK_LLM_API_URL environment variable.".into());
+        return Err(
+            "LLM API URL not configured. Set LITHO_BOOK_LLM_API_URL environment variable.".into(),
+        );
     }
 
     // 构建系统提示词
@@ -526,7 +671,7 @@ fn generate_index_html(tree_json: &str, docs_path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::body::Body;
+    use axum::body::{Body, to_bytes};
     use http::Request;
     use tower::ServiceExt;
 
@@ -539,7 +684,16 @@ mod tests {
         std::fs::write(dir.path().join("test.md"), "# Test\nHello world").unwrap();
         let tree = crate::filesystem::DocumentTree::new(dir.path()).unwrap();
         let docs_path = dir.path().display().to_string().replace('\\', "/");
-        let router = create_router(tree, docs_path);
+        let router = create_router_with_backend(tree, docs_path, SearchBackend::InMemory);
+        (router, dir)
+    }
+
+    fn make_test_app_with_backend(backend: SearchBackend) -> (Router, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("test.md"), "# Test\nHello world").unwrap();
+        let tree = crate::filesystem::DocumentTree::new(dir.path()).unwrap();
+        let docs_path = dir.path().display().to_string().replace('\\', "/");
+        let router = create_router_with_backend(tree, docs_path, backend);
         (router, dir)
     }
 
@@ -671,5 +825,71 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), 200);
+    }
+
+    #[tokio::test]
+    async fn test_search_endpoint_qmd_backend_success() {
+        let script_dir = tempfile::tempdir().unwrap();
+        let script_path = script_dir.path().join("qmd-mock.cmd");
+        let payload = r#"{"results":[{"file":"docs/alpha.md","title":"Alpha","score":0.87,"snippet":"hello from qmd"}]}"#;
+        std::fs::write(&script_path, format!("@echo off\r\necho {}\r\n", payload)).unwrap();
+
+        let backend = SearchBackend::Qmd(QmdSearchConfig {
+            bin: script_path.display().to_string(),
+            mode: "query".to_string(),
+            index: None,
+            limit: 10,
+            cwd: None,
+        });
+        let (app, _dir) = make_test_app_with_backend(backend);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/search?q=hello")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+
+        let bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+        let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(parsed["total"].as_u64(), Some(1));
+        assert_eq!(
+            parsed["results"][0]["file_path"].as_str(),
+            Some("docs/alpha.md")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_search_endpoint_qmd_backend_fallback() {
+        let script_dir = tempfile::tempdir().unwrap();
+        let script_path = script_dir.path().join("qmd-fail.cmd");
+        std::fs::write(&script_path, "@echo off\r\nexit /b 2\r\n").unwrap();
+
+        let backend = SearchBackend::Qmd(QmdSearchConfig {
+            bin: script_path.display().to_string(),
+            mode: "query".to_string(),
+            index: None,
+            limit: 10,
+            cwd: None,
+        });
+        let (app, _dir) = make_test_app_with_backend(backend);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/search?q=hello")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+
+        let bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+        let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(parsed["total"].as_u64().unwrap_or(0) >= 1);
+        assert_eq!(parsed["results"][0]["file_path"].as_str(), Some("test.md"));
     }
 }
