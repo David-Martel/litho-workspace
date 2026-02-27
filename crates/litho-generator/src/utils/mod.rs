@@ -3,4 +3,5 @@ pub mod project_structure_formatter;
 pub mod prompt_compressor;
 pub mod sources;
 pub mod threads;
+pub mod token_compress;
 pub mod token_estimator;
