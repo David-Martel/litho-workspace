@@ -18,6 +18,46 @@ pub trait Outlet {
     async fn save(&self, context: &GeneratorContext) -> Result<()>;
 }
 
+/// Enum-based dispatch over all format-dependent outlet variants.
+///
+/// Because `Outlet::save` is an async trait method (RPITIT), the trait is not
+/// object-safe and cannot be used as `Box<dyn Outlet>`. `OutletKind` wraps
+/// every concrete outlet and delegates to the appropriate implementation,
+/// giving callers a single type that erases the concrete variant without
+/// requiring dynamic dispatch through a vtable.
+///
+/// # Examples
+///
+/// ```ignore
+/// let outlet = OutletKind::for_format("html", doc_tree);
+/// outlet.save(&context).await?;
+/// ```
+pub enum OutletKind {
+    Disk(DiskOutlet),
+    Html(HtmlOutlet),
+}
+
+impl OutletKind {
+    /// Construct the appropriate outlet variant for `format`.
+    ///
+    /// `"html"` maps to [`HtmlOutlet`]; every other string (including `"md"`)
+    /// maps to [`DiskOutlet`].
+    pub fn for_format(format: &str, doc_tree: DocTree) -> Self {
+        match format {
+            "html" => Self::Html(HtmlOutlet::new(doc_tree)),
+            _ => Self::Disk(DiskOutlet::new(doc_tree)),
+        }
+    }
+
+    /// Save documentation using whichever outlet variant is active.
+    pub async fn save(&self, context: &GeneratorContext) -> Result<()> {
+        match self {
+            Self::Disk(o) => o.save(context).await,
+            Self::Html(o) => o.save(context).await,
+        }
+    }
+}
+
 pub struct DocTree {
     /// key is the ScopedKey of Documentation in Memory, value is the relative path for document output
     structure: HashMap<String, String>,
@@ -75,7 +115,7 @@ impl DiskOutlet {
 
 impl Outlet for DiskOutlet {
     async fn save(&self, context: &GeneratorContext) -> Result<()> {
-        println!("\n🖊️ Saving documentation...");
+        println!("\nSaving documentation...");
         // Create output directory
         let output_dir = &context.config.output_path;
         if output_dir.exists() {
@@ -103,7 +143,7 @@ impl Outlet for DiskOutlet {
                 // Write document content to file
                 fs::write(&output_file_path, doc_markdown)?;
 
-                println!("💾 Document saved: {}", output_file_path.display());
+                println!("Document saved: {}", output_file_path.display());
             } else {
                 // If document doesn't exist, log warning but don't interrupt the process
                 let msg = context.config.target_language.msg_doc_not_found();
@@ -112,7 +152,7 @@ impl Outlet for DiskOutlet {
         }
 
         println!(
-            "💾 Document save completed, output directory: {}",
+            "Document save completed, output directory: {}",
             output_dir.display()
         );
 
@@ -120,9 +160,56 @@ impl Outlet for DiskOutlet {
         if let Err(e) = MermaidFixer::auto_fix_after_output(context).await {
             let msg = context.config.target_language.msg_mermaid_error();
             eprintln!("{}", msg.replace("{}", &e.to_string()));
-            eprintln!("💡 This will not affect the main documentation generation process");
+            eprintln!("This will not affect the main documentation generation process");
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Verify that `OutletKind::for_format` returns the expected variant for
+    /// every documented format string.
+    #[test]
+    fn test_for_format_html_variant() {
+        let doc_tree = DocTree::default();
+        let outlet = OutletKind::for_format("html", doc_tree);
+        assert!(
+            matches!(outlet, OutletKind::Html(_)),
+            "expected Html variant for format \"html\""
+        );
+    }
+
+    #[test]
+    fn test_for_format_md_variant() {
+        let doc_tree = DocTree::default();
+        let outlet = OutletKind::for_format("md", doc_tree);
+        assert!(
+            matches!(outlet, OutletKind::Disk(_)),
+            "expected Disk variant for format \"md\""
+        );
+    }
+
+    #[test]
+    fn test_for_format_unknown_falls_back_to_disk() {
+        let doc_tree = DocTree::default();
+        let outlet = OutletKind::for_format("pdf", doc_tree);
+        assert!(
+            matches!(outlet, OutletKind::Disk(_)),
+            "expected Disk variant for unknown format \"pdf\""
+        );
+    }
+
+    #[test]
+    fn test_for_format_empty_string_falls_back_to_disk() {
+        let doc_tree = DocTree::default();
+        let outlet = OutletKind::for_format("", doc_tree);
+        assert!(
+            matches!(outlet, OutletKind::Disk(_)),
+            "expected Disk variant for empty format string"
+        );
     }
 }

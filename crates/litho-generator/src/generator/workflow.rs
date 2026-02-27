@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::generator::compose::DocumentationComposer;
-use crate::generator::outlet::{DiskOutlet, DocTree, HtmlOutlet, Outlet, SummaryOutlet};
+use crate::generator::outlet::{DocTree, Outlet, OutletKind, SummaryOutlet};
 use crate::integrations::change_detector;
 use crate::integrations::manifest::DocumentationManifest;
 use crate::{
@@ -121,13 +121,8 @@ pub async fn launch(c: &Config) -> Result<()> {
 
     // Execute document storage (format-aware outlet selection)
     let output_start = Instant::now();
-    if context.config.output_format == "html" {
-        let outlet = HtmlOutlet::new(doc_tree);
-        outlet.save(&context).await?;
-    } else {
-        let outlet = DiskOutlet::new(doc_tree);
-        outlet.save(&context).await?;
-    }
+    let outlet = OutletKind::for_format(&context.config.output_format, doc_tree);
+    outlet.save(&context).await?;
 
     // Generate and save summary report
     let summary_outlet = SummaryOutlet::new();
@@ -170,7 +165,10 @@ pub async fn launch(c: &Config) -> Result<()> {
 /// Launch in incremental mode — only re-generate documentation for changed files.
 ///
 /// Loads the previous manifest, detects changes via git, and selectively re-runs
-/// only the affected pipeline stages.
+/// only the affected pipeline stages. Falls back to a full rebuild when:
+/// - No manifest exists (first run)
+/// - More than 30% of tracked files changed
+/// - The manifest's recorded commit no longer exists in the git history
 pub async fn launch_incremental(c: &Config) -> Result<()> {
     let overall_start = Instant::now();
 
@@ -185,8 +183,7 @@ pub async fn launch_incremental(c: &Config) -> Result<()> {
     };
 
     // Detect changes
-    let changeset =
-        change_detector::detect_changes(&c.project_path, &manifest).await?;
+    let changeset = change_detector::detect_changes(&c.project_path, &manifest).await?;
 
     if changeset.is_empty() {
         println!("✅ No changes detected since last generation. Documentation is up to date.");
@@ -207,19 +204,108 @@ pub async fn launch_incremental(c: &Config) -> Result<()> {
         changeset.affected_agents.len()
     );
     for agent in &changeset.affected_agents {
-        println!("   → {}", agent);
+        println!("   -> {}", agent);
     }
 
-    // For now, incremental mode triggers a full generation when agents are affected.
-    // A future enhancement will selectively re-run only affected agents by passing
-    // the changeset into the research orchestrator and documentation composer.
-    // This still saves time by skipping runs when nothing changed.
-    println!("🔄 Re-running affected pipeline stages...");
-    launch(c).await?;
+    // Build the full pipeline context (identical to launch())
+    let config = c.clone();
+    let llm_client = LLMClient::new(config.clone())?;
+    let cache_manager = Arc::new(RwLock::new(CacheManager::new(
+        config.cache.clone(),
+        config.target_language.clone(),
+    )));
+    let memory = Arc::new(RwLock::new(Memory::new()));
+
+    let context = GeneratorContext {
+        llm_client,
+        config,
+        cache_manager,
+        memory,
+    };
+
+    // Preprocessing always runs — it populates memory with fresh AST data that
+    // every subsequent agent reads from.
+    let preprocess_start = Instant::now();
+    let preprocess_agent = PreProcessAgent::new();
+    preprocess_agent.execute(context.clone()).await?;
+    let preprocess_time = preprocess_start.elapsed().as_secs_f64();
+    context
+        .store_to_memory(TimingScope::TIMING, TimingKeys::PREPROCESS, preprocess_time)
+        .await?;
+    println!(
+        "=== Preprocessing completed (Duration: {:.2}s) ===",
+        preprocess_time
+    );
+
+    // Selective research stage — only re-run research agents in the affected set.
+    let research_start = Instant::now();
+    let research_orchestrator = ResearchOrchestrator::default();
+    research_orchestrator
+        .execute_research_pipeline_selective(&context, &changeset.affected_agents)
+        .await?;
+    let research_time = research_start.elapsed().as_secs_f64();
+    context
+        .store_to_memory(TimingScope::TIMING, TimingKeys::RESEARCH, research_time)
+        .await?;
+    println!(
+        "\n=== Selective research completed (Duration: {:.2}s) ===",
+        research_time
+    );
+
+    // Selective compose stage — only re-run documentation agents in the affected set.
+    let compose_start = Instant::now();
+    let mut doc_tree = DocTree::new(&context.config.target_language);
+    let documentation_orchestrator = DocumentationComposer::default();
+    documentation_orchestrator
+        .execute_selective(&context, &mut doc_tree, &changeset.affected_agents)
+        .await?;
+    let compose_time = compose_start.elapsed().as_secs_f64();
+    context
+        .store_to_memory(TimingScope::TIMING, TimingKeys::COMPOSE, compose_time)
+        .await?;
+    println!(
+        "\n=== Selective document generation completed (Duration: {:.2}s) ===",
+        compose_time
+    );
+
+    // Output stage always runs — it writes whatever the agents produced (or re-produced).
+    let output_start = Instant::now();
+    let outlet = OutletKind::for_format(&context.config.output_format, doc_tree);
+    outlet.save(&context).await?;
+
+    let summary_outlet = SummaryOutlet::new();
+    summary_outlet.save(&context).await?;
+
+    let output_time = output_start.elapsed().as_secs_f64();
+    context
+        .store_to_memory(TimingScope::TIMING, TimingKeys::OUTPUT, output_time)
+        .await?;
+    println!(
+        "\n=== Document storage completed (Duration: {:.2}s) ===",
+        output_time
+    );
 
     let total_time = overall_start.elapsed().as_secs_f64();
+    context
+        .store_to_memory(TimingScope::TIMING, TimingKeys::TOTAL_EXECUTION, total_time)
+        .await?;
+
+    // Save an updated manifest so the next incremental run has a fresh baseline.
+    let mut updated_manifest = DocumentationManifest::new(context.config.project_path.clone());
+    updated_manifest.git_commit =
+        change_detector::get_git_commit(&context.config.project_path).await;
+    updated_manifest.git_branch =
+        change_detector::get_git_branch(&context.config.project_path).await;
+    updated_manifest.total_generation_time_secs = total_time;
+    if let Err(e) = updated_manifest.save(&context.config.internal_path).await {
+        eprintln!(
+            "Warning: Failed to save manifest after incremental run: {}",
+            e
+        );
+    }
+
     println!(
-        "\n🎉 Incremental generation completed! Total duration: {:.2}s",
+        "\nIncremental generation completed! Total duration: {:.2}s",
         total_time
     );
 

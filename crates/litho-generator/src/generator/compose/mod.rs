@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::generator::compose::agents::architecture_editor::ArchitectureEditor;
 use crate::generator::compose::agents::boundary_editor::BoundaryEditor;
 use crate::generator::compose::agents::database_editor::DatabaseEditor;
@@ -48,6 +50,84 @@ impl DocumentationComposer {
         if self.has_database_files(context).await {
             let database_editor = DatabaseEditor::default();
             database_editor.execute(context).await?;
+        }
+
+        Ok(())
+    }
+
+    /// Execute only the compose agents whose short-form names appear in `affected_agents`.
+    ///
+    /// The short-form names used by the change detector are:
+    /// `"Overview"`, `"Architecture"`, `"Workflow"`, `"KeyModulesInsight"`,
+    /// `"Boundary"`, `"Database"`.
+    ///
+    /// If `affected_agents` is empty, all agents are executed (safety fallback).
+    pub async fn execute_selective(
+        &self,
+        context: &GeneratorContext,
+        doc_tree: &mut DocTree,
+        affected_agents: &HashSet<String>,
+    ) -> Result<()> {
+        // Empty set means something went wrong upstream — run everything.
+        if affected_agents.is_empty() {
+            return self.execute(context, doc_tree).await;
+        }
+
+        println!("\n🤖 Executing selective documentation generation...");
+        println!(
+            "📝 Target language: {}",
+            context.config.target_language.display_name()
+        );
+
+        let is_affected = |name: &str| affected_agents.contains(name);
+
+        if is_affected("Overview") {
+            let overview_editor = OverviewEditor::default();
+            overview_editor.execute(context).await?;
+        } else {
+            println!("   Skipping Overview editor (not affected)");
+        }
+
+        if is_affected("Architecture") {
+            let architecture_editor = ArchitectureEditor::default();
+            architecture_editor.execute(context).await?;
+        } else {
+            println!("   Skipping Architecture editor (not affected)");
+        }
+
+        if is_affected("Workflow") {
+            let workflow_editor = WorkflowEditor::default();
+            workflow_editor.execute(context).await?;
+        } else {
+            println!("   Skipping Workflow editor (not affected)");
+        }
+
+        if is_affected("KeyModulesInsight") {
+            let key_modules_insight_editor = KeyModulesInsightEditor::default();
+            key_modules_insight_editor
+                .execute(context, doc_tree)
+                .await?;
+        } else {
+            println!("   Skipping KeyModulesInsight editor (not affected)");
+        }
+
+        if is_affected("Boundary") {
+            let boundary_editor = BoundaryEditor::default();
+            boundary_editor.execute(context).await?;
+        } else {
+            println!("   Skipping Boundary editor (not affected)");
+        }
+
+        // Database editor: only when affected AND database files exist
+        if is_affected("Database") {
+            if self.has_database_files(context).await {
+                let database_editor = DatabaseEditor::default();
+                database_editor.execute(context).await?;
+            } else {
+                println!("   Skipping Database editor (no database files found)");
+            }
+        } else {
+            println!("   Skipping Database editor (not affected)");
         }
 
         Ok(())

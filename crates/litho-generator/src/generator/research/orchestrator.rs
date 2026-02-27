@@ -1,6 +1,7 @@
 use anyhow::Result;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::collections::HashSet;
 use tokio::process::Command;
 
 use crate::generator::context::GeneratorContext;
@@ -66,6 +67,129 @@ impl ResearchOrchestrator {
         }
 
         println!("✓ Litho Studies Research pipeline execution completed");
+
+        Ok(())
+    }
+
+    /// Execute only the research agents whose short-form names appear in `affected_agents`.
+    ///
+    /// The short-form names used by the change detector are the enum variant name strings:
+    /// `"SystemContextResearcher"`, `"DomainModulesDetector"`, `"ArchitectureResearcher"`,
+    /// `"WorkflowResearcher"`, `"KeyModulesInsight"`, `"BoundaryAnalyzer"`,
+    /// `"DatabaseOverviewAnalyzer"`.
+    ///
+    /// If `affected_agents` is empty, all agents are executed (safety fallback).
+    pub async fn execute_research_pipeline_selective(
+        &self,
+        context: &GeneratorContext,
+        affected_agents: &HashSet<String>,
+    ) -> Result<()> {
+        // Empty set means something went wrong upstream — run everything.
+        if affected_agents.is_empty() {
+            return self.execute_research_pipeline(context).await;
+        }
+
+        println!(
+            "🚀 Starting selective research pipeline ({} agents affected)...",
+            affected_agents.len()
+        );
+        self.seed_qmd_research_context(context).await?;
+
+        let is_affected = |name: &str| affected_agents.contains(name);
+
+        // Layer 1: SystemContextResearcher — others may depend on its memory output.
+        if is_affected("SystemContextResearcher") {
+            self.execute_agent(&SystemContextResearcher, context)
+                .await?;
+        } else {
+            println!("   Skipping SystemContextResearcher (not affected)");
+        }
+
+        // Layer 2: parallel meso agents — only run the affected subset.
+        // tokio::try_join! requires a fixed arity, so we enumerate all eight
+        // possible (run/skip) combinations for the three agents.
+        let run_domain = is_affected("DomainModulesDetector");
+        let run_arch = is_affected("ArchitectureResearcher");
+        let run_workflow = is_affected("WorkflowResearcher");
+
+        if !run_domain {
+            println!("   Skipping DomainModulesDetector (not affected)");
+        }
+        if !run_arch {
+            println!("   Skipping ArchitectureResearcher (not affected)");
+        }
+        if !run_workflow {
+            println!("   Skipping WorkflowResearcher (not affected)");
+        }
+
+        match (run_domain, run_arch, run_workflow) {
+            (true, true, true) => {
+                tokio::try_join!(
+                    self.execute_agent(&DomainModulesDetector, context),
+                    self.execute_agent(&ArchitectureResearcher, context),
+                    self.execute_agent(&WorkflowResearcher, context)
+                )?;
+            }
+            (true, true, false) => {
+                tokio::try_join!(
+                    self.execute_agent(&DomainModulesDetector, context),
+                    self.execute_agent(&ArchitectureResearcher, context)
+                )?;
+            }
+            (true, false, true) => {
+                tokio::try_join!(
+                    self.execute_agent(&DomainModulesDetector, context),
+                    self.execute_agent(&WorkflowResearcher, context)
+                )?;
+            }
+            (false, true, true) => {
+                tokio::try_join!(
+                    self.execute_agent(&ArchitectureResearcher, context),
+                    self.execute_agent(&WorkflowResearcher, context)
+                )?;
+            }
+            (true, false, false) => {
+                self.execute_agent(&DomainModulesDetector, context).await?;
+            }
+            (false, true, false) => {
+                self.execute_agent(&ArchitectureResearcher, context).await?;
+            }
+            (false, false, true) => {
+                self.execute_agent(&WorkflowResearcher, context).await?;
+            }
+            (false, false, false) => {
+                // None of the layer-2 agents are affected.
+            }
+        }
+
+        // Layer 3: micro analysis
+        if is_affected("KeyModulesInsight") {
+            self.execute_agent(&KeyModulesInsight, context).await?;
+        } else {
+            println!("   Skipping KeyModulesInsight (not affected)");
+        }
+
+        // Boundary interface analysis
+        if is_affected("BoundaryAnalyzer") {
+            self.execute_agent(&BoundaryAnalyzer::default(), context)
+                .await?;
+        } else {
+            println!("   Skipping BoundaryAnalyzer (not affected)");
+        }
+
+        // Database overview analysis: only when affected AND database files exist
+        if is_affected("DatabaseOverviewAnalyzer") {
+            if self.has_database_files(context).await {
+                self.execute_agent(&DatabaseOverviewAnalyzer::default(), context)
+                    .await?;
+            } else {
+                println!("   Skipping DatabaseOverviewAnalyzer (no database files found)");
+            }
+        } else {
+            println!("   Skipping DatabaseOverviewAnalyzer (not affected)");
+        }
+
+        println!("✓ Selective research pipeline execution completed");
 
         Ok(())
     }
