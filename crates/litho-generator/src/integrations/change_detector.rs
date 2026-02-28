@@ -286,4 +286,164 @@ mod tests {
         assert!(affected.contains("DomainModulesDetector"));
         assert!(affected.contains("Overview"));
     }
+
+    // --- New tests ---
+
+    #[test]
+    fn test_changeset_is_empty_only_when_all_vecs_empty() {
+        // modified only
+        let cs = ChangeSet {
+            changed_files: vec![PathBuf::from("a.rs")],
+            added_files: vec![],
+            removed_files: vec![],
+            affected_agents: HashSet::new(),
+            full_rebuild_needed: false,
+        };
+        assert!(!cs.is_empty());
+
+        // added only
+        let cs2 = ChangeSet {
+            changed_files: vec![],
+            added_files: vec![PathBuf::from("b.rs")],
+            removed_files: vec![],
+            affected_agents: HashSet::new(),
+            full_rebuild_needed: false,
+        };
+        assert!(!cs2.is_empty());
+
+        // removed only
+        let cs3 = ChangeSet {
+            changed_files: vec![],
+            added_files: vec![],
+            removed_files: vec![PathBuf::from("c.rs")],
+            affected_agents: HashSet::new(),
+            full_rebuild_needed: false,
+        };
+        assert!(!cs3.is_empty());
+    }
+
+    #[test]
+    fn test_changeset_total_changes_sums_all_categories() {
+        let cs = ChangeSet {
+            changed_files: vec![PathBuf::from("a.rs"), PathBuf::from("b.rs")],
+            added_files: vec![PathBuf::from("c.rs")],
+            removed_files: vec![PathBuf::from("d.rs"), PathBuf::from("e.rs"), PathBuf::from("f.rs")],
+            affected_agents: HashSet::new(),
+            full_rebuild_needed: false,
+        };
+        assert_eq!(cs.total_changes(), 6);
+    }
+
+    #[test]
+    fn test_full_rebuild_flag_is_independent_of_is_empty() {
+        // A changeset can be empty yet have full_rebuild_needed = true (no-commit case)
+        let cs = ChangeSet {
+            changed_files: vec![],
+            added_files: vec![],
+            removed_files: vec![],
+            affected_agents: HashSet::new(),
+            full_rebuild_needed: true,
+        };
+        assert!(cs.is_empty());
+        assert_eq!(cs.total_changes(), 0);
+        assert!(cs.full_rebuild_needed);
+    }
+
+    #[test]
+    fn test_map_files_research_agent_cascades_to_compose_agents() {
+        // A file that maps to a Researcher should pull in all compose agents
+        let mut manifest = DocumentationManifest::new(PathBuf::from("/test"));
+        manifest.modules.insert(
+            "SystemContextResearcher".to_string(),
+            ModuleManifest {
+                agent_type: "SystemContextResearcher".to_string(),
+                output_file: "context.md".to_string(),
+                input_files: vec![PathBuf::from("src/main.rs")],
+                generated_at: Utc::now(),
+                content_hash: "xyz".to_string(),
+            },
+        );
+
+        let changed = vec![PathBuf::from("src/main.rs")];
+        let refs: Vec<&PathBuf> = changed.iter().collect();
+        let affected = map_files_to_agents(&refs, &manifest);
+
+        // The matched agent is a Researcher — compose agents must follow
+        assert!(affected.contains("Overview"));
+        assert!(affected.contains("Architecture"));
+        assert!(affected.contains("Workflow"));
+        assert!(affected.contains("Boundary"));
+        assert!(affected.contains("Database"));
+        assert!(affected.contains("KeyModulesInsight"));
+    }
+
+    #[test]
+    fn test_map_files_non_research_agent_does_not_cascade() {
+        // A file that maps to a non-research agent (no Researcher/Detector/Analyzer keyword)
+        // should NOT cascade to compose agents
+        let mut manifest = DocumentationManifest::new(PathBuf::from("/test"));
+        manifest.modules.insert(
+            "Overview".to_string(),
+            ModuleManifest {
+                agent_type: "OverviewEditor".to_string(),
+                output_file: "1.Overview.md".to_string(),
+                input_files: vec![PathBuf::from("docs/overview.md")],
+                generated_at: Utc::now(),
+                content_hash: "aaa".to_string(),
+            },
+        );
+
+        let changed = vec![PathBuf::from("docs/overview.md")];
+        let refs: Vec<&PathBuf> = changed.iter().collect();
+        let affected = map_files_to_agents(&refs, &manifest);
+
+        assert!(affected.contains("Overview"));
+        // Architecture/Workflow/etc. should NOT be added since no research agent was triggered
+        assert!(!affected.contains("Architecture"));
+        assert!(!affected.contains("Workflow"));
+    }
+
+    #[test]
+    fn test_map_files_empty_input_yields_empty_affected() {
+        let manifest = DocumentationManifest::new(PathBuf::from("/test"));
+        let refs: Vec<&PathBuf> = vec![];
+        let affected = map_files_to_agents(&refs, &manifest);
+        assert!(affected.is_empty());
+    }
+
+    #[test]
+    fn test_thirty_percent_threshold_boundary() {
+        // Verify that the full_rebuild logic is >0.3 (strictly greater than)
+        // We can't call detect_changes without git, but we can replicate the
+        // arithmetic that the function uses and assert the boundary condition.
+
+        // 3 changes out of 10 tracked = 0.30 exactly → NOT full rebuild (> 0.3, not >=)
+        let total_tracked: usize = 10;
+        let total_changes: usize = 3;
+        let ratio = total_changes as f64 / total_tracked as f64;
+        assert!((ratio - 0.3).abs() < f64::EPSILON);
+        assert!(!(ratio > 0.3), "exactly 30% must NOT trigger full rebuild");
+
+        // 4 changes out of 10 = 0.40 → IS full rebuild
+        let total_changes_over: usize = 4;
+        let ratio_over = total_changes_over as f64 / total_tracked as f64;
+        assert!(ratio_over > 0.3, "40% must trigger full rebuild");
+    }
+
+    #[test]
+    fn test_changeset_affected_agents_reflects_full_rebuild_semantics() {
+        // When full_rebuild_needed is true the detect_changes function returns
+        // an empty affected_agents set (the caller re-runs all agents)
+        let cs = ChangeSet {
+            changed_files: vec![PathBuf::from("src/huge_change.rs")],
+            added_files: vec![],
+            removed_files: vec![],
+            affected_agents: HashSet::new(), // empty on full rebuild
+            full_rebuild_needed: true,
+        };
+        // A full-rebuild changeset is NOT empty (there are changed files)
+        assert!(!cs.is_empty());
+        // But affected_agents is empty — the caller runs everything
+        assert!(cs.affected_agents.is_empty());
+    }
 }

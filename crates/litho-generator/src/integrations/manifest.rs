@@ -148,4 +148,190 @@ mod tests {
         let hash = blake3::hash(b"hello world").to_hex().to_string();
         assert_eq!(hash.len(), 64); // BLAKE3 produces 256-bit = 64 hex chars
     }
+
+    // --- New tests ---
+
+    #[test]
+    fn test_manifest_new_default_fields() {
+        let manifest = DocumentationManifest::new(PathBuf::from("/some/project"));
+        assert_eq!(manifest.version, 1);
+        assert!(manifest.git_commit.is_none());
+        assert!(manifest.git_branch.is_none());
+        assert_eq!(manifest.project_path, PathBuf::from("/some/project"));
+        assert!(manifest.file_hashes.is_empty());
+        assert!(manifest.modules.is_empty());
+        assert_eq!(manifest.total_generation_time_secs, 0.0);
+    }
+
+    #[test]
+    fn test_record_file_hash_inserts_entry() {
+        let mut manifest = DocumentationManifest::new(PathBuf::from("/p"));
+        manifest.record_file_hash(PathBuf::from("src/lib.rs"), "aabbcc".to_string());
+        assert_eq!(manifest.file_hashes.len(), 1);
+        assert_eq!(
+            manifest.file_hashes.get(&PathBuf::from("src/lib.rs")).unwrap(),
+            "aabbcc"
+        );
+    }
+
+    #[test]
+    fn test_record_file_hash_overwrites_existing() {
+        let mut manifest = DocumentationManifest::new(PathBuf::from("/p"));
+        let path = PathBuf::from("src/lib.rs");
+        manifest.record_file_hash(path.clone(), "first".to_string());
+        manifest.record_file_hash(path.clone(), "second".to_string());
+        // Only the latest value should survive
+        assert_eq!(manifest.file_hashes.len(), 1);
+        assert_eq!(manifest.file_hashes[&path], "second");
+    }
+
+    #[test]
+    fn test_record_module_stores_blake3_hash_of_content() {
+        let mut manifest = DocumentationManifest::new(PathBuf::from("/p"));
+        let content = "# My Doc\nHello world";
+        manifest.record_module(
+            "Research".to_string(),
+            "SystemContextResearcher".to_string(),
+            "research.md".to_string(),
+            vec![],
+            content,
+        );
+
+        let module = manifest.modules.get("Research").unwrap();
+        // Verify the stored hash matches what we compute independently
+        let expected_hash = blake3::hash(content.as_bytes()).to_hex().to_string();
+        assert_eq!(module.content_hash, expected_hash);
+        assert_eq!(module.agent_type, "SystemContextResearcher");
+        assert_eq!(module.output_file, "research.md");
+        assert_eq!(module.content_hash.len(), 64);
+    }
+
+    #[test]
+    fn test_record_module_different_content_yields_different_hash() {
+        let mut manifest = DocumentationManifest::new(PathBuf::from("/p"));
+        manifest.record_module(
+            "A".to_string(),
+            "AgentA".to_string(),
+            "a.md".to_string(),
+            vec![],
+            "content one",
+        );
+        manifest.record_module(
+            "B".to_string(),
+            "AgentB".to_string(),
+            "b.md".to_string(),
+            vec![],
+            "content two",
+        );
+
+        let hash_a = &manifest.modules["A"].content_hash;
+        let hash_b = &manifest.modules["B"].content_hash;
+        assert_ne!(hash_a, hash_b);
+    }
+
+    #[test]
+    fn test_manifest_serialization_preserves_project_path() {
+        let path = PathBuf::from("/my/project/root");
+        let manifest = DocumentationManifest::new(path.clone());
+        let json = serde_json::to_string(&manifest).unwrap();
+        let restored: DocumentationManifest = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.project_path, path);
+    }
+
+    #[test]
+    fn test_manifest_version_is_always_one() {
+        let manifest = DocumentationManifest::new(PathBuf::from("."));
+        let json = serde_json::to_string(&manifest).unwrap();
+        let restored: DocumentationManifest = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.version, 1);
+    }
+
+    #[tokio::test]
+    async fn test_manifest_save_and_load_roundtrip() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let internal_path = dir.path().join(".litho");
+
+        let mut manifest = DocumentationManifest::new(dir.path().to_path_buf());
+        manifest.git_commit = Some("deadbeef".to_string());
+        manifest.git_branch = Some("feature/incremental".to_string());
+        manifest.total_generation_time_secs = 42.5;
+        manifest.record_file_hash(PathBuf::from("src/main.rs"), "cafebabe".to_string());
+        manifest.record_module(
+            "Overview".to_string(),
+            "OverviewEditor".to_string(),
+            "1.Overview.md".to_string(),
+            vec![PathBuf::from("src/main.rs")],
+            "## Overview content",
+        );
+
+        // Save to temp directory
+        manifest.save(&internal_path).await.unwrap();
+
+        // Manifest file must exist
+        assert!(internal_path.join("manifest.json").exists());
+
+        // Load it back
+        let loaded = DocumentationManifest::load(&internal_path).await;
+        assert!(loaded.is_some(), "manifest.load() returned None");
+        let loaded = loaded.unwrap();
+
+        assert_eq!(loaded.version, 1);
+        assert_eq!(loaded.git_commit.as_deref(), Some("deadbeef"));
+        assert_eq!(loaded.git_branch.as_deref(), Some("feature/incremental"));
+        assert!((loaded.total_generation_time_secs - 42.5).abs() < f64::EPSILON);
+        assert_eq!(loaded.file_hashes.len(), 1);
+        assert_eq!(
+            loaded.file_hashes[&PathBuf::from("src/main.rs")],
+            "cafebabe"
+        );
+        assert_eq!(loaded.modules.len(), 1);
+        assert!(loaded.modules.contains_key("Overview"));
+    }
+
+    #[tokio::test]
+    async fn test_manifest_load_returns_none_for_missing_file() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let nonexistent = dir.path().join("no_such_dir");
+        let result = DocumentationManifest::load(&nonexistent).await;
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_hash_file_produces_64_char_hex() {
+        use tempfile::NamedTempFile;
+        use std::io::Write;
+
+        let mut tmp = NamedTempFile::new().unwrap();
+        tmp.write_all(b"test file content for hashing").unwrap();
+        tmp.flush().unwrap();
+
+        let hash = hash_file(tmp.path()).await.unwrap();
+        assert_eq!(hash.len(), 64, "BLAKE3 hex digest must be 64 characters");
+        // All characters must be lowercase hex digits
+        assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[tokio::test]
+    async fn test_hash_file_same_content_same_hash() {
+        use tempfile::NamedTempFile;
+        use std::io::Write;
+
+        let content = b"deterministic content";
+
+        let mut tmp1 = NamedTempFile::new().unwrap();
+        tmp1.write_all(content).unwrap();
+        tmp1.flush().unwrap();
+
+        let mut tmp2 = NamedTempFile::new().unwrap();
+        tmp2.write_all(content).unwrap();
+        tmp2.flush().unwrap();
+
+        let hash1 = hash_file(tmp1.path()).await.unwrap();
+        let hash2 = hash_file(tmp2.path()).await.unwrap();
+        assert_eq!(hash1, hash2, "Same content must yield same BLAKE3 hash");
+    }
 }

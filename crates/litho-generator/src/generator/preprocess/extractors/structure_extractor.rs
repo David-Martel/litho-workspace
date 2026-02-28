@@ -574,3 +574,310 @@ impl StructureExtractor {
         Ok(Vec::new())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        cache::CacheManager,
+        config::Config,
+        generator::context::GeneratorContext,
+        llm::client::LLMClient,
+        memory::Memory,
+    };
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
+
+    /// Build a `StructureExtractor` wired to a default config so we can call
+    /// its private methods via the public `StructureExtractor` API.
+    fn make_extractor() -> StructureExtractor {
+        let config = Config::default();
+        let llm_client = LLMClient::new(config.clone())
+            .expect("LLMClient::new should not fail with default config");
+        let cache_manager = Arc::new(RwLock::new(CacheManager::new(
+            config.cache.clone(),
+            config.target_language.clone(),
+        )));
+        let memory = Arc::new(RwLock::new(Memory::new()));
+        let context = GeneratorContext {
+            llm_client,
+            config,
+            cache_manager,
+            memory,
+        };
+        StructureExtractor::new(context)
+    }
+
+    // Helper: build a bare `FileInfo` without going through the filesystem.
+    fn make_file_info(path: &str, size: u64, extension: Option<&str>) -> FileInfo {
+        FileInfo {
+            path: PathBuf::from(path),
+            name: PathBuf::from(path)
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string(),
+            size,
+            extension: extension.map(|s| s.to_string()),
+            is_core: false,
+            importance_score: 0.0,
+            complexity_score: 0.0,
+            last_modified: None,
+        }
+    }
+
+    fn make_dir_info(name: &str, file_count: usize, subdir_count: usize) -> DirectoryInfo {
+        DirectoryInfo {
+            path: PathBuf::from(name),
+            name: name.to_string(),
+            file_count,
+            subdirectory_count: subdir_count,
+            total_size: 0,
+            importance_score: 0.0,
+        }
+    }
+
+    // ── categorize_file_size ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_categorize_file_size_tiny() {
+        let ex = make_extractor();
+        assert_eq!(ex.categorize_file_size(0), "tiny");
+        assert_eq!(ex.categorize_file_size(512), "tiny");
+        assert_eq!(ex.categorize_file_size(1024), "tiny");
+    }
+
+    #[test]
+    fn test_categorize_file_size_small() {
+        let ex = make_extractor();
+        assert_eq!(ex.categorize_file_size(1025), "small");
+        assert_eq!(ex.categorize_file_size(5000), "small");
+        assert_eq!(ex.categorize_file_size(10240), "small");
+    }
+
+    #[test]
+    fn test_categorize_file_size_medium() {
+        let ex = make_extractor();
+        assert_eq!(ex.categorize_file_size(10241), "medium");
+        assert_eq!(ex.categorize_file_size(50_000), "medium");
+        assert_eq!(ex.categorize_file_size(102400), "medium");
+    }
+
+    #[test]
+    fn test_categorize_file_size_large() {
+        let ex = make_extractor();
+        assert_eq!(ex.categorize_file_size(102401), "large");
+        assert_eq!(ex.categorize_file_size(500_000), "large");
+        assert_eq!(ex.categorize_file_size(1_048_576), "large");
+    }
+
+    #[test]
+    fn test_categorize_file_size_huge() {
+        let ex = make_extractor();
+        assert_eq!(ex.categorize_file_size(1_048_577), "huge");
+        assert_eq!(ex.categorize_file_size(u64::MAX), "huge");
+    }
+
+    // ── calculate_importance_scores / is_core threshold ──────────────────────
+
+    #[test]
+    fn test_is_core_true_when_score_exactly_0_5() {
+        let ex = make_extractor();
+        // A Rust source file in src/ with a "good" size (>1KB, <50KB) and in "main" path
+        // scores: 0.3 (src) + 0.3 (rs ext) + 0.2 (size 1025..50KB) = 0.8 → is_core
+        // We want to test the boundary at exactly 0.5.
+        // Craft a file whose score is exactly 0.5: "config" path bonus (0.1) + "rs" ext (0.3) + size bonus (0.2) = 0.6
+        // Simpler: path with "src" (0.3) + ext "rs" (0.3) and size 0 (no size bonus) = 0.6 → still is_core
+        // To land on exactly 0.5: "config" (0.1) + "rs" (0.3) + size bonus (0.2) = 0.6 — still >= 0.5
+        // Use ext "toml" (0.1) + path "config" (0.1) + size bonus (0.2) = 0.4 → NOT is_core
+        // ext "toml" (0.1) + path "src/config" (0.3 src + 0.1 config = 0.4) + size bonus 0.2 = 0.7 → is_core
+        //
+        // For an exact 0.5 test use ext "rs" (0.3) + no other bonuses except size bonus (0.2) = 0.5
+        let mut files = vec![make_file_info(
+            "standalone.rs",
+            5000, // size >1024 and <50*1024 → +0.2
+            Some("rs"),
+        )];
+        // score = 0.3 (ext rs) + 0.2 (size) = 0.5 → is_core must be true (>= 0.5)
+        let mut dirs = vec![];
+        ex.calculate_importance_scores(&mut files, &mut dirs);
+        assert!(
+            files[0].is_core,
+            "File with score 0.5 must be core (>= 0.5 threshold), score={}",
+            files[0].importance_score
+        );
+        assert!(
+            (files[0].importance_score - 0.5).abs() < 1e-9,
+            "Expected score 0.5, got {}",
+            files[0].importance_score
+        );
+    }
+
+    #[test]
+    fn test_is_core_false_when_score_below_0_5() {
+        let ex = make_extractor();
+        // ext "toml" (0.1) + size 0 (tiny, no bonus) = 0.1 → NOT is_core
+        let mut files = vec![make_file_info("settings.toml", 100, Some("toml"))];
+        let mut dirs = vec![];
+        ex.calculate_importance_scores(&mut files, &mut dirs);
+        assert!(
+            !files[0].is_core,
+            "File with score < 0.5 must NOT be core, score={}",
+            files[0].importance_score
+        );
+    }
+
+    #[test]
+    fn test_tools_path_bonus_pushes_file_to_core() {
+        let ex = make_extractor();
+        // ext "py" (0.3) + size bonus 0 + tools/ path bonus (0.15) = 0.45 → NOT core without src
+        // add size bonus (0.2): 0.3 + 0.15 + 0.2 = 0.65 → is_core
+        let mut files = vec![make_file_info(
+            "tools/runner.py",
+            5000, // >1024, <50KB → +0.2
+            Some("py"),
+        )];
+        let mut dirs = vec![];
+        ex.calculate_importance_scores(&mut files, &mut dirs);
+
+        // tools/ bonus must be applied
+        let score = files[0].importance_score;
+        assert!(
+            score >= 0.5,
+            "File in tools/ with py ext + size bonus should be core, score={}",
+            score
+        );
+        assert!(files[0].is_core, "tools/ file must be is_core, score={}", score);
+    }
+
+    #[test]
+    fn test_tools_path_bonus_not_applied_without_tools_prefix() {
+        let ex = make_extractor();
+        // Same file NOT in tools/
+        let mut files = vec![make_file_info("scripts/runner.py", 5000, Some("py"))];
+        let mut dirs = vec![];
+        ex.calculate_importance_scores(&mut files, &mut dirs);
+        // ext "py" (0.3) + size (0.2) = 0.5 → is_core but NOT because of tools/ bonus
+        // Check the score does not include the +0.15 tools bonus
+        let score = files[0].importance_score;
+        // If tools/ bonus were wrongly applied, score would be 0.65
+        // Without tools/ bonus, score = 0.3 + 0.2 = 0.5
+        assert!(
+            (score - 0.5).abs() < 1e-9,
+            "Non-tools/ script.py should score exactly 0.5, got {}",
+            score
+        );
+    }
+
+    #[test]
+    fn test_importance_score_capped_at_1_0() {
+        let ex = make_extractor();
+        // src/main.rs with size bonus: 0.3(src) + 0.2(main) + 0.3(rs) + 0.2(size) = 1.0 exactly
+        // Add database path: would push it past 1.0 without capping
+        let mut files = vec![make_file_info(
+            "src/main/database/schema.rs",
+            5000,
+            Some("rs"),
+        )];
+        let mut dirs = vec![];
+        ex.calculate_importance_scores(&mut files, &mut dirs);
+        assert!(
+            files[0].importance_score <= 1.0,
+            "Score must be capped at 1.0, got {}",
+            files[0].importance_score
+        );
+    }
+
+    #[test]
+    fn test_directory_importance_src_or_lib() {
+        let ex = make_extractor();
+        let mut files = vec![];
+        let mut dirs = vec![make_dir_info("src", 0, 0)];
+        ex.calculate_importance_scores(&mut files, &mut dirs);
+        assert!(
+            dirs[0].importance_score >= 0.4,
+            "src directory must score >= 0.4, got {}",
+            dirs[0].importance_score
+        );
+    }
+
+    #[test]
+    fn test_directory_importance_score_capped_at_1_0() {
+        let ex = make_extractor();
+        // "src" (0.4) + name contains "core" (0.3) + file_count>5 (0.2) + subdir_count>2 (0.1) = 1.0
+        let mut files = vec![];
+        let mut dirs = vec![make_dir_info("src-core", 10, 5)];
+        ex.calculate_importance_scores(&mut files, &mut dirs);
+        assert!(
+            dirs[0].importance_score <= 1.0,
+            "Dir score must be capped at 1.0, got {}",
+            dirs[0].importance_score
+        );
+    }
+
+    // ── should_ignore_directory (via default config) ──────────────────────────
+
+    #[test]
+    fn test_should_ignore_excluded_dir_target() {
+        let ex = make_extractor();
+        // "target" is in the default excluded_dirs list
+        assert!(
+            ex.should_ignore_directory("target", "target"),
+            "target/ must be ignored by default"
+        );
+    }
+
+    #[test]
+    fn test_should_ignore_hidden_directory_by_default() {
+        let ex = make_extractor();
+        // include_hidden = false by default
+        assert!(
+            ex.should_ignore_directory(".git", ".git"),
+            ".git must be ignored (hidden)"
+        );
+        assert!(
+            ex.should_ignore_directory(".mydir", ".mydir"),
+            "hidden dirs must be ignored"
+        );
+    }
+
+    #[test]
+    fn test_should_not_ignore_normal_source_directory() {
+        let ex = make_extractor();
+        assert!(
+            !ex.should_ignore_directory("src", "src"),
+            "src/ must not be ignored"
+        );
+        assert!(
+            !ex.should_ignore_directory("lib", "lib"),
+            "lib/ must not be ignored"
+        );
+    }
+
+    #[test]
+    fn test_should_ignore_multi_component_excluded_path() {
+        // Simulate a config that excludes a sub-path (don't need a default extractor here)
+        let mut config = Config::default();
+        config.excluded_dirs.push("facts/reference_templates".to_string());
+
+        let llm_client = LLMClient::new(config.clone()).unwrap();
+        let cache_manager = Arc::new(RwLock::new(CacheManager::new(
+            config.cache.clone(),
+            config.target_language.clone(),
+        )));
+        let memory = Arc::new(RwLock::new(Memory::new()));
+        let context = GeneratorContext { llm_client, config, cache_manager, memory };
+        let ex2 = StructureExtractor::new(context);
+
+        // The leaf name is "reference_templates", the relative path is the multi-component pattern
+        assert!(
+            ex2.should_ignore_directory("reference_templates", "facts/reference_templates"),
+            "Multi-component excluded path must be ignored"
+        );
+        // The leaf name alone should NOT be ignored at a different path
+        assert!(
+            !ex2.should_ignore_directory("reference_templates", "other/reference_templates"),
+            "Same leaf at different path must NOT be ignored"
+        );
+    }
+}
