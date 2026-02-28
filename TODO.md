@@ -1,10 +1,10 @@
 # Litho Workspace TODOs
 
-Last updated: 2026-02-27 (post-Session 49: rig-core removal + LTO re-enabled)
+Last updated: 2026-02-27 (post-Session 50: smart file batching)
 
 ## P0: Testing — Expanded (489 tests passing)
 
-The codebase now has **489 tests across litho-core, litho-extract, litho-generator**.
+The codebase now has **476 tests across litho-core, litho-extract, litho-generator** (466 litho-generator + litho-core + litho-extract).
 Previous count of "12" was incorrect — litho-generator alone has 456+ inline tests.
 Remaining gaps:
 
@@ -39,7 +39,7 @@ Pipeline evaluation on david-t-martel (253 files, 44 source, 12 markdown):
 
 - [x] **Token-aware preprocessing** — `token_compress.rs` strips comments + collapses whitespace (~30-40% reduction, 22 tests)
 - [x] **max_parallels raised 3→8** — immediate ~65% preprocessing speedup potential
-- [ ] **Smart file batching** — group small files into single LLM calls (currently 1 call per file regardless of size)
+- [x] **Smart file batching** — `code_analyze.rs` groups small files (<3KB source) into batched LLM calls (10 new tests, ~60-80% fewer LLM calls for small files)
 - [ ] **Pre-computation cache warming** — hash source files before LLM calls, skip identical files from previous runs
 - [ ] **Streaming preprocessing** — start research phase as soon as first files complete (don't wait for all)
 
@@ -134,6 +134,15 @@ but needs real-world hardening.
 ---
 
 ## Completed
+
+### Session 50 — Smart file batching (2026-02-27)
+- [x] **Smart file batching** in `code_analyze.rs` — files <3KB source grouped into batched LLM calls
+- [x] `BatchedCodeInsights` wrapper type for multi-file extraction
+- [x] `group_into_batches()` with 50KB source byte budget per batch
+- [x] Static analysis runs upfront for all files, then partitions batch vs individual
+- [x] Fallback: if LLM returns fewer results than batch size, fills with static analysis
+- [x] 10 new unit tests for batching logic (group_into_batches, threshold partitioning)
+- [x] 466 litho-generator tests pass, 0 regressions
 
 ### Session 49 — rig-core removal + LTO (2026-02-27)
 - [x] **rig-core 0.23 fully removed** — replaced with direct reqwest HTTP clients
