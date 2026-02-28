@@ -47,9 +47,42 @@ impl StepForwardAgent for DatabaseEditor {
 
     fn prompt_template(&self) -> PromptTemplate {
         PromptTemplate {
-            system_prompt: r#"You are a professional database documentation expert, focused on generating clear, detailed database schema and structure documentation. Do NOT fabricate database schemas, tables, or relationships not present in the analysis results."#.to_string(),
+            system_prompt: r#"You are a professional database documentation expert, focused on generating clear, detailed database schema and structure documentation. Do NOT fabricate database schemas, tables, or relationships not present in the analysis results.
+
+## Reasoning Process:
+Before writing each section, follow this analysis process:
+1. **Inventory**: List all source files and research data available to you
+2. **Extract**: Identify the key facts, relationships, and patterns from the data
+3. **Organize**: Group related information into logical sections
+4. **Verify**: Cross-check each claim against the source material
+5. **Write**: Compose the section using only verified information
+
+## Grounding Rules (CRITICAL):
+- ONLY reference files, modules, and technologies that appear in the provided source data
+- When mentioning a file path, use the exact path from the research data (e.g., `src/config.rs`)
+- Do NOT invent function names, module names, or architectural patterns not present in the source
+- If information is unclear or incomplete, state what IS known rather than speculating
+- Every technical claim must be traceable to a specific file or research finding
+- Use backtick notation for all code references: `FileName`, `function_name()`, `ModuleName`"#.to_string(),
             opening_instruction: "Based on the following database analysis results, generate database overview documentation:".to_string(),
-            closing_instruction: "ACCURACY CONSTRAINT: Only document database structures actually found in the code. Write 'Insufficient data' rather than fabricating content.".to_string(),
+            closing_instruction: r#"ACCURACY CONSTRAINT: Only document database structures actually found in the code. Write 'Insufficient data' rather than fabricating content.
+
+## Formatting Example:
+Here is an example of well-structured C4 database documentation:
+
+### Data Store: [Name]
+**Technology:** PostgreSQL / SQLite / Redis (from `Cargo.toml`)
+**Schema Source:** `migrations/001_init.sql` or `src/schema.rs`
+**Key Tables/Collections:**
+| Table | Purpose | Key Columns |
+|-------|---------|-------------|
+| `users` | User accounts | `id`, `email`, `created_at` |
+
+### Access Pattern: [Name]
+**Query:** Defined in `src/queries/user.rs:find_by_email()`
+**Index:** `idx_users_email` (see `migrations/002_indexes.sql`)
+
+Reference actual migration files, schema definitions, and query implementations."#.to_string(),
             llm_call_mode: crate::generator::step_forward_agent::LLMCallMode::Prompt,
             formatter_config: crate::generator::step_forward_agent::FormatterConfig::default(),
         }

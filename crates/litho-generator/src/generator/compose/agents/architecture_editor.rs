@@ -2,7 +2,8 @@ use crate::generator::compose::memory::MemoryScope;
 use crate::generator::compose::types::AgentType;
 use crate::generator::research::types::AgentType as ResearchAgentType;
 use crate::generator::step_forward_agent::{
-    AgentDataConfig, DataSource, FormatterConfig, LLMCallMode, PromptTemplate, StepForwardAgent,
+    AgentDataConfig, DataSource, FormatterConfig, LLMCallMode, ModelPreference, PromptTemplate,
+    StepForwardAgent,
 };
 
 #[derive(Default)]
@@ -21,6 +22,10 @@ impl StepForwardAgent for ArchitectureEditor {
 
     fn should_include_timestamp(&self) -> bool {
         true
+    }
+
+    fn model_preference(&self) -> ModelPreference {
+        ModelPreference::Powerful
     }
 
     fn data_config(&self) -> AgentDataConfig {
@@ -61,6 +66,14 @@ If available:
 - Reference documented ADRs (Architecture Decision Records) when relevant
 - Validate that code structure aligns with documented architecture patterns
 
+## Reasoning Process:
+Before writing each section, follow this analysis process:
+1. **Inventory**: List all source files and research data available to you
+2. **Extract**: Identify the key facts, relationships, and patterns from the data
+3. **Organize**: Group related information into logical sections
+4. **Verify**: Cross-check each claim against the source material
+5. **Write**: Compose the section using only verified information
+
 ## C4 Architecture Documentation Standards:
 You need to generate complete architecture documentation conforming to the C4 model Container level, including:
 - **Architecture Overview**: Explain overall architecture design, architecture diagrams, and core workflows
@@ -77,6 +90,14 @@ You need to generate complete architecture documentation conforming to the C4 mo
 4. **Readability**: Clear structure with rich narrative language that is easy to understand
 5. **Practicality**: Provide valuable architecture insights and technical guidance
 6. **Consistency**: Maintain alignment with external documentation when available
+
+## Grounding Rules (CRITICAL):
+- ONLY reference files, modules, and technologies that appear in the provided source data
+- When mentioning a file path, use the exact path from the research data (e.g., `src/config.rs`)
+- Do NOT invent function names, module names, or architectural patterns not present in the source
+- If information is unclear or incomplete, state what IS known rather than speculating
+- Every technical claim must be traceable to a specific file or research finding
+- Use backtick notation for all code references: `FileName`, `function_name()`, `ModuleName`
 "#.to_string(),
 
             opening_instruction: r#"Based on the following research materials, write a complete, in-depth, and detailed C4 architecture document. Please carefully analyze all provided research reports and extract key architectural information:
@@ -175,6 +196,23 @@ Please generate a high-quality C4 architecture document, ensuring:
 - **Knowledge Transfer**: Facilitate quick understanding of system architecture for new team members
 
 ACCURACY CONSTRAINT: Do NOT mention technologies, frameworks, or architectural patterns not evidenced in the research materials. If data is insufficient for a section, write "Insufficient data available" rather than fabricating content. Every technology claim must trace to the Verified Technology Stack or code insights.
+
+## Formatting Example:
+Here is an example of well-structured C4 Container documentation:
+
+### Container: [Name]
+**Purpose:** [What this container does]
+**Technology:** [Primary tech stack] (from `Cargo.toml`)
+**Key Files:**
+- `src/main.rs` — Entry point and CLI argument parsing
+- `src/lib.rs` — Public API surface
+
+### Data Flow
+1. User input enters via `src/cli.rs:parse_args()`
+2. Request is routed through `src/router.rs:dispatch()`
+3. Result is formatted by `src/output.rs:render()`
+
+Use this level of specificity — reference actual files and functions from the source data.
 
 Please generate a high-quality architecture document that meets the above requirements based on the research materials."#.to_string(),
 

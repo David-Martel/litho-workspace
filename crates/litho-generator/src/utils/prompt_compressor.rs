@@ -175,6 +175,7 @@ impl PromptCompressor {
             prompt_user: compression_prompt,
             cache_scope: format!("prompt_compression_{}", content_type),
             log_tag: format!("Context-Compression-{}", content_type),
+            model_preference: crate::generator::step_forward_agent::ModelPreference::Auto,
         };
 
         // Check if content is already too large for compression

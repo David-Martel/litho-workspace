@@ -4,7 +4,8 @@ use crate::generator::outlet::DocTree;
 use crate::generator::research::memory::MemoryRetriever;
 use crate::generator::research::types::{AgentType as ResearchAgentType, KeyModuleReport};
 use crate::generator::step_forward_agent::{
-    AgentDataConfig, DataSource, FormatterConfig, LLMCallMode, PromptTemplate, StepForwardAgent,
+    AgentDataConfig, DataSource, FormatterConfig, LLMCallMode, ModelPreference, PromptTemplate,
+    StepForwardAgent,
 };
 use crate::utils::threads::do_parallel_with_limit;
 use anyhow::Result;
@@ -99,6 +100,10 @@ impl StepForwardAgent for KeyModuleInsightEditor {
 
     fn should_include_timestamp(&self) -> bool {
         true
+    }
+
+    fn model_preference(&self) -> ModelPreference {
+        ModelPreference::Powerful
     }
 
     fn data_config(&self) -> AgentDataConfig {

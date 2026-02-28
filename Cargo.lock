@@ -5443,6 +5443,7 @@ dependencies = [
  "chrono",
  "clap",
  "comrak",
+ "criterion",
  "futures",
  "glob",
  "litho-core",

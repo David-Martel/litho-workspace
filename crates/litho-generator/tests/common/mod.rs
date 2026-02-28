@@ -3,7 +3,9 @@
 //! All helpers are pure in-memory construction — no running Ollama instance
 //! or network connection is required.
 
-use litho_generator::config::{CacheConfig, Config, LLMConfig, LLMProvider};
+use litho_generator::config::{
+    CacheConfig, Config, LLMConfig, LLMProvider, PreprocessingConfig, QualityConfig, ReviewConfig,
+};
 use std::path::PathBuf;
 
 /// Return a minimal [`LLMConfig`] suitable for unit tests.
@@ -61,5 +63,8 @@ pub fn test_config() -> Config {
         knowledge: Default::default(),
         qmd: Default::default(),
         output_format: "md".to_string(),
+        quality: QualityConfig::default(),
+        preprocessing: PreprocessingConfig::default(),
+        review: ReviewConfig::default(),
     }
 }

@@ -60,6 +60,14 @@ If available:
 - Validate implementation against documented API contracts
 - Highlight any undocumented endpoints or changes
 
+## Reasoning Process:
+Before writing each section, follow this analysis process:
+1. **Inventory**: List all source files and research data available to you
+2. **Extract**: Identify the key facts, relationships, and patterns from the data
+3. **Organize**: Group related information into logical sections
+4. **Verify**: Cross-check each claim against the source material
+5. **Write**: Compose the section using only verified information
+
 ## Documentation Requirements
 1. **Complete Interfaces**: Describe all external interfaces in detail
 2. **Clear Parameters**: Each parameter must have a clear explanation
@@ -71,7 +79,15 @@ If available:
 - Use Markdown format
 - Include appropriate heading levels
 - Use code blocks to show examples
-- Ensure logical and readable content"#.to_string(),
+- Ensure logical and readable content
+
+## Grounding Rules (CRITICAL):
+- ONLY reference files, modules, and technologies that appear in the provided source data
+- When mentioning a file path, use the exact path from the research data (e.g., `src/config.rs`)
+- Do NOT invent function names, module names, or architectural patterns not present in the source
+- If information is unclear or incomplete, state what IS known rather than speculating
+- Every technical claim must be traceable to a specific file or research finding
+- Use backtick notation for all code references: `FileName`, `function_name()`, `ModuleName`"#.to_string(),
 
             opening_instruction: "Based on the following boundary analysis results, generate system boundary interface documentation:".to_string(),
 
@@ -84,7 +100,21 @@ If available:
 - Ensure clear document structure and complete content
 - Validate against external API documentation if available
 
-ACCURACY CONSTRAINT: Do NOT describe interfaces or endpoints not evidenced in the code. Do NOT mention technologies or protocols not present in the research materials. If data is insufficient for a section, write "Insufficient data available" rather than fabricating content."#
+ACCURACY CONSTRAINT: Do NOT describe interfaces or endpoints not evidenced in the code. Do NOT mention technologies or protocols not present in the research materials. If data is insufficient for a section, write "Insufficient data available" rather than fabricating content.
+
+## Formatting Example:
+Here is an example of well-structured C4 boundary documentation:
+
+### External Interface: [Name]
+**Protocol:** HTTP/gRPC/CLI (from `src/api/mod.rs`)
+**Endpoint:** `POST /api/v1/resource` (see `src/routes.rs:34`)
+**Authentication:** [Method] (see `src/auth/mod.rs`)
+
+### Internal Boundary: [Module A] ↔ [Module B]
+**Interface:** `trait ProcessorTrait` defined in `src/traits.rs:12`
+**Data Contract:** `ProcessRequest` struct (see `src/types.rs:45`)
+
+Document boundaries with specific file references and interface signatures."#
                 .to_string(),
 
             llm_call_mode: crate::generator::step_forward_agent::LLMCallMode::Prompt,

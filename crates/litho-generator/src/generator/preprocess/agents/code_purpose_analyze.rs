@@ -59,6 +59,7 @@ impl CodePurposeEnhancer {
                 prompt_user,
                 cache_scope: "ai_code_purpose".to_string(),
                 log_tag: file_name.to_string(),
+                model_preference: crate::generator::step_forward_agent::ModelPreference::Auto,
             },
         )
         .await;

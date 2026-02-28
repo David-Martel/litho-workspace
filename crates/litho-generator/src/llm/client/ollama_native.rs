@@ -134,10 +134,12 @@ impl OllamaNativeClient {
     fn build_options(&self, config: &LLMConfig) -> ollama_rs::models::ModelOptions {
         let mut opts = ollama_rs::models::ModelOptions::default();
 
-        // Context window – the most critical parameter.
-        // Configurable via `context_window` in litho.toml [llm] section.
-        // Gemma3 12B-IT-QAT supports up to 131072; default is 32768.
-        opts = opts.num_ctx(config.context_window as u64);
+        // Context window – auto-detected from the model name when the user has
+        // not explicitly overridden `context_window` in litho.toml.
+        // Known large-context models (Gemma 3, Qwen 2.5, Llama 3, …) default to
+        // 131 072; unknown models fall back to 32 768.
+        let resolved_ctx = config.resolve_context_window();
+        opts = opts.num_ctx(resolved_ctx as u64);
 
         // Generation limit.
         opts = opts.num_predict(config.max_tokens as i32);

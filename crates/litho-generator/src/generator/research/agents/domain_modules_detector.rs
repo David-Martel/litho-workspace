@@ -5,7 +5,8 @@ use crate::generator::research::types::{AgentType, DomainModulesReport};
 use crate::generator::{
     context::GeneratorContext,
     step_forward_agent::{
-        AgentDataConfig, DataSource, FormatterConfig, LLMCallMode, PromptTemplate, StepForwardAgent,
+        AgentDataConfig, DataSource, FormatterConfig, LLMCallMode, ModelPreference, PromptTemplate,
+        StepForwardAgent,
     },
 };
 
@@ -26,6 +27,10 @@ impl StepForwardAgent for DomainModulesDetector {
 
     fn memory_scope_key(&self) -> String {
         MemoryScope::STUDIES_RESEARCH.to_string()
+    }
+
+    fn model_preference(&self) -> ModelPreference {
+        ModelPreference::Efficient
     }
 
     fn data_config(&self) -> AgentDataConfig {

@@ -1,7 +1,8 @@
 use crate::generator::research::memory::MemoryScope;
 use crate::generator::research::types::{AgentType, SystemContextReport};
 use crate::generator::step_forward_agent::{
-    AgentDataConfig, DataSource, FormatterConfig, LLMCallMode, PromptTemplate, StepForwardAgent,
+    AgentDataConfig, DataSource, FormatterConfig, LLMCallMode, ModelPreference, PromptTemplate,
+    StepForwardAgent,
 };
 
 /// Project Objective Researcher - Responsible for analyzing the project's core objectives, functional value, and system boundaries
@@ -21,6 +22,10 @@ impl StepForwardAgent for SystemContextResearcher {
 
     fn memory_scope_key(&self) -> String {
         MemoryScope::STUDIES_RESEARCH.to_string()
+    }
+
+    fn model_preference(&self) -> ModelPreference {
+        ModelPreference::Efficient
     }
 
     fn data_config(&self) -> AgentDataConfig {

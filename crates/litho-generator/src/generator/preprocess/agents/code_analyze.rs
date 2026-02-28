@@ -20,18 +20,6 @@ use std::pin::Pin;
 /// Cache category for content-hash keyed preprocessing results.
 const CONTENT_HASH_CACHE_CATEGORY: &str = "content_hash_insights";
 
-/// Files with source_summary shorter than this (bytes) are eligible for batching.
-const BATCH_SOURCE_THRESHOLD: usize = 3000;
-
-/// Maximum total source bytes in a single batch prompt.
-/// Conservative target: ~50K chars ≈ 12.5K tokens, leaving room for prompt
-/// overhead and LLM response within a 32K context window.
-const MAX_BATCH_SOURCE_BYTES: usize = 50_000;
-
-/// Minimum number of batchable files required to activate batching.
-/// If fewer files qualify, they are processed individually (no batching overhead).
-const MIN_BATCH_FILES: usize = 3;
-
 /// Wrapper type for LLM batch extraction of multiple CodeInsights.
 #[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 struct BatchedCodeInsights {
@@ -64,6 +52,9 @@ impl CodeAnalyze {
         project_structure: &ProjectStructure,
     ) -> Result<Vec<CodeInsight>> {
         let max_parallels = context.config.llm.max_parallels;
+        let batch_source_threshold = context.config.preprocessing.batch_source_threshold_bytes;
+        let max_batch_source_bytes = context.config.preprocessing.batch_source_budget_bytes;
+        let min_batch_files = context.config.preprocessing.min_batch_files;
 
         // Phase 0: Content-hash cache warming — skip files whose source hasn't changed
         let mut cached_insights: Vec<CodeInsight> = Vec::new();
@@ -114,7 +105,7 @@ impl CodeAnalyze {
         let mut individual: Vec<(CodeDossier, CodeInsight)> = Vec::new();
 
         for (code, analysis) in static_analyses {
-            if code.source_summary.len() < BATCH_SOURCE_THRESHOLD {
+            if code.source_summary.len() < batch_source_threshold {
                 batch_eligible.push((code, analysis));
             } else {
                 individual.push((code, analysis));
@@ -122,7 +113,7 @@ impl CodeAnalyze {
         }
 
         // Only batch if enough files qualify; otherwise process all individually
-        if batch_eligible.len() < MIN_BATCH_FILES {
+        if batch_eligible.len() < min_batch_files {
             individual.extend(batch_eligible);
             batch_eligible = Vec::new();
         }
@@ -131,7 +122,7 @@ impl CodeAnalyze {
         let individual_count = individual.len();
 
         // Phase 3: Group small files into batches
-        let batches = Self::group_into_batches(batch_eligible);
+        let batches = Self::group_into_batches(batch_eligible, max_batch_source_bytes);
         let num_batches = batches.len();
 
         if batch_count > 0 {
@@ -256,6 +247,7 @@ impl CodeAnalyze {
     /// Group batch-eligible files into sized batches based on source byte budget.
     fn group_into_batches(
         files: Vec<(CodeDossier, CodeInsight)>,
+        max_batch_source_bytes: usize,
     ) -> Vec<Vec<(CodeDossier, CodeInsight)>> {
         let mut batches = Vec::new();
         let mut current_batch = Vec::new();
@@ -265,7 +257,7 @@ impl CodeAnalyze {
             let source_bytes = item.0.source_summary.len();
 
             // If adding this file would exceed budget, start a new batch
-            if !current_batch.is_empty() && current_bytes + source_bytes > MAX_BATCH_SOURCE_BYTES {
+            if !current_batch.is_empty() && current_bytes + source_bytes > max_batch_source_bytes {
                 batches.push(std::mem::take(&mut current_batch));
                 current_bytes = 0;
             }
@@ -298,6 +290,7 @@ impl CodeAnalyze {
             prompt_user,
             cache_scope: "ai_code_insight".to_string(),
             log_tag: analysis.code_dossier.name.to_string(),
+            model_preference: crate::generator::step_forward_agent::ModelPreference::Auto,
         }
     }
 
@@ -383,6 +376,7 @@ impl CodeAnalyze {
             prompt_user,
             cache_scope: "ai_code_insight_batch".to_string(),
             log_tag,
+            model_preference: crate::generator::step_forward_agent::ModelPreference::Auto,
         })
     }
 }
@@ -494,20 +488,20 @@ mod tests {
             make_pair("b", 1000),
             make_pair("c", 1000),
         ];
-        let batches = CodeAnalyze::group_into_batches(files);
+        let batches = CodeAnalyze::group_into_batches(files, 50_000);
         assert_eq!(batches.len(), 1);
         assert_eq!(batches[0].len(), 3);
     }
 
     #[test]
     fn test_group_into_batches_multiple_batches() {
-        // Each file is 30K, MAX_BATCH_SOURCE_BYTES is 50K, so max 1 per batch after first
+        // Each file is 30K, budget is 50K, so max 1 per batch after first
         let files = vec![
             make_pair("a", 30_000),
             make_pair("b", 30_000),
             make_pair("c", 30_000),
         ];
-        let batches = CodeAnalyze::group_into_batches(files);
+        let batches = CodeAnalyze::group_into_batches(files, 50_000);
         // First batch: a (30K), can't add b (60K > 50K)
         // Second batch: b (30K), can't add c (60K > 50K)
         // Third batch: c (30K)
@@ -517,7 +511,7 @@ mod tests {
     #[test]
     fn test_group_into_batches_empty() {
         let files: Vec<(CodeDossier, CodeInsight)> = vec![];
-        let batches = CodeAnalyze::group_into_batches(files);
+        let batches = CodeAnalyze::group_into_batches(files, 50_000);
         assert!(batches.is_empty());
     }
 
@@ -525,19 +519,21 @@ mod tests {
     fn test_group_into_batches_fits_exactly() {
         // Two files that together exactly reach the limit
         let files = vec![make_pair("a", 25_000), make_pair("b", 25_000)];
-        let batches = CodeAnalyze::group_into_batches(files);
+        let batches = CodeAnalyze::group_into_batches(files, 50_000);
         assert_eq!(batches.len(), 1);
         assert_eq!(batches[0].len(), 2);
     }
 
     #[test]
     fn test_batch_threshold_partitioning() {
+        use crate::config::PreprocessingConfig;
+        let pc = PreprocessingConfig::default();
         // Files below threshold should be batch-eligible
-        let small = make_dossier("small", BATCH_SOURCE_THRESHOLD - 1);
-        let large = make_dossier("large", BATCH_SOURCE_THRESHOLD);
+        let small = make_dossier("small", pc.batch_source_threshold_bytes - 1);
+        let large = make_dossier("large", pc.batch_source_threshold_bytes);
 
-        assert!(small.source_summary.len() < BATCH_SOURCE_THRESHOLD);
-        assert!(large.source_summary.len() >= BATCH_SOURCE_THRESHOLD);
+        assert!(small.source_summary.len() < pc.batch_source_threshold_bytes);
+        assert!(large.source_summary.len() >= pc.batch_source_threshold_bytes);
     }
 
     #[test]

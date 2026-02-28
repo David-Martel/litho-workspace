@@ -138,6 +138,18 @@ pub struct Config {
     /// Output format: "md" (default) or "html"
     #[serde(default = "default_output_format")]
     pub output_format: String,
+
+    /// Quality scoring and validation configuration
+    #[serde(default)]
+    pub quality: QualityConfig,
+
+    /// Preprocessing pipeline configuration
+    #[serde(default)]
+    pub preprocessing: PreprocessingConfig,
+
+    /// Secondary review agent configuration
+    #[serde(default)]
+    pub review: ReviewConfig,
 }
 
 fn default_output_format() -> String {
@@ -204,6 +216,227 @@ pub struct LLMConfig {
 
 fn default_context_window() -> u32 {
     32768
+}
+
+/// Look up the default context window for a model name pattern.
+///
+/// Returns the known maximum context window for popular models.
+/// Falls back to 32768 for unknown models.
+///
+/// # Examples
+///
+/// ```
+/// # use litho_generator::config::model_default_context_window;
+/// assert_eq!(model_default_context_window("gemma3:12b"), 131_072);
+/// assert_eq!(model_default_context_window("qwen2.5-coder:7b"), 131_072);
+/// assert_eq!(model_default_context_window("mistral:7b"), 32_768);
+/// assert_eq!(model_default_context_window("some-unknown-model"), 32_768);
+/// ```
+pub fn model_default_context_window(model: &str) -> u32 {
+    // Gemma 3 / Gemma 2 family — 128K context
+    if model.starts_with("gemma3") || model.starts_with("gemma-3") || model.starts_with("gemma2") {
+        return 131_072;
+    }
+    // Qwen 2.5 / Qwen 3 family — 128K context
+    if model.starts_with("qwen2.5") || model.starts_with("qwen-2.5") || model.starts_with("qwen3") {
+        return 131_072;
+    }
+    // Llama 3.x family — 128K context
+    if model.starts_with("llama3") || model.starts_with("llama-3") {
+        return 131_072;
+    }
+    // DeepSeek Coder — 128K context
+    if model.starts_with("deepseek") {
+        return 131_072;
+    }
+    // Phi-3 / Phi-4 family — 128K context
+    if model.starts_with("phi") {
+        return 131_072;
+    }
+    // CodeLlama — 16K context
+    if model.starts_with("codellama") {
+        return 16_384;
+    }
+    // Mistral / Mixtral family — 32K context
+    if model.starts_with("mistral") || model.starts_with("mixtral") {
+        return 32_768;
+    }
+    // Default fallback
+    default_context_window()
+}
+
+impl LLMConfig {
+    /// Resolve the effective context window size.
+    ///
+    /// If the user explicitly set `context_window` to a non-default value, that
+    /// value is used as-is.  Otherwise the context window is auto-detected from
+    /// `model_efficient`'s name so that known large-context models (e.g. Gemma 3,
+    /// Qwen 2.5, Llama 3) automatically get their full 128K window without
+    /// requiring a manual entry in `litho.toml`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use litho_generator::config::LLMConfig;
+    ///
+    /// let mut cfg = LLMConfig::default();
+    /// cfg.model_efficient = "gemma3:12b".to_string();
+    /// // Default context_window (32768) triggers auto-detection.
+    /// assert_eq!(cfg.resolve_context_window(), 131_072);
+    ///
+    /// cfg.context_window = 65_536; // Explicit user override.
+    /// assert_eq!(cfg.resolve_context_window(), 65_536);
+    /// ```
+    pub fn resolve_context_window(&self) -> u32 {
+        // Respect an explicit non-default value set by the user.
+        if self.context_window != default_context_window() {
+            return self.context_window;
+        }
+        // Auto-detect from model name.
+        let model = self.model_efficient.to_lowercase();
+        model_default_context_window(&model)
+    }
+}
+
+/// Quality scoring configuration for content validation.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(default)]
+pub struct QualityConfig {
+    /// Minimum overall quality score (0.0-1.0) to pass validation.
+    /// Set to 0.0 to disable the quality gate.
+    pub min_score: f64,
+
+    /// Weight for completeness dimension (section coverage + symbol coverage).
+    pub completeness_weight: f64,
+
+    /// Weight for accuracy dimension (file reference validation).
+    pub accuracy_weight: f64,
+
+    /// Weight for freshness dimension (stale path detection).
+    pub freshness_weight: f64,
+
+    /// Weight for grounding dimension (tech stack verification).
+    pub grounding_weight: f64,
+
+    /// Weight for coherence dimension (terminology consistency).
+    pub coherence_weight: f64,
+
+    /// Weight for helpfulness dimension (LLM-as-judge, optional).
+    /// Only applied when an Ollama provider is configured; otherwise the
+    /// helpfulness score defaults to 1.0 and this weight still participates
+    /// in the weighted average.
+    pub helpfulness_weight: f64,
+}
+
+impl Default for QualityConfig {
+    fn default() -> Self {
+        Self {
+            min_score: 0.0,
+            completeness_weight: 0.20,
+            accuracy_weight: 0.20,
+            freshness_weight: 0.10,
+            grounding_weight: 0.20,
+            coherence_weight: 0.15,
+            helpfulness_weight: 0.15,
+        }
+    }
+}
+
+impl QualityConfig {
+    /// Validate that weights sum to approximately 1.0 and are non-negative.
+    #[allow(dead_code)]
+    pub fn validate(&self) -> Result<(), String> {
+        let weights = [
+            self.completeness_weight,
+            self.accuracy_weight,
+            self.freshness_weight,
+            self.grounding_weight,
+            self.coherence_weight,
+            self.helpfulness_weight,
+        ];
+
+        for (i, w) in weights.iter().enumerate() {
+            if *w < 0.0 || *w > 1.0 {
+                return Err(format!(
+                    "Quality weight {} is out of range [0.0, 1.0]: {}",
+                    i, w
+                ));
+            }
+        }
+
+        let sum: f64 = weights.iter().sum();
+        if (sum - 1.0).abs() > 0.01 {
+            return Err(format!("Quality weights must sum to ~1.0, got {}", sum));
+        }
+
+        if self.min_score < 0.0 || self.min_score > 1.0 {
+            return Err(format!(
+                "min_score must be in [0.0, 1.0], got {}",
+                self.min_score
+            ));
+        }
+
+        Ok(())
+    }
+}
+
+/// Secondary review agent configuration.
+///
+/// When enabled, the ReviewAgent runs after all compose agents complete and
+/// evaluates each documentation section for grounding, structural consistency,
+/// and completeness.
+///
+/// # Examples
+///
+/// ```toml
+/// [review]
+/// enabled = true
+/// min_review_score = 0.7
+/// max_retries = 2
+/// ```
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(default)]
+pub struct ReviewConfig {
+    /// Enable the secondary review pass after compose.
+    pub enabled: bool,
+    /// Minimum review score (0.0-1.0) to accept without flagging.
+    pub min_review_score: f64,
+    /// Maximum re-generation attempts per section (reserved for future use).
+    pub max_retries: u32,
+}
+
+impl Default for ReviewConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            min_review_score: 0.6,
+            max_retries: 1,
+        }
+    }
+}
+
+/// Preprocessing pipeline configuration.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(default)]
+pub struct PreprocessingConfig {
+    /// Files with source shorter than this (bytes) are eligible for batching.
+    pub batch_source_threshold_bytes: usize,
+
+    /// Maximum total source bytes in a single batch prompt.
+    pub batch_source_budget_bytes: usize,
+
+    /// Minimum number of batchable files required to activate batching.
+    pub min_batch_files: usize,
+}
+
+impl Default for PreprocessingConfig {
+    fn default() -> Self {
+        Self {
+            batch_source_threshold_bytes: 3000,
+            batch_source_budget_bytes: 50_000,
+            min_batch_files: 3,
+        }
+    }
 }
 
 /// Cache configuration
@@ -748,6 +981,9 @@ impl Default for Config {
             knowledge: KnowledgeConfig::default(),
             qmd: QmdRetrieverConfig::default(),
             output_format: default_output_format(),
+            quality: QualityConfig::default(),
+            preprocessing: PreprocessingConfig::default(),
+            review: ReviewConfig::default(),
         }
     }
 }
@@ -778,7 +1014,10 @@ impl Default for LLMConfig {
                 .ok()
                 .filter(|s| !s.is_empty()),
             codex_as_fallback: true,
-            context_window: default_context_window(),
+            context_window: std::env::var("LITHO_CONTEXT_WINDOW")
+                .ok()
+                .and_then(|s| s.parse::<u32>().ok())
+                .unwrap_or_else(default_context_window),
         }
     }
 }
@@ -1056,5 +1295,203 @@ mod tests {
         let json = r#"{"project_path":".", "output_path":"./out", "internal_path":"./.litho", "output_format":"html"}"#;
         let cfg: Config = serde_json::from_str(json).unwrap();
         assert_eq!(cfg.output_format, "html");
+    }
+
+    // -----------------------------------------------------------------------
+    // QualityConfig unit tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn quality_config_default_weights_sum_to_one() {
+        let qc = QualityConfig::default();
+        let sum = qc.completeness_weight
+            + qc.accuracy_weight
+            + qc.freshness_weight
+            + qc.grounding_weight
+            + qc.coherence_weight
+            + qc.helpfulness_weight;
+        assert!((sum - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn quality_config_default_validates() {
+        let qc = QualityConfig::default();
+        assert!(qc.validate().is_ok());
+    }
+
+    #[test]
+    fn quality_config_negative_weight_fails() {
+        let qc = QualityConfig {
+            completeness_weight: -0.1,
+            ..Default::default()
+        };
+        assert!(qc.validate().is_err());
+    }
+
+    #[test]
+    fn quality_config_weights_not_summing_to_one_fails() {
+        // completeness_weight raised to 0.5 pushes total sum above 1.0
+        let qc = QualityConfig {
+            completeness_weight: 0.5,
+            ..Default::default()
+        };
+        assert!(qc.validate().is_err());
+    }
+
+    #[test]
+    fn quality_config_min_score_out_of_range_fails() {
+        let qc = QualityConfig {
+            min_score: 1.5,
+            ..Default::default()
+        };
+        assert!(qc.validate().is_err());
+    }
+
+    #[test]
+    fn quality_config_serde_round_trip() {
+        let qc = QualityConfig::default();
+        let json = serde_json::to_string(&qc).unwrap();
+        let parsed: QualityConfig = serde_json::from_str(&json).unwrap();
+        assert!(
+            (parsed.completeness_weight - qc.completeness_weight).abs() < f64::EPSILON,
+            "completeness_weight round-trip failed"
+        );
+        assert!(
+            (parsed.min_score - qc.min_score).abs() < f64::EPSILON,
+            "min_score round-trip failed"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // PreprocessingConfig unit tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn preprocessing_config_default_values() {
+        let pc = PreprocessingConfig::default();
+        assert_eq!(pc.batch_source_threshold_bytes, 3000);
+        assert_eq!(pc.batch_source_budget_bytes, 50_000);
+        assert_eq!(pc.min_batch_files, 3);
+    }
+
+    #[test]
+    fn preprocessing_config_serde_round_trip() {
+        let pc = PreprocessingConfig::default();
+        let json = serde_json::to_string(&pc).unwrap();
+        let parsed: PreprocessingConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            parsed.batch_source_threshold_bytes,
+            pc.batch_source_threshold_bytes
+        );
+        assert_eq!(
+            parsed.batch_source_budget_bytes,
+            pc.batch_source_budget_bytes
+        );
+        assert_eq!(parsed.min_batch_files, pc.min_batch_files);
+    }
+
+    // -----------------------------------------------------------------------
+    // Context window auto-detection tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn context_window_gemma3_auto_detect() {
+        assert_eq!(model_default_context_window("gemma3:12b"), 131_072);
+        assert_eq!(model_default_context_window("gemma3:27b-it-qat"), 131_072);
+        assert_eq!(model_default_context_window("gemma-3-12b"), 131_072);
+    }
+
+    #[test]
+    fn context_window_gemma2_auto_detect() {
+        assert_eq!(model_default_context_window("gemma2:9b"), 131_072);
+        assert_eq!(model_default_context_window("gemma2:27b"), 131_072);
+    }
+
+    #[test]
+    fn context_window_qwen_auto_detect() {
+        assert_eq!(model_default_context_window("qwen2.5-coder:7b"), 131_072);
+        assert_eq!(model_default_context_window("qwen2.5-coder:32b"), 131_072);
+        assert_eq!(model_default_context_window("qwen3:8b"), 131_072);
+        assert_eq!(model_default_context_window("qwen-2.5:14b"), 131_072);
+    }
+
+    #[test]
+    fn context_window_llama3_auto_detect() {
+        assert_eq!(model_default_context_window("llama3.2:3b"), 131_072);
+        assert_eq!(model_default_context_window("llama3:70b"), 131_072);
+        assert_eq!(model_default_context_window("llama-3.1:8b"), 131_072);
+    }
+
+    #[test]
+    fn context_window_mistral_auto_detect() {
+        assert_eq!(model_default_context_window("mistral:7b"), 32_768);
+        assert_eq!(model_default_context_window("mixtral:8x7b"), 32_768);
+    }
+
+    #[test]
+    fn context_window_deepseek_auto_detect() {
+        assert_eq!(model_default_context_window("deepseek-coder:6.7b"), 131_072);
+        assert_eq!(
+            model_default_context_window("deepseek-coder-v2:16b"),
+            131_072
+        );
+    }
+
+    #[test]
+    fn context_window_phi_auto_detect() {
+        assert_eq!(model_default_context_window("phi3:mini"), 131_072);
+        assert_eq!(model_default_context_window("phi4:14b"), 131_072);
+    }
+
+    #[test]
+    fn context_window_codellama_auto_detect() {
+        assert_eq!(model_default_context_window("codellama:7b"), 16_384);
+        assert_eq!(
+            model_default_context_window("codellama:34b-instruct"),
+            16_384
+        );
+    }
+
+    #[test]
+    fn context_window_unknown_model_fallback() {
+        assert_eq!(model_default_context_window("some-random-model"), 32_768);
+        assert_eq!(model_default_context_window(""), 32_768);
+    }
+
+    #[test]
+    fn resolve_context_window_explicit_override() {
+        // User explicitly sets a non-default value — must be respected as-is.
+        let config = LLMConfig {
+            model_efficient: "gemma3:12b".to_string(),
+            context_window: 65_536,
+            ..Default::default()
+        };
+        assert_eq!(config.resolve_context_window(), 65_536);
+    }
+
+    #[test]
+    fn resolve_context_window_auto_detect() {
+        // context_window left at default 32768 — auto-detects from model name.
+        let config = LLMConfig {
+            model_efficient: "gemma3:12b".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(config.resolve_context_window(), 131_072);
+    }
+
+    #[test]
+    fn resolve_context_window_default_model() {
+        // Empty model name + default context_window -> fallback value.
+        let config = LLMConfig::default();
+        assert_eq!(config.resolve_context_window(), 32_768);
+    }
+
+    #[test]
+    fn resolve_context_window_qwen_auto_detect() {
+        let config = LLMConfig {
+            model_efficient: "qwen2.5-coder:7b".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(config.resolve_context_window(), 131_072);
     }
 }

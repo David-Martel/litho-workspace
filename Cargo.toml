@@ -143,6 +143,9 @@ exec_server_test_support = { path = "external/codex-rs/codex-rs/exec-server/test
 app_test_support = { path = "external/codex-rs/codex-rs/app-server/tests/common" }
 mcp_test_support = { path = "external/codex-rs/codex-rs/mcp-server/tests/common" }
 
+# Benchmarking
+criterion = { version = "0.5", features = ["html_reports"] }
+
 # Shared External Dependencies
 age = "0.11.1"
 allocative = "0.3.3"

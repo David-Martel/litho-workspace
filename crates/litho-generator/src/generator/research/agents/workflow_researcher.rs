@@ -1,7 +1,8 @@
 use crate::generator::research::memory::MemoryScope;
 use crate::generator::research::types::{AgentType, WorkflowReport};
 use crate::generator::step_forward_agent::{
-    AgentDataConfig, DataSource, FormatterConfig, LLMCallMode, PromptTemplate, StepForwardAgent,
+    AgentDataConfig, DataSource, FormatterConfig, LLMCallMode, ModelPreference, PromptTemplate,
+    StepForwardAgent,
 };
 
 #[derive(Default)]
@@ -20,6 +21,10 @@ impl StepForwardAgent for WorkflowResearcher {
 
     fn memory_scope_key(&self) -> String {
         MemoryScope::STUDIES_RESEARCH.to_string()
+    }
+
+    fn model_preference(&self) -> ModelPreference {
+        ModelPreference::Efficient
     }
 
     fn data_config(&self) -> AgentDataConfig {

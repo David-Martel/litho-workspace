@@ -90,6 +90,7 @@ Generate a project-level dependency relationship graph, focusing on:
             prompt_user,
             cache_scope: "ai_relationships_insights".to_string(),
             log_tag: "Dependency Relationship Analysis".to_string(),
+            model_preference: crate::generator::step_forward_agent::ModelPreference::Auto,
         })
     }
 

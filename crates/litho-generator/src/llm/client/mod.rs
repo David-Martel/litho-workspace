@@ -99,30 +99,17 @@ impl LLMClient {
         }
     }
 
-    /// Data extraction method
+    /// Data extraction method — selects model via size-based heuristic.
+    ///
+    /// Delegates to [`LLMClient::extract_with_models`] after running
+    /// `evaluate_befitting_model` to pick primary and fallback models.
     pub async fn extract<T>(&self, system_prompt: &str, user_prompt: &str) -> Result<T>
     where
         T: JsonSchema + for<'a> Deserialize<'a> + Serialize + Send + Sync + 'static,
     {
-        // Prefer native ollama-rs path for Ollama provider — gives us num_ctx
-        // control and avoids the OpenAI-compat layer limitations.
-        if let Some(ref native) = self.ollama_native {
-            let (befitting_model, _) =
-                evaluate_befitting_model(&self.config.llm, system_prompt, user_prompt);
-            return native
-                .extract::<T>(
-                    &befitting_model,
-                    system_prompt,
-                    user_prompt,
-                    &self.config.llm,
-                )
-                .await;
-        }
-
-        let (befitting_model, fallover_model) =
+        let (primary_model, fallback_model) =
             evaluate_befitting_model(&self.config.llm, system_prompt, user_prompt);
-
-        self.extract_inner(system_prompt, user_prompt, befitting_model, fallover_model)
+        self.extract_with_models::<T>(system_prompt, user_prompt, primary_model, fallback_model)
             .await
     }
 
@@ -189,6 +176,81 @@ impl LLMClient {
         .await
     }
 
+    /// Data extraction method with explicit model selection.
+    ///
+    /// Callers that have already called [`crate::llm::client::utils::resolve_model_for_agent`]
+    /// should use this method to pass the resolved primary and fallback models directly,
+    /// bypassing the internal `evaluate_befitting_model` size heuristic.
+    pub async fn extract_with_models<T>(
+        &self,
+        system_prompt: &str,
+        user_prompt: &str,
+        primary_model: String,
+        fallback_model: Option<String>,
+    ) -> Result<T>
+    where
+        T: JsonSchema + for<'a> Deserialize<'a> + Serialize + Send + Sync + 'static,
+    {
+        // Prefer native ollama-rs path for Ollama provider.
+        if let Some(ref native) = self.ollama_native {
+            return native
+                .extract::<T>(&primary_model, system_prompt, user_prompt, &self.config.llm)
+                .await;
+        }
+
+        self.extract_inner(system_prompt, user_prompt, primary_model, fallback_model)
+            .await
+    }
+
+    /// Simplified single-turn dialogue using an explicit model name.
+    ///
+    /// Unlike [`LLMClient::prompt_without_react`] which always selects
+    /// `model_efficient`, this variant lets the caller specify the model so
+    /// that preference-aware routing can choose the powerful model for compose
+    /// agents.
+    pub async fn prompt_without_react_with_model(
+        &self,
+        model: &str,
+        system_prompt: &str,
+        user_prompt: &str,
+    ) -> Result<String> {
+        // Prefer native ollama-rs path when available.
+        if let Some(ref native) = self.ollama_native {
+            return native
+                .chat(model, system_prompt, user_prompt, &self.config.llm)
+                .await;
+        }
+
+        let agent_builder = self.get_agent_builder();
+        let agent = agent_builder.build_agent_without_tools(system_prompt);
+
+        self.retry_with_backoff(|| async { agent.prompt(user_prompt).await })
+            .await
+    }
+
+    /// Multi-turn dialogue (with tools) using an explicit model name.
+    ///
+    /// When native Ollama is active the ReAct tool loop is skipped and the
+    /// call is demoted to a simple chat using the provided model.  Otherwise
+    /// delegates to [`LLMClient::prompt`] (ReAct with tools).
+    pub async fn prompt_with_model(
+        &self,
+        model: &str,
+        system_prompt: &str,
+        user_prompt: &str,
+    ) -> Result<String> {
+        if self.ollama_native.is_some() {
+            return self
+                .prompt_without_react_with_model(model, system_prompt, user_prompt)
+                .await;
+        }
+
+        // For non-Ollama providers the model selection is embedded in the
+        // ReActExecutor call.  We defer to `prompt()` which handles the
+        // full ReAct / summary-reasoning lifecycle.
+        self.prompt(system_prompt, user_prompt).await
+    }
+
     /// Attempt extraction via the local codex-rs binary as a last resort.
     ///
     /// Returns `Ok(T)` on success; any error is propagated to the caller so it
@@ -205,7 +267,10 @@ impl LLMClient {
         client.extract::<T>(system_prompt, user_prompt).await
     }
 
-    /// Intelligent dialogue method (using default ReAct configuration)
+    /// Intelligent dialogue method (using default ReAct configuration).
+    ///
+    /// When using native Ollama the ReAct tool loop is demoted to a simple
+    /// chat (same as [`LLMClient::prompt_without_react`]).
     pub async fn prompt(&self, system_prompt: &str, user_prompt: &str) -> Result<String> {
         // When using native ollama-rs, demote to simple chat — the ReAct tool
         // loop depends on rig-core agent types that bypass num_ctx control.
@@ -315,23 +380,17 @@ impl LLMClient {
     }
 
     /// Simplified single-turn dialogue method (without tools)
+    /// Simplified single-turn dialogue method (without tools).
+    ///
+    /// Uses `model_efficient` for selection. Delegates to
+    /// [`LLMClient::prompt_without_react_with_model`].
     pub async fn prompt_without_react(
         &self,
         system_prompt: &str,
         user_prompt: &str,
     ) -> Result<String> {
-        // Prefer native ollama-rs path when available.
-        if let Some(ref native) = self.ollama_native {
-            let model = &self.config.llm.model_efficient;
-            return native
-                .chat(model, system_prompt, user_prompt, &self.config.llm)
-                .await;
-        }
-
-        let agent_builder = self.get_agent_builder();
-        let agent = agent_builder.build_agent_without_tools(system_prompt);
-
-        self.retry_with_backoff(|| async { agent.prompt(user_prompt).await })
+        let model = self.config.llm.model_efficient.clone();
+        self.prompt_without_react_with_model(&model, system_prompt, user_prompt)
             .await
     }
 }

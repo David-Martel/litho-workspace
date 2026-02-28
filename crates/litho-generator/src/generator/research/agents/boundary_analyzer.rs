@@ -3,7 +3,8 @@ use crate::generator::research::types::{AgentType, BoundaryAnalysisReport};
 use crate::generator::{
     context::GeneratorContext,
     step_forward_agent::{
-        AgentDataConfig, DataSource, FormatterConfig, LLMCallMode, PromptTemplate, StepForwardAgent,
+        AgentDataConfig, DataSource, FormatterConfig, LLMCallMode, ModelPreference, PromptTemplate,
+        StepForwardAgent,
     },
 };
 use crate::types::code::{CodeInsight, CodePurpose};
@@ -28,6 +29,10 @@ impl StepForwardAgent for BoundaryAnalyzer {
 
     fn memory_scope_key(&self) -> String {
         crate::generator::research::memory::MemoryScope::STUDIES_RESEARCH.to_string()
+    }
+
+    fn model_preference(&self) -> ModelPreference {
+        ModelPreference::Efficient
     }
 
     fn data_config(&self) -> AgentDataConfig {

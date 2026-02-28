@@ -15,6 +15,11 @@ path = "src/lib.rs"
 
 [dev-dependencies]
 tempfile = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "quality_benchmarks"
+harness = false
 
 [dependencies]
 litho-core = { workspace = true }

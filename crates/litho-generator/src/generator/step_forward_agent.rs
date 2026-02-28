@@ -4,7 +4,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::generator::agent_executor::{AgentExecuteParams, extract, prompt, prompt_with_tools};
+use crate::generator::agent_executor::{
+    AgentExecuteParams, extract_with_preference, prompt_with_preference,
+    prompt_with_tools_with_preference,
+};
 use crate::generator::preprocess::memory::{MemoryScope, ScopedKeys};
 use crate::generator::research::memory::MemoryRetriever;
 use crate::{
@@ -16,6 +19,30 @@ use crate::{
     utils::project_structure_formatter::ProjectStructureFormatter,
     utils::prompt_compressor::{CompressionConfig, PromptCompressor},
 };
+
+/// Model routing preference for agents.
+///
+/// Implements a basic Mixture-of-Experts pattern: different agents
+/// can prefer different model sizes based on their task complexity.
+///
+/// # Examples
+///
+/// ```
+/// use litho_generator::generator::step_forward_agent::ModelPreference;
+///
+/// let pref = ModelPreference::default();
+/// assert_eq!(pref, ModelPreference::Auto);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ModelPreference {
+    /// Use the efficient (smaller) model — best for high-volume analytical tasks.
+    Efficient,
+    /// Use the powerful (larger) model — best for creative/synthesis tasks.
+    Powerful,
+    /// Let the framework decide based on prompt size (default behavior).
+    #[default]
+    Auto,
+}
 
 /// Replace time placeholders with actual time information
 /// This function replaces time placeholders in LLM responses with current actual time
@@ -588,6 +615,23 @@ pub trait StepForwardAgent: Send + Sync {
         false
     }
 
+    /// Model routing preference for this agent.
+    ///
+    /// Override to [`ModelPreference::Efficient`] for high-volume analytical tasks or
+    /// [`ModelPreference::Powerful`] for creative synthesis tasks. The default is
+    /// [`ModelPreference::Auto`], which uses prompt-size-based routing.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// fn model_preference(&self) -> ModelPreference {
+    ///     ModelPreference::Efficient  // research agents
+    /// }
+    /// ```
+    fn model_preference(&self) -> ModelPreference {
+        ModelPreference::Auto
+    }
+
     /// Default implementation of execute method - Fully standardized with automatic data validation
     async fn execute(&self, context: &GeneratorContext) -> Result<Self::Output> {
         // 1. Get data configuration
@@ -671,26 +715,30 @@ pub trait StepForwardAgent: Send + Sync {
             agent_type_value.clone()
         };
 
+        let preference = self.model_preference();
+
         let params = AgentExecuteParams {
             prompt_sys: system_prompt,
             prompt_user: user_prompt,
             cache_scope: format!("{}/{}", self.memory_scope_key(), agent_type_value.as_str()),
             log_tag,
+            model_preference: preference,
         };
 
         let result_value = match template.llm_call_mode {
             LLMCallMode::Extract => {
-                let result: Self::Output = extract(context, params).await?;
+                let result: Self::Output = extract_with_preference(context, params).await?;
                 serde_json::to_value(&result)?
             }
             LLMCallMode::Prompt => {
-                let result_text: String = prompt(context, params).await?;
+                let result_text: String = prompt_with_preference(context, params).await?;
                 // Replace time placeholders
                 let processed_text = replace_time_placeholders(&result_text);
                 serde_json::to_value(&processed_text)?
             }
             LLMCallMode::PromptWithTools => {
-                let result_text: String = prompt_with_tools(context, params).await?;
+                let result_text: String =
+                    prompt_with_tools_with_preference(context, params).await?;
                 // Replace time placeholders
                 let processed_text = replace_time_placeholders(&result_text);
                 serde_json::to_value(&processed_text)?

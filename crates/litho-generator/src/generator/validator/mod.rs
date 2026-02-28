@@ -40,6 +40,10 @@ pub struct ValidationReport {
     pub accuracy_score: f64,
     pub freshness_score: f64,
     pub grounding_score: f64,
+    pub coherence_score: f64,
+    /// LLM-as-judge helpfulness score (0.0 - 1.0).
+    /// Defaults to 1.0 when Ollama is unavailable.
+    pub helpfulness_score: f64,
 }
 
 impl ValidationReport {
@@ -78,8 +82,12 @@ impl ContentValidator {
         // Load generated documents from memory
         let doc_sections = Self::load_generated_docs(context).await;
 
-        // 1. Structural completeness
-        let completeness_score = Self::check_completeness(&doc_sections, &mut findings);
+        // 1. Structural completeness (section coverage + symbol coverage)
+        let section_completeness = Self::check_completeness(&doc_sections, &mut findings);
+        let symbol_coverage =
+            Self::check_symbol_coverage(&doc_sections, code_insights.as_deref(), &mut findings);
+        // Blend: 60% section structure, 40% symbol coverage
+        let completeness_score = section_completeness * 0.6 + symbol_coverage * 0.4;
 
         // 2. File path accuracy
         let accuracy_score = if let Some(ref ps) = project_structure {
@@ -111,11 +119,21 @@ impl ContentValidator {
         )
         .await;
 
-        // Compute overall score (weighted average)
-        let quality_score = completeness_score * 0.30
-            + accuracy_score * 0.30
-            + freshness_score * 0.15
-            + grounding_score * 0.25;
+        // 5. Terminology coherence
+        let coherence_score = Self::check_coherence(&doc_sections, &mut findings);
+
+        // 6. Helpfulness (LLM-as-judge, optional — returns 1.0 when Ollama unavailable)
+        let helpfulness_score =
+            Self::check_helpfulness(&doc_sections, &context.config, &mut findings).await;
+
+        // Compute overall score (weighted average from config)
+        let qc = &context.config.quality;
+        let quality_score = completeness_score * qc.completeness_weight
+            + accuracy_score * qc.accuracy_weight
+            + freshness_score * qc.freshness_weight
+            + grounding_score * qc.grounding_weight
+            + coherence_score * qc.coherence_weight
+            + helpfulness_score * qc.helpfulness_weight;
 
         Ok(ValidationReport {
             findings,
@@ -124,6 +142,8 @@ impl ContentValidator {
             accuracy_score,
             freshness_score,
             grounding_score,
+            coherence_score,
+            helpfulness_score,
         })
     }
 
@@ -151,7 +171,10 @@ impl ContentValidator {
     }
 
     /// Check that all expected C4 document sections are present and non-trivial.
-    fn check_completeness(doc_sections: &[(String, String)], findings: &mut Vec<Finding>) -> f64 {
+    pub fn check_completeness(
+        doc_sections: &[(String, String)],
+        findings: &mut Vec<Finding>,
+    ) -> f64 {
         let expected = [
             "Project Overview",
             "Architecture Description",
@@ -477,6 +500,206 @@ impl ContentValidator {
         grounded_claims as f64 / total_claims as f64
     }
 
+    /// Check symbol coverage: what fraction of public symbols appear in docs.
+    ///
+    /// Uses `CodeInsight` data (from preprocessing) as ground truth.
+    /// A symbol is "documented" if its name appears anywhere in the generated docs.
+    ///
+    /// Returns `1.0` when no insights are available (nothing to check).
+    pub fn check_symbol_coverage(
+        doc_sections: &[(String, String)],
+        code_insights: Option<&[CodeInsight]>,
+        findings: &mut Vec<Finding>,
+    ) -> f64 {
+        let insights = match code_insights {
+            Some(i) if !i.is_empty() => i,
+            _ => return 1.0, // No insights — can't check
+        };
+
+        // Collect all public symbol names from code insights.
+        let mut public_symbols: Vec<String> = Vec::new();
+        for insight in insights {
+            // Functions from code dossier
+            for func in &insight.code_dossier.functions {
+                if !func.is_empty() {
+                    public_symbols.push(func.clone());
+                }
+            }
+            // Interface names from code dossier
+            for iface in &insight.code_dossier.interfaces {
+                if !iface.is_empty() {
+                    public_symbols.push(iface.clone());
+                }
+            }
+            // Detailed interface names
+            for iface in &insight.interfaces {
+                if !iface.name.is_empty() {
+                    public_symbols.push(iface.name.clone());
+                }
+            }
+        }
+
+        // Deduplicate
+        public_symbols.sort();
+        public_symbols.dedup();
+
+        if public_symbols.is_empty() {
+            return 1.0;
+        }
+
+        // Concatenate all doc content for searching.
+        let all_docs: String = doc_sections
+            .iter()
+            .map(|(_, content)| content.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let mut documented = 0usize;
+        let mut undocumented: Vec<String> = Vec::new();
+
+        for symbol in &public_symbols {
+            let found = if symbol.len() <= 4 {
+                // Short symbols need word-boundary matching to avoid false positives
+                // (e.g., "id" matching "considered", "to" matching "into").
+                Regex::new(&format!(r"\b{}\b", regex::escape(symbol)))
+                    .map(|re| re.is_match(&all_docs))
+                    .unwrap_or(false)
+            } else {
+                all_docs.contains(symbol.as_str())
+            };
+
+            if found {
+                documented += 1;
+            } else {
+                undocumented.push(symbol.clone());
+            }
+        }
+
+        // Report undocumented symbols (up to 20 in a single finding).
+        if !undocumented.is_empty() {
+            let sample: Vec<&str> = undocumented.iter().take(20).map(|s| s.as_str()).collect();
+            findings.push(Finding {
+                severity: Severity::Warning,
+                category: "completeness".to_string(),
+                message: format!(
+                    "{}/{} public symbols not found in docs: {}{}",
+                    undocumented.len(),
+                    public_symbols.len(),
+                    sample.join(", "),
+                    if undocumented.len() > 20 { "..." } else { "" }
+                ),
+                section: None,
+            });
+        }
+
+        documented as f64 / public_symbols.len() as f64
+    }
+
+    /// Check terminology consistency across all doc sections.
+    ///
+    /// Extracts backtick-wrapped terms from each section and flags inconsistencies
+    /// where similar names appear with different spellings (e.g. `CodeInsight` vs
+    /// `code_insight` vs `Code Insight`).
+    ///
+    /// Returns a score in `[0.0, 1.0]` where `1.0` means fully consistent.
+    pub fn check_coherence(doc_sections: &[(String, String)], findings: &mut Vec<Finding>) -> f64 {
+        use std::collections::HashMap;
+
+        // Extract all backtick-wrapped identifiers (3+ chars, starts with a letter/underscore).
+        let term_re = Regex::new(r"`([A-Za-z_]\w{2,})`").unwrap();
+        let mut term_counts: HashMap<String, usize> = HashMap::new();
+
+        for (_, content) in doc_sections {
+            for cap in term_re.captures_iter(content) {
+                let term = cap[1].to_string();
+                *term_counts.entry(term).or_insert(0) += 1;
+            }
+        }
+
+        if term_counts.is_empty() {
+            return 1.0;
+        }
+
+        // Group terms by their normalized form (lowercase, strip underscores/hyphens).
+        let mut normalized_groups: HashMap<String, Vec<String>> = HashMap::new();
+        for term in term_counts.keys() {
+            let normalized = term.to_lowercase().replace(['_', '-'], "");
+            normalized_groups
+                .entry(normalized)
+                .or_default()
+                .push(term.clone());
+        }
+
+        // Filter out groups where all variants are well-known Rust casing conventions
+        // for conversion/accessor trait method pairs (e.g., `to_string` vs `ToString`,
+        // `as_ref` vs `AsRef`, `into_iter` vs `IntoIter`).
+        // These are expected naming patterns in Rust and are not actual inconsistencies.
+        // Only filter when the snake_case form starts with a Rust conversion method prefix.
+        let rust_conversion_prefix = Regex::new(r"^(to|as|into|from|try_from|try_into)_").unwrap();
+        normalized_groups.retain(|_, variants| {
+            if variants.len() != 2 {
+                return true; // Only handle the simple 2-variant case
+            }
+            // Check if exactly one is snake_case starting with a conversion prefix,
+            // and exactly one is PascalCase — these are Rust trait method naming conventions.
+            let mut snake_conversion: Option<&str> = None;
+            let mut has_pascal = false;
+            for v in variants.iter() {
+                if v.contains('_') && rust_conversion_prefix.is_match(v) {
+                    snake_conversion = Some(v.as_str());
+                } else if v.chars().next().is_some_and(|c| c.is_uppercase()) {
+                    has_pascal = true;
+                }
+            }
+            // If one variant is a Rust conversion method (to_*, as_*, into_*, from_*)
+            // and the other is PascalCase, treat this as an expected naming convention.
+            if snake_conversion.is_some() && has_pascal {
+                return false; // Exclude this group
+            }
+            true
+        });
+
+        // Find groups that have more than one spelling variant.
+        let mut inconsistencies = 0usize;
+        for variants in normalized_groups.values() {
+            if variants.len() > 1 {
+                inconsistencies += 1;
+                // Only emit individual findings for the first 10 groups.
+                if inconsistencies <= 10 {
+                    let mut sorted = variants.clone();
+                    sorted.sort();
+                    findings.push(Finding {
+                        severity: Severity::Warning,
+                        category: "coherence".to_string(),
+                        message: format!("Inconsistent terminology: {}", sorted.join(" vs ")),
+                        section: None,
+                    });
+                }
+            }
+        }
+
+        if inconsistencies > 10 {
+            findings.push(Finding {
+                severity: Severity::Warning,
+                category: "coherence".to_string(),
+                message: format!(
+                    "... and {} more terminology inconsistencies",
+                    inconsistencies - 10
+                ),
+                section: None,
+            });
+        }
+
+        // Score: penalize by the ratio of inconsistent groups to total groups.
+        let total_groups = normalized_groups.len();
+        if total_groups == 0 {
+            return 1.0;
+        }
+
+        let consistent_groups = total_groups - inconsistencies;
+        consistent_groups as f64 / total_groups as f64
+    }
+
     /// Extract dependency names from Cargo.toml content.
     fn extract_cargo_deps(content: &str, known_tech: &mut HashSet<String>) {
         // Simple line-by-line parsing for [dependencies] entries
@@ -542,7 +765,240 @@ impl ContentValidator {
             }
         }
     }
+
+    /// Rate documentation helpfulness using the local LLM as a judge (G-Eval style).
+    ///
+    /// Sends each documentation section to the configured Ollama model and asks
+    /// it to rate four dimensions on a 1–5 scale:
+    ///
+    /// * `summary_quality` — how accurately the opening captures the section's purpose
+    /// * `depth` — whether the section explains *why*, not just *what*
+    /// * `actionability` — usefulness to a new contributor
+    /// * `examples` — presence of code references, file paths, or usage examples
+    ///
+    /// The four sub-scores are averaged per section and then across all sections,
+    /// then normalized to `[0.0, 1.0]`.
+    ///
+    /// Returns `1.0` (neutral) when:
+    /// * The configured provider is not `Ollama`
+    /// * The Ollama client cannot be constructed
+    /// * No sections meet the minimum length threshold (100 chars)
+    async fn check_helpfulness(
+        doc_sections: &[(String, String)],
+        config: &crate::config::Config,
+        findings: &mut Vec<Finding>,
+    ) -> f64 {
+        use crate::llm::client::ollama_native::OllamaNativeClient;
+
+        // Only run when Ollama provider is configured.
+        if config.llm.provider != crate::config::LLMProvider::Ollama {
+            findings.push(Finding {
+                severity: Severity::Info,
+                category: "helpfulness".to_string(),
+                message: "LLM-as-judge requires Ollama provider; skipping helpfulness check"
+                    .to_string(),
+                section: None,
+            });
+            return 1.0;
+        }
+
+        let client = match OllamaNativeClient::from_config(&config.llm) {
+            Ok(c) => c,
+            Err(e) => {
+                findings.push(Finding {
+                    severity: Severity::Warning,
+                    category: "helpfulness".to_string(),
+                    message: format!("Could not connect to Ollama for helpfulness check: {}", e),
+                    section: None,
+                });
+                return 1.0;
+            }
+        };
+
+        if config.llm.model_efficient.is_empty() {
+            findings.push(Finding {
+                severity: Severity::Warning,
+                category: "helpfulness".to_string(),
+                message: "model_efficient is empty; skipping helpfulness check".to_string(),
+                section: None,
+            });
+            return 1.0;
+        }
+
+        let system_prompt = r#"You are a documentation quality evaluator. Rate the provided documentation section on each criterion using a 1-5 scale.
+
+Criteria:
+1. SUMMARY_QUALITY: Does the opening accurately capture the section's purpose? (1=misleading, 5=perfect)
+2. DEPTH: Does it explain WHY things are designed this way, not just WHAT exists? (1=surface-only, 5=deep insight)
+3. ACTIONABILITY: Could a new developer use this to start contributing? (1=useless, 5=immediately actionable)
+4. EXAMPLES: Are code references, file paths, or usage examples provided? (1=none, 5=comprehensive)
+
+Respond with ONLY a JSON object:
+{"summary_quality": N, "depth": N, "actionability": N, "examples": N}
+
+Where N is an integer 1-5. No explanation, just the JSON."#;
+
+        let mut total_score = 0.0f64;
+        let mut sections_rated = 0usize;
+
+        for (section_name, content) in doc_sections {
+            // Skip very short sections.
+            if content.len() < 100 {
+                continue;
+            }
+
+            // Truncate to first 4000 chars to keep prompt size reasonable.
+            let excerpt: String = content.chars().take(4000).collect();
+            let user_prompt = format!(
+                "Rate this documentation section titled '{}':\n\n{}",
+                section_name, excerpt
+            );
+
+            match client
+                .chat(
+                    &config.llm.model_efficient,
+                    system_prompt,
+                    &user_prompt,
+                    &config.llm,
+                )
+                .await
+            {
+                Ok(response) => {
+                    if let Some(avg) = parse_helpfulness_scores(&response) {
+                        total_score += avg;
+                        sections_rated += 1;
+                    } else {
+                        findings.push(Finding {
+                            severity: Severity::Info,
+                            category: "helpfulness".to_string(),
+                            message: format!(
+                                "Could not parse LLM rating for section '{}'",
+                                section_name
+                            ),
+                            section: Some(section_name.clone()),
+                        });
+                    }
+                }
+                Err(e) => {
+                    findings.push(Finding {
+                        severity: Severity::Warning,
+                        category: "helpfulness".to_string(),
+                        message: format!(
+                            "LLM helpfulness check failed for '{}': {}",
+                            section_name, e
+                        ),
+                        section: Some(section_name.clone()),
+                    });
+                }
+            }
+        }
+
+        if sections_rated == 0 {
+            // Distinguish "no eligible sections" from "all LLM calls failed"
+            let eligible_sections = doc_sections.iter().filter(|(_, c)| c.len() >= 100).count();
+            if eligible_sections > 0 {
+                findings.push(Finding {
+                    severity: Severity::Warning,
+                    category: "helpfulness".to_string(),
+                    message: format!(
+                        "All {} eligible sections failed LLM helpfulness evaluation; defaulting to 1.0",
+                        eligible_sections
+                    ),
+                    section: None,
+                });
+            }
+            return 1.0;
+        }
+
+        let avg_score = total_score / sections_rated as f64;
+        // Normalize from 1-5 scale to 0.0-1.0.
+        let normalized = (avg_score - 1.0) / 4.0;
+
+        findings.push(Finding {
+            severity: Severity::Info,
+            category: "helpfulness".to_string(),
+            message: format!(
+                "LLM-as-judge rated {} sections, average {:.1}/5 ({:.0}%)",
+                sections_rated,
+                avg_score,
+                normalized * 100.0
+            ),
+            section: None,
+        });
+
+        normalized.clamp(0.0, 1.0)
+    }
 }
+
+// ---------------------------------------------------------------------------
+// Helpfulness scoring helpers (module-level so they are testable without
+// constructing a ContentValidator).
+// ---------------------------------------------------------------------------
+
+/// Parse the four sub-scores from the LLM's JSON response.
+///
+/// Accepts raw JSON, JSON wrapped in a markdown code fence, or JSON embedded
+/// anywhere in a prose response.  Returns the arithmetic mean as a value in
+/// `1.0..=5.0`, or `None` when fewer than two valid scores can be extracted.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// let avg = parse_helpfulness_scores(r#"{"summary_quality":4,"depth":3,"actionability":5,"examples":4}"#);
+/// assert_eq!(avg, Some(4.0));
+/// ```
+pub(crate) fn parse_helpfulness_scores(response: &str) -> Option<f64> {
+    // 1. Try direct JSON parse.
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(response) {
+        return extract_scores_from_json(&v);
+    }
+
+    // 2. Try extracting JSON from a markdown code fence.
+    let json_re = Regex::new(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```").ok()?;
+    if let Some(cap) = json_re.captures(response)
+        && let Ok(v) = serde_json::from_str::<serde_json::Value>(&cap[1])
+    {
+        return extract_scores_from_json(&v);
+    }
+
+    // 3. Find the first `{...}` block anywhere in the response.
+    if let Some(start) = response.find('{')
+        && let Some(end_offset) = response[start..].find('}')
+        && let Ok(v) =
+            serde_json::from_str::<serde_json::Value>(&response[start..=start + end_offset])
+    {
+        return extract_scores_from_json(&v);
+    }
+
+    None
+}
+
+/// Extract the four helpfulness sub-scores from a parsed JSON value.
+///
+/// Scores outside the valid `1..=5` range are silently ignored.
+/// Returns `None` when fewer than two valid scores are found.
+pub(crate) fn extract_scores_from_json(v: &serde_json::Value) -> Option<f64> {
+    let keys = ["summary_quality", "depth", "actionability", "examples"];
+    let mut sum = 0.0f64;
+    let mut count = 0usize;
+
+    for key in &keys {
+        if let Some(score) = v.get(key).and_then(|s| s.as_f64())
+            && (1.0..=5.0).contains(&score)
+        {
+            sum += score;
+            count += 1;
+        }
+    }
+
+    if count >= 2 {
+        Some(sum / count as f64)
+    } else {
+        None
+    }
+}
+
+// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -674,6 +1130,8 @@ tempfile = "3"
             accuracy_score: 0.5,
             freshness_score: 1.0,
             grounding_score: 0.5,
+            coherence_score: 0.9,
+            helpfulness_score: 0.8,
         };
         assert_eq!(report.errors(), 1);
         assert_eq!(report.warnings(), 2);
@@ -717,5 +1175,373 @@ reqwest = { version = "0.12" }
         let mut findings = Vec::new();
         let score = ContentValidator::check_file_references(&docs, &ps, &mut findings);
         assert!((score - 1.0).abs() < f64::EPSILON);
+    }
+
+    // -----------------------------------------------------------------------
+    // check_symbol_coverage tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_symbol_coverage_full() {
+        use crate::types::code::{CodeDossier, CodeInsight};
+        let docs = vec![(
+            "Overview".to_string(),
+            "The system uses `Config` and calls `execute` to run.".to_string(),
+        )];
+        let insights = vec![CodeInsight {
+            code_dossier: CodeDossier {
+                name: "config.rs".to_string(),
+                functions: vec!["execute".to_string()],
+                interfaces: vec!["Config".to_string()],
+                ..Default::default()
+            },
+            ..Default::default()
+        }];
+        let mut findings = Vec::new();
+        let score = ContentValidator::check_symbol_coverage(&docs, Some(&insights), &mut findings);
+        assert!(
+            (score - 1.0).abs() < f64::EPSILON,
+            "expected 1.0, got {score}"
+        );
+        assert!(
+            findings.is_empty(),
+            "expected no findings, got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn test_symbol_coverage_partial() {
+        use crate::types::code::{CodeDossier, CodeInsight};
+        let docs = vec![(
+            "Overview".to_string(),
+            "The `Config` struct controls behavior.".to_string(),
+        )];
+        let insights = vec![CodeInsight {
+            code_dossier: CodeDossier {
+                name: "config.rs".to_string(),
+                functions: vec!["execute".to_string(), "validate".to_string()],
+                interfaces: vec!["Config".to_string()],
+                ..Default::default()
+            },
+            ..Default::default()
+        }];
+        let mut findings = Vec::new();
+        let score = ContentValidator::check_symbol_coverage(&docs, Some(&insights), &mut findings);
+        // 1 out of 3 symbols documented → ~0.333
+        assert!(score > 0.3 && score < 0.4, "expected ~0.333, got {score}");
+        assert!(
+            !findings.is_empty(),
+            "expected at least one finding for undocumented symbols"
+        );
+    }
+
+    #[test]
+    fn test_symbol_coverage_no_insights() {
+        let docs = vec![("Overview".to_string(), "Hello".to_string())];
+        let mut findings = Vec::new();
+        let score = ContentValidator::check_symbol_coverage(&docs, None, &mut findings);
+        assert!(
+            (score - 1.0).abs() < f64::EPSILON,
+            "expected 1.0 when no insights, got {score}"
+        );
+        assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn test_symbol_coverage_empty_insights_slice() {
+        let docs = vec![("Overview".to_string(), "Hello".to_string())];
+        let mut findings = Vec::new();
+        let score = ContentValidator::check_symbol_coverage(&docs, Some(&[]), &mut findings);
+        assert!(
+            (score - 1.0).abs() < f64::EPSILON,
+            "expected 1.0 for empty insights, got {score}"
+        );
+    }
+
+    #[test]
+    fn test_symbol_coverage_detailed_interfaces() {
+        use crate::types::code::{CodeDossier, CodeInsight, InterfaceInfo};
+        let docs = vec![(
+            "Arch".to_string(),
+            "The `MyTrait` interface is central.".to_string(),
+        )];
+        let insights = vec![CodeInsight {
+            code_dossier: CodeDossier {
+                name: "lib.rs".to_string(),
+                ..Default::default()
+            },
+            interfaces: vec![
+                InterfaceInfo {
+                    name: "MyTrait".to_string(),
+                    ..Default::default()
+                },
+                InterfaceInfo {
+                    name: "HiddenImpl".to_string(),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        }];
+        let mut findings = Vec::new();
+        let score = ContentValidator::check_symbol_coverage(&docs, Some(&insights), &mut findings);
+        // 1 out of 2 symbols documented → 0.5
+        assert!(
+            (score - 0.5).abs() < f64::EPSILON,
+            "expected 0.5, got {score}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // check_coherence tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_coherence_consistent() {
+        let docs = vec![
+            (
+                "A".to_string(),
+                "The `Config` struct and `Config` usage.".to_string(),
+            ),
+            ("B".to_string(), "Uses `Config` throughout.".to_string()),
+        ];
+        let mut findings = Vec::new();
+        let score = ContentValidator::check_coherence(&docs, &mut findings);
+        assert!(
+            (score - 1.0).abs() < f64::EPSILON,
+            "expected 1.0 for consistent terminology, got {score}"
+        );
+        assert!(
+            findings.is_empty(),
+            "expected no findings, got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn test_coherence_inconsistent() {
+        let docs = vec![
+            ("A".to_string(), "The `CodeInsight` type.".to_string()),
+            (
+                "B".to_string(),
+                "Uses `code_insight` for analysis.".to_string(),
+            ),
+        ];
+        let mut findings = Vec::new();
+        let score = ContentValidator::check_coherence(&docs, &mut findings);
+        assert!(
+            score < 1.0,
+            "expected score < 1.0 for inconsistency, got {score}"
+        );
+        assert!(
+            findings.iter().any(|f| f.category == "coherence"),
+            "expected at least one coherence finding"
+        );
+    }
+
+    #[test]
+    fn test_coherence_no_terms() {
+        let docs = vec![(
+            "A".to_string(),
+            "This is a plain text document.".to_string(),
+        )];
+        let mut findings = Vec::new();
+        let score = ContentValidator::check_coherence(&docs, &mut findings);
+        assert!(
+            (score - 1.0).abs() < f64::EPSILON,
+            "expected 1.0 when no backtick terms, got {score}"
+        );
+        assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn test_coherence_many_inconsistencies_cap() {
+        // Generate more than 10 inconsistent term groups to verify the
+        // "and N more" summary finding is emitted.
+        let mut content_a = String::new();
+        let mut content_b = String::new();
+        for i in 0..15 {
+            content_a.push_str(&format!("`Term{i}Camel` "));
+            content_b.push_str(&format!("`term{i}_camel` "));
+        }
+        let docs = vec![("A".to_string(), content_a), ("B".to_string(), content_b)];
+        let mut findings = Vec::new();
+        let score = ContentValidator::check_coherence(&docs, &mut findings);
+        assert!(score < 1.0);
+        // Should have exactly 10 individual coherence findings + 1 summary
+        let coherence_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.category == "coherence")
+            .collect();
+        assert_eq!(
+            coherence_findings.len(),
+            11,
+            "expected 10 individual + 1 summary finding, got {}",
+            coherence_findings.len()
+        );
+        assert!(
+            coherence_findings
+                .last()
+                .unwrap()
+                .message
+                .contains("more terminology"),
+            "last finding should be summary"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // parse_helpfulness_scores / extract_scores_from_json tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_parse_helpfulness_scores_valid() {
+        let response = r#"{"summary_quality": 4, "depth": 3, "actionability": 5, "examples": 4}"#;
+        let avg = parse_helpfulness_scores(response).unwrap();
+        assert!((avg - 4.0).abs() < f64::EPSILON, "expected 4.0, got {avg}");
+    }
+
+    #[test]
+    fn test_parse_helpfulness_scores_in_code_block() {
+        let response = "Here are my ratings:\n```json\n{\"summary_quality\": 3, \"depth\": 4, \"actionability\": 2, \"examples\": 3}\n```";
+        let avg = parse_helpfulness_scores(response).unwrap();
+        assert!((avg - 3.0).abs() < f64::EPSILON, "expected 3.0, got {avg}");
+    }
+
+    #[test]
+    fn test_parse_helpfulness_scores_invalid() {
+        assert!(
+            parse_helpfulness_scores("not json at all").is_none(),
+            "plain text should return None"
+        );
+        assert!(
+            parse_helpfulness_scores("{}").is_none(),
+            "empty object should return None (fewer than 2 valid scores)"
+        );
+    }
+
+    #[test]
+    fn test_parse_helpfulness_scores_partial_keys() {
+        // Only 2 valid keys — should still produce a result.
+        let response = r#"{"summary_quality": 4, "depth": 3}"#;
+        let avg = parse_helpfulness_scores(response).unwrap();
+        assert!((avg - 3.5).abs() < f64::EPSILON, "expected 3.5, got {avg}");
+    }
+
+    #[test]
+    fn test_parse_helpfulness_scores_out_of_range() {
+        // Scores outside 1-5 are ignored; only depth=3 and actionability=4 are valid.
+        let response = r#"{"summary_quality": 10, "depth": 3, "actionability": 4, "examples": 0}"#;
+        let avg = parse_helpfulness_scores(response).unwrap();
+        assert!(
+            (avg - 3.5).abs() < f64::EPSILON,
+            "expected 3.5 (only depth=3 + actionability=4), got {avg}"
+        );
+    }
+
+    #[test]
+    fn test_extract_scores_from_json_all_valid() {
+        let v: serde_json::Value = serde_json::json!({
+            "summary_quality": 4,
+            "depth": 3,
+            "actionability": 5,
+            "examples": 4
+        });
+        let avg = extract_scores_from_json(&v).unwrap();
+        assert!(
+            (avg - 4.0).abs() < f64::EPSILON,
+            "expected (4+3+5+4)/4=4.0, got {avg}"
+        );
+    }
+
+    #[test]
+    fn test_extract_scores_from_json_only_one_valid_returns_none() {
+        let v: serde_json::Value = serde_json::json!({"summary_quality": 3});
+        assert!(
+            extract_scores_from_json(&v).is_none(),
+            "single valid score is not enough"
+        );
+    }
+
+    #[test]
+    fn test_parse_helpfulness_scores_embedded_in_prose() {
+        // JSON embedded after prose text — heuristic extraction via first '{...}'.
+        let response = r#"Sure! Here is my evaluation: {"summary_quality": 2, "depth": 5, "actionability": 3, "examples": 4} I hope that helps."#;
+        let avg = parse_helpfulness_scores(response).unwrap();
+        // (2+5+3+4)/4 = 3.5
+        assert!((avg - 3.5).abs() < f64::EPSILON, "expected 3.5, got {avg}");
+    }
+
+    #[test]
+    fn test_symbol_coverage_short_name_word_boundary() {
+        // "id" should NOT match "considered" — word boundary enforcement
+        let docs = vec![(
+            "Overview".to_string(),
+            "This is considered important for the system.".to_string(),
+        )];
+        let insights = vec![crate::types::code::CodeInsight {
+            code_dossier: crate::types::code::CodeDossier {
+                functions: vec!["id".to_string()],
+                interfaces: vec![],
+                ..Default::default()
+            },
+            interfaces: vec![],
+            ..Default::default()
+        }];
+        let mut findings = Vec::new();
+        let score = ContentValidator::check_symbol_coverage(&docs, Some(&insights), &mut findings);
+        // "id" should NOT be found via substring in "considered"
+        assert!(
+            score < 1.0,
+            "Short symbol 'id' should not match 'considered' via substring"
+        );
+        assert!(!findings.is_empty());
+    }
+
+    #[test]
+    fn test_symbol_coverage_short_name_exact_word_match() {
+        // "id" SHOULD match when it appears as a standalone word
+        let docs = vec![(
+            "Overview".to_string(),
+            "The id field is the primary key.".to_string(),
+        )];
+        let insights = vec![crate::types::code::CodeInsight {
+            code_dossier: crate::types::code::CodeDossier {
+                functions: vec!["id".to_string()],
+                interfaces: vec![],
+                ..Default::default()
+            },
+            interfaces: vec![],
+            ..Default::default()
+        }];
+        let mut findings = Vec::new();
+        let score = ContentValidator::check_symbol_coverage(&docs, Some(&insights), &mut findings);
+        assert!(
+            (score - 1.0).abs() < f64::EPSILON,
+            "Short symbol 'id' should match standalone word 'id'"
+        );
+    }
+
+    #[test]
+    fn test_coherence_rust_casing_convention_excluded() {
+        // to_string vs ToString should NOT be flagged as inconsistency
+        let docs = vec![(
+            "Overview".to_string(),
+            "Use `to_string` for conversion. The `ToString` trait is also useful.".to_string(),
+        )];
+        let mut findings = Vec::new();
+        let score = ContentValidator::check_coherence(&docs, &mut findings);
+        // Should be perfect since snake_case vs PascalCase of same term is expected in Rust
+        let coherence_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.category == "coherence")
+            .collect();
+        assert!(
+            coherence_findings.is_empty(),
+            "Rust casing convention (to_string vs ToString) should not be flagged: {:?}",
+            coherence_findings
+        );
+        assert!(
+            (score - 1.0).abs() < 0.01,
+            "Score should be ~1.0 but got {}",
+            score
+        );
     }
 }
