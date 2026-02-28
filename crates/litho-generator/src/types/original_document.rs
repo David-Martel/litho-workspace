@@ -17,31 +17,32 @@ impl OriginalDocument {
     pub fn to_prompt_string(&self) -> String {
         let mut content = String::new();
 
-        if let Some(ref readme) = self.readme {
-            if !readme.trim().is_empty() {
-                content.push_str(readme);
-                content.push_str("\n\n");
-            }
+        if let Some(ref readme) = self.readme
+            && !readme.trim().is_empty()
+        {
+            content.push_str(readme);
+            content.push_str("\n\n");
         }
 
-        if let Some(ref supplementary) = self.supplementary_docs {
-            if !supplementary.trim().is_empty() {
-                content.push_str("---\n### Supplementary Project Documentation\n");
-                content.push_str(supplementary);
-                content.push_str("\n\n");
-            }
+        if let Some(ref supplementary) = self.supplementary_docs
+            && !supplementary.trim().is_empty()
+        {
+            content.push_str("---\n### Supplementary Project Documentation\n");
+            content.push_str(supplementary);
+            content.push_str("\n\n");
         }
 
-        if let Some(ref tech_stack) = self.tech_stack {
-            if !tech_stack.is_empty() {
-                content.push_str("---\n### Verified Technology Stack (extracted from manifest files)\n");
-                for dep in tech_stack {
-                    content.push_str("- ");
-                    content.push_str(dep);
-                    content.push('\n');
-                }
+        if let Some(ref tech_stack) = self.tech_stack
+            && !tech_stack.is_empty()
+        {
+            content
+                .push_str("---\n### Verified Technology Stack (extracted from manifest files)\n");
+            for dep in tech_stack {
+                content.push_str("- ");
+                content.push_str(dep);
                 content.push('\n');
             }
+            content.push('\n');
         }
 
         content

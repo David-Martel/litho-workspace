@@ -1,5 +1,5 @@
 use std::collections::hash_map::RandomState;
-use std::hash::{BuildHasher, Hash, Hasher};
+use std::hash::{BuildHasher, Hash};
 
 #[derive(Debug)]
 enum Slot<K, V> {
@@ -98,9 +98,7 @@ impl<K: Eq + Hash, V, S: BuildHasher> FastHashTable<K, V, S> {
     }
 
     fn bucket(&self, key: &K) -> usize {
-        let mut hasher = self.build_hasher.build_hasher();
-        key.hash(&mut hasher);
-        (hasher.finish() as usize) & (self.slots.len() - 1)
+        (self.build_hasher.hash_one(key) as usize) & (self.slots.len() - 1)
     }
 }
 

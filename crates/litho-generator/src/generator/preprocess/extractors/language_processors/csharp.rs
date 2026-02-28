@@ -16,6 +16,12 @@ pub struct CSharpProcessor {
     constructor_regex: Regex,
 }
 
+impl Default for CSharpProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CSharpProcessor {
     pub fn new() -> Self {
         Self {
@@ -64,45 +70,45 @@ impl LanguageProcessor for CSharpProcessor {
         // Handle .cs files
         for (line_num, line) in content.lines().enumerate() {
             // Extract using statements
-            if let Some(captures) = self.using_regex.captures(line) {
-                if let Some(using_path) = captures.get(1) {
-                    let using_str = using_path.as_str().trim();
+            if let Some(captures) = self.using_regex.captures(line)
+                && let Some(using_path) = captures.get(1)
+            {
+                let using_str = using_path.as_str().trim();
 
-                    // Skip using static and using alias
-                    if using_str.starts_with("static ") || using_str.contains(" = ") {
-                        continue;
-                    }
-
-                    let is_external = using_str.starts_with("System")
-                        || using_str.starts_with("Microsoft")
-                        || !using_str.contains(".");
-
-                    // Parse dependency name
-                    let dependency_name = self.extract_dependency_name(using_str);
-
-                    dependencies.push(Dependency {
-                        name: dependency_name,
-                        path: Some(source_file.clone()),
-                        is_external,
-                        line_number: Some(line_num + 1),
-                        dependency_type: "using".to_string(),
-                        version: None,
-                    });
+                // Skip using static and using alias
+                if using_str.starts_with("static ") || using_str.contains(" = ") {
+                    continue;
                 }
+
+                let is_external = using_str.starts_with("System")
+                    || using_str.starts_with("Microsoft")
+                    || !using_str.contains(".");
+
+                // Parse dependency name
+                let dependency_name = self.extract_dependency_name(using_str);
+
+                dependencies.push(Dependency {
+                    name: dependency_name,
+                    path: Some(source_file.clone()),
+                    is_external,
+                    line_number: Some(line_num + 1),
+                    dependency_type: "using".to_string(),
+                    version: None,
+                });
             }
 
             // Extract namespace statement
-            if let Some(captures) = self.namespace_regex.captures(line) {
-                if let Some(namespace_name) = captures.get(1) {
-                    dependencies.push(Dependency {
-                        name: namespace_name.as_str().trim().to_string(),
-                        path: Some(source_file.clone()),
-                        is_external: false,
-                        line_number: Some(line_num + 1),
-                        dependency_type: "namespace".to_string(),
-                        version: None,
-                    });
-                }
+            if let Some(captures) = self.namespace_regex.captures(line)
+                && let Some(namespace_name) = captures.get(1)
+            {
+                dependencies.push(Dependency {
+                    name: namespace_name.as_str().trim().to_string(),
+                    path: Some(source_file.clone()),
+                    is_external: false,
+                    line_number: Some(line_num + 1),
+                    dependency_type: "namespace".to_string(),
+                    version: None,
+                });
             }
         }
 
@@ -463,7 +469,7 @@ impl LanguageProcessor for CSharpProcessor {
                 let params_str = captures.get(3).map(|m| m.as_str()).unwrap_or("");
 
                 // Simple check if it's a constructor (name starts with uppercase)
-                if name.chars().next().map_or(false, |c| c.is_uppercase()) {
+                if name.chars().next().is_some_and(|c| c.is_uppercase()) {
                     let parameters = self.parse_csharp_parameters(params_str);
 
                     interfaces.push(InterfaceInfo {
@@ -491,77 +497,80 @@ impl CSharpProcessor {
             let trimmed = line.trim();
 
             // Extract NuGet package references: <PackageReference Include="Package.Name" Version="1.0.0" />
-            if trimmed.starts_with("<PackageReference") && trimmed.contains("Include=") {
-                if let Some(start) = trimmed.find("Include=\"") {
-                    let after_include = &trimmed[start + 9..];
-                    if let Some(end) = after_include.find('"') {
-                        let package_name = &after_include[..end];
+            if trimmed.starts_with("<PackageReference")
+                && trimmed.contains("Include=")
+                && let Some(start) = trimmed.find("Include=\"")
+            {
+                let after_include = &trimmed[start + 9..];
+                if let Some(end) = after_include.find('"') {
+                    let package_name = &after_include[..end];
 
-                        // Extract version if present
-                        let version = if let Some(ver_start) = trimmed.find("Version=\"") {
-                            let after_version = &trimmed[ver_start + 9..];
-                            after_version
-                                .find('"')
-                                .map(|ver_end| after_version[..ver_end].to_string())
-                        } else {
-                            None
-                        };
+                    // Extract version if present
+                    let version = if let Some(ver_start) = trimmed.find("Version=\"") {
+                        let after_version = &trimmed[ver_start + 9..];
+                        after_version
+                            .find('"')
+                            .map(|ver_end| after_version[..ver_end].to_string())
+                    } else {
+                        None
+                    };
 
-                        dependencies.push(Dependency {
-                            name: package_name.to_string(),
-                            path: Some(source_file.to_string()),
-                            is_external: true,
-                            line_number: Some(line_num + 1),
-                            dependency_type: "nuget_package".to_string(),
-                            version,
-                        });
-                    }
+                    dependencies.push(Dependency {
+                        name: package_name.to_string(),
+                        path: Some(source_file.to_string()),
+                        is_external: true,
+                        line_number: Some(line_num + 1),
+                        dependency_type: "nuget_package".to_string(),
+                        version,
+                    });
                 }
             }
 
             // Extract project references: <ProjectReference Include="..\Other.Project\Other.Project.csproj" />
-            if trimmed.starts_with("<ProjectReference") && trimmed.contains("Include=") {
-                if let Some(start) = trimmed.find("Include=\"") {
-                    let after_include = &trimmed[start + 9..];
-                    if let Some(end) = after_include.find('"') {
-                        let project_path = &after_include[..end];
+            if trimmed.starts_with("<ProjectReference")
+                && trimmed.contains("Include=")
+                && let Some(start) = trimmed.find("Include=\"")
+            {
+                let after_include = &trimmed[start + 9..];
+                if let Some(end) = after_include.find('"') {
+                    let project_path = &after_include[..end];
 
-                        // Extract project name from path
-                        let project_name = project_path
-                            .split(['/', '\\'])
-                            .last()
-                            .unwrap_or(project_path)
-                            .trim_end_matches(".csproj")
-                            .to_string();
+                    // Extract project name from path
+                    let project_name = project_path
+                        .split(['/', '\\'])
+                        .next_back()
+                        .unwrap_or(project_path)
+                        .trim_end_matches(".csproj")
+                        .to_string();
 
-                        dependencies.push(Dependency {
-                            name: project_name,
-                            path: Some(source_file.to_string()),
-                            is_external: false,
-                            line_number: Some(line_num + 1),
-                            dependency_type: "project_reference".to_string(),
-                            version: None,
-                        });
-                    }
+                    dependencies.push(Dependency {
+                        name: project_name,
+                        path: Some(source_file.to_string()),
+                        is_external: false,
+                        line_number: Some(line_num + 1),
+                        dependency_type: "project_reference".to_string(),
+                        version: None,
+                    });
                 }
             }
 
             // Extract framework references: <FrameworkReference Include="Microsoft.AspNetCore.App" />
-            if trimmed.starts_with("<FrameworkReference") && trimmed.contains("Include=") {
-                if let Some(start) = trimmed.find("Include=\"") {
-                    let after_include = &trimmed[start + 9..];
-                    if let Some(end) = after_include.find('"') {
-                        let framework_name = &after_include[..end];
+            if trimmed.starts_with("<FrameworkReference")
+                && trimmed.contains("Include=")
+                && let Some(start) = trimmed.find("Include=\"")
+            {
+                let after_include = &trimmed[start + 9..];
+                if let Some(end) = after_include.find('"') {
+                    let framework_name = &after_include[..end];
 
-                        dependencies.push(Dependency {
-                            name: framework_name.to_string(),
-                            path: Some(source_file.to_string()),
-                            is_external: true,
-                            line_number: Some(line_num + 1),
-                            dependency_type: "framework_reference".to_string(),
-                            version: None,
-                        });
-                    }
+                    dependencies.push(Dependency {
+                        name: framework_name.to_string(),
+                        path: Some(source_file.to_string()),
+                        is_external: true,
+                        line_number: Some(line_num + 1),
+                        dependency_type: "framework_reference".to_string(),
+                        version: None,
+                    });
                 }
             }
         }
@@ -635,12 +644,8 @@ impl CSharpProcessor {
                     (parts[0].to_string(), name, has_default)
                 };
 
-                // Handle generic types and nullable types
-                let clean_type = if param_type.contains('<') || param_type.contains('?') {
-                    param_type
-                } else {
-                    param_type
-                };
+                // Handle generic types and nullable types (kept as-is regardless)
+                let clean_type = param_type;
 
                 parameters.push(ParameterInfo {
                     name,
@@ -699,7 +704,7 @@ impl CSharpProcessor {
     /// Extract dependency name from C# using path
     fn extract_dependency_name(&self, using_path: &str) -> String {
         // For System.Collections.Generic, return Generic
-        if let Some(namespace_name) = using_path.split('.').last() {
+        if let Some(namespace_name) = using_path.split('.').next_back() {
             namespace_name.to_string()
         } else {
             using_path.to_string()
@@ -1001,8 +1006,8 @@ impl CSharpProcessor {
         let column_re = regex::Regex::new(r"(?i)^\s*\[?(\w+)\]?\s+([\w\(\),\s]+?)(?:\s+(?:NOT\s+)?NULL|\s+PRIMARY\s+KEY|\s+IDENTITY|\s+DEFAULT|\s*,|\s*\))").unwrap();
 
         // Look for columns in the following lines until we hit a closing paren or GO
-        for i in (start_line + 1)..lines.len().min(start_line + 50) {
-            let line = lines[i].trim();
+        for line_raw in lines.iter().skip(start_line + 1).take(49) {
+            let line = line_raw.trim();
 
             if line.starts_with(')')
                 || line.to_uppercase().starts_with("GO")
@@ -1057,8 +1062,7 @@ impl CSharpProcessor {
 
         // Collect lines until AS keyword
         let mut param_section = String::new();
-        for i in start_line..lines.len().min(start_line + 30) {
-            let line = lines[i];
+        for &line in lines.iter().skip(start_line).take(30) {
             param_section.push_str(line);
             param_section.push(' ');
 
@@ -1103,8 +1107,7 @@ impl CSharpProcessor {
             regex::Regex::new(r"(?i)RETURNS\s+([\w\(\),\s]+?)(?:\s+AS|\s+WITH|\s+BEGIN)").unwrap();
 
         // Look for RETURNS keyword
-        for i in start_line..lines.len().min(start_line + 20) {
-            let line = lines[i];
+        for &line in lines.iter().skip(start_line).take(20) {
             if let Some(captures) = returns_re.captures(line) {
                 return captures.get(1).map(|m| m.as_str().trim().to_string());
             }
@@ -1121,15 +1124,15 @@ impl CSharpProcessor {
         for i in (0..line_index).rev() {
             let line = lines[i].trim();
 
-            if line.starts_with("--") {
-                comments.insert(0, line[2..].trim().to_string());
+            if let Some(rest) = line.strip_prefix("--") {
+                comments.insert(0, rest.trim().to_string());
             } else if line.ends_with("*/") {
                 // Multi-line comment - find the start
                 let mut comment_text = String::new();
                 for j in (0..=i).rev() {
                     let comment_line = lines[j].trim();
-                    if comment_line.starts_with("/*") {
-                        comment_text = comment_line[2..].trim_end_matches("*/").trim().to_string();
+                    if let Some(stripped) = comment_line.strip_prefix("/*") {
+                        comment_text = stripped.trim_end_matches("*/").trim().to_string();
                         break;
                     } else if comment_line.ends_with("*/") {
                         comment_text = comment_line.trim_end_matches("*/").trim().to_string();
@@ -1167,85 +1170,85 @@ impl CSharpProcessor {
                 || trimmed.starts_with("<PreDeploy")
                 || trimmed.starts_with("<PostDeploy"))
                 && trimmed.contains("Include=")
+                && let Some(start) = trimmed.find("Include=\"")
             {
-                if let Some(start) = trimmed.find("Include=\"") {
-                    let after_include = &trimmed[start + 9..];
-                    if let Some(end) = after_include.find('"') {
-                        let file_path = &after_include[..end];
+                let after_include = &trimmed[start + 9..];
+                if let Some(end) = after_include.find('"') {
+                    let file_path = &after_include[..end];
 
-                        // Extract SQL object name and type from path
-                        let parts: Vec<&str> = file_path.split(['/', '\\', '.']).collect();
-                        let object_type = if parts.len() > 2 {
-                            parts[parts.len() - 3].to_string() // e.g., "Tables", "StoredProcedures"
-                        } else {
-                            "sql_object".to_string()
-                        };
+                    // Extract SQL object name and type from path
+                    let parts: Vec<&str> = file_path.split(['/', '\\', '.']).collect();
+                    let object_type = if parts.len() > 2 {
+                        parts[parts.len() - 3].to_string() // e.g., "Tables", "StoredProcedures"
+                    } else {
+                        "sql_object".to_string()
+                    };
 
-                        let object_name =
-                            parts.iter().rev().nth(1).unwrap_or(&"unknown").to_string();
+                    let object_name = parts.iter().rev().nth(1).unwrap_or(&"unknown").to_string();
 
-                        dependencies.push(Dependency {
-                            name: object_name,
-                            path: Some(source_file.to_string()),
-                            is_external: false,
-                            line_number: Some(line_num + 1),
-                            dependency_type: object_type,
-                            version: None,
-                        });
-                    }
+                    dependencies.push(Dependency {
+                        name: object_name,
+                        path: Some(source_file.to_string()),
+                        is_external: false,
+                        line_number: Some(line_num + 1),
+                        dependency_type: object_type,
+                        version: None,
+                    });
                 }
             }
 
             // Extract project references: <ProjectReference Include="..\OtherDatabase\OtherDatabase.sqlproj" />
-            if trimmed.starts_with("<ProjectReference") && trimmed.contains("Include=") {
-                if let Some(start) = trimmed.find("Include=\"") {
-                    let after_include = &trimmed[start + 9..];
-                    if let Some(end) = after_include.find('"') {
-                        let project_path = &after_include[..end];
+            if trimmed.starts_with("<ProjectReference")
+                && trimmed.contains("Include=")
+                && let Some(start) = trimmed.find("Include=\"")
+            {
+                let after_include = &trimmed[start + 9..];
+                if let Some(end) = after_include.find('"') {
+                    let project_path = &after_include[..end];
 
-                        // Extract project name from path
-                        let project_name = project_path
-                            .split(['/', '\\'])
-                            .last()
-                            .unwrap_or(project_path)
-                            .trim_end_matches(".sqlproj")
-                            .to_string();
+                    // Extract project name from path
+                    let project_name = project_path
+                        .split(['/', '\\'])
+                        .next_back()
+                        .unwrap_or(project_path)
+                        .trim_end_matches(".sqlproj")
+                        .to_string();
 
-                        dependencies.push(Dependency {
-                            name: project_name,
-                            path: Some(source_file.to_string()),
-                            is_external: false,
-                            line_number: Some(line_num + 1),
-                            dependency_type: "database_reference".to_string(),
-                            version: None,
-                        });
-                    }
+                    dependencies.push(Dependency {
+                        name: project_name,
+                        path: Some(source_file.to_string()),
+                        is_external: false,
+                        line_number: Some(line_num + 1),
+                        dependency_type: "database_reference".to_string(),
+                        version: None,
+                    });
                 }
             }
 
             // Extract DACPAC references: <ArtifactReference Include="..\..\Packages\DatabaseName.dacpac" />
-            if trimmed.starts_with("<ArtifactReference") && trimmed.contains("Include=") {
-                if let Some(start) = trimmed.find("Include=\"") {
-                    let after_include = &trimmed[start + 9..];
-                    if let Some(end) = after_include.find('"') {
-                        let dacpac_path = &after_include[..end];
+            if trimmed.starts_with("<ArtifactReference")
+                && trimmed.contains("Include=")
+                && let Some(start) = trimmed.find("Include=\"")
+            {
+                let after_include = &trimmed[start + 9..];
+                if let Some(end) = after_include.find('"') {
+                    let dacpac_path = &after_include[..end];
 
-                        let dacpac_name = dacpac_path
-                            .split(['/', '\\'])
-                            .last()
-                            .unwrap_or(dacpac_path)
-                            .trim_end_matches(".dacpac")
-                            .to_string();
+                    let dacpac_name = dacpac_path
+                        .split(['/', '\\'])
+                        .next_back()
+                        .unwrap_or(dacpac_path)
+                        .trim_end_matches(".dacpac")
+                        .to_string();
 
-                        dependencies.push(Dependency {
-                            name: dacpac_name,
-                            path: Some(source_file.to_string()),
-                            is_external: true,
-                            line_number: Some(line_num + 1),
-                            dependency_type: "dacpac_reference".to_string(),
-                            version: None,
-                        });
-                    }
+                    dependencies.push(Dependency {
+                        name: dacpac_name,
+                        path: Some(source_file.to_string()),
+                        is_external: true,
+                        line_number: Some(line_num + 1),
+                        dependency_type: "dacpac_reference".to_string(),
+                        version: None,
+                    });
                 }
             }
         }
@@ -1267,127 +1270,128 @@ impl CSharpProcessor {
             }
 
             // Extract table references from FROM clause
-            if upper_line.contains(" FROM ") {
-                if let Some(from_pos) = upper_line.find(" FROM ") {
-                    let after_from = &line[from_pos + 6..];
-                    let table_part = after_from
-                        .split_whitespace()
-                        .next()
-                        .unwrap_or("")
-                        .trim_matches(|c: char| {
-                            !c.is_alphanumeric() && c != '.' && c != '_' && c != '[' && c != ']'
-                        });
+            if upper_line.contains(" FROM ")
+                && let Some(from_pos) = upper_line.find(" FROM ")
+            {
+                let after_from = &line[from_pos + 6..];
+                let table_part = after_from
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("")
+                    .trim_matches(|c: char| {
+                        !c.is_alphanumeric() && c != '.' && c != '_' && c != '[' && c != ']'
+                    });
 
-                    if !table_part.is_empty() {
-                        dependencies.push(Dependency {
-                            name: table_part.to_string(),
-                            path: Some(source_file.to_string()),
-                            is_external: false,
-                            line_number: Some(line_num + 1),
-                            dependency_type: "table_reference".to_string(),
-                            version: None,
-                        });
-                    }
+                if !table_part.is_empty() {
+                    dependencies.push(Dependency {
+                        name: table_part.to_string(),
+                        path: Some(source_file.to_string()),
+                        is_external: false,
+                        line_number: Some(line_num + 1),
+                        dependency_type: "table_reference".to_string(),
+                        version: None,
+                    });
                 }
             }
 
             // Extract table references from JOIN clause
-            if upper_line.contains(" JOIN ") {
-                if let Some(join_pos) = upper_line.find(" JOIN ") {
-                    let after_join = &line[join_pos + 6..];
-                    let table_part = after_join
-                        .split_whitespace()
-                        .next()
-                        .unwrap_or("")
-                        .trim_matches(|c: char| {
-                            !c.is_alphanumeric() && c != '.' && c != '_' && c != '[' && c != ']'
-                        });
+            if upper_line.contains(" JOIN ")
+                && let Some(join_pos) = upper_line.find(" JOIN ")
+            {
+                let after_join = &line[join_pos + 6..];
+                let table_part = after_join
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("")
+                    .trim_matches(|c: char| {
+                        !c.is_alphanumeric() && c != '.' && c != '_' && c != '[' && c != ']'
+                    });
 
-                    if !table_part.is_empty() {
-                        dependencies.push(Dependency {
-                            name: table_part.to_string(),
-                            path: Some(source_file.to_string()),
-                            is_external: false,
-                            line_number: Some(line_num + 1),
-                            dependency_type: "table_reference".to_string(),
-                            version: None,
-                        });
-                    }
+                if !table_part.is_empty() {
+                    dependencies.push(Dependency {
+                        name: table_part.to_string(),
+                        path: Some(source_file.to_string()),
+                        is_external: false,
+                        line_number: Some(line_num + 1),
+                        dependency_type: "table_reference".to_string(),
+                        version: None,
+                    });
                 }
             }
 
             // Extract table references from INSERT INTO
-            if upper_line.contains("INSERT INTO ") {
-                if let Some(insert_pos) = upper_line.find("INSERT INTO ") {
-                    let after_insert = &line[insert_pos + 12..];
-                    let table_part = after_insert
-                        .split_whitespace()
-                        .next()
-                        .unwrap_or("")
-                        .trim_matches(|c: char| {
-                            !c.is_alphanumeric() && c != '.' && c != '_' && c != '[' && c != ']'
-                        });
+            if upper_line.contains("INSERT INTO ")
+                && let Some(insert_pos) = upper_line.find("INSERT INTO ")
+            {
+                let after_insert = &line[insert_pos + 12..];
+                let table_part = after_insert
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("")
+                    .trim_matches(|c: char| {
+                        !c.is_alphanumeric() && c != '.' && c != '_' && c != '[' && c != ']'
+                    });
 
-                    if !table_part.is_empty() {
-                        dependencies.push(Dependency {
-                            name: table_part.to_string(),
-                            path: Some(source_file.to_string()),
-                            is_external: false,
-                            line_number: Some(line_num + 1),
-                            dependency_type: "table_reference".to_string(),
-                            version: None,
-                        });
-                    }
+                if !table_part.is_empty() {
+                    dependencies.push(Dependency {
+                        name: table_part.to_string(),
+                        path: Some(source_file.to_string()),
+                        is_external: false,
+                        line_number: Some(line_num + 1),
+                        dependency_type: "table_reference".to_string(),
+                        version: None,
+                    });
                 }
             }
 
             // Extract table references from UPDATE
-            if upper_line.contains("UPDATE ") && !upper_line.contains("UPDATE STATISTICS") {
-                if let Some(update_pos) = upper_line.find("UPDATE ") {
-                    let after_update = &line[update_pos + 7..];
-                    let table_part = after_update
-                        .split_whitespace()
-                        .next()
-                        .unwrap_or("")
-                        .trim_matches(|c: char| {
-                            !c.is_alphanumeric() && c != '.' && c != '_' && c != '[' && c != ']'
-                        });
+            if upper_line.contains("UPDATE ")
+                && !upper_line.contains("UPDATE STATISTICS")
+                && let Some(update_pos) = upper_line.find("UPDATE ")
+            {
+                let after_update = &line[update_pos + 7..];
+                let table_part = after_update
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("")
+                    .trim_matches(|c: char| {
+                        !c.is_alphanumeric() && c != '.' && c != '_' && c != '[' && c != ']'
+                    });
 
-                    if !table_part.is_empty() {
-                        dependencies.push(Dependency {
-                            name: table_part.to_string(),
-                            path: Some(source_file.to_string()),
-                            is_external: false,
-                            line_number: Some(line_num + 1),
-                            dependency_type: "table_reference".to_string(),
-                            version: None,
-                        });
-                    }
+                if !table_part.is_empty() {
+                    dependencies.push(Dependency {
+                        name: table_part.to_string(),
+                        path: Some(source_file.to_string()),
+                        is_external: false,
+                        line_number: Some(line_num + 1),
+                        dependency_type: "table_reference".to_string(),
+                        version: None,
+                    });
                 }
             }
 
             // Extract table references from DELETE FROM
-            if upper_line.contains("DELETE FROM ") {
-                if let Some(delete_pos) = upper_line.find("DELETE FROM ") {
-                    let after_delete = &line[delete_pos + 12..];
-                    let table_part = after_delete
-                        .split_whitespace()
-                        .next()
-                        .unwrap_or("")
-                        .trim_matches(|c: char| {
-                            !c.is_alphanumeric() && c != '.' && c != '_' && c != '[' && c != ']'
-                        });
+            if upper_line.contains("DELETE FROM ")
+                && let Some(delete_pos) = upper_line.find("DELETE FROM ")
+            {
+                let after_delete = &line[delete_pos + 12..];
+                let table_part = after_delete
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("")
+                    .trim_matches(|c: char| {
+                        !c.is_alphanumeric() && c != '.' && c != '_' && c != '[' && c != ']'
+                    });
 
-                    if !table_part.is_empty() {
-                        dependencies.push(Dependency {
-                            name: table_part.to_string(),
-                            path: Some(source_file.to_string()),
-                            is_external: false,
-                            line_number: Some(line_num + 1),
-                            dependency_type: "table_reference".to_string(),
-                            version: None,
-                        });
-                    }
+                if !table_part.is_empty() {
+                    dependencies.push(Dependency {
+                        name: table_part.to_string(),
+                        path: Some(source_file.to_string()),
+                        is_external: false,
+                        line_number: Some(line_num + 1),
+                        dependency_type: "table_reference".to_string(),
+                        version: None,
+                    });
                 }
             }
 

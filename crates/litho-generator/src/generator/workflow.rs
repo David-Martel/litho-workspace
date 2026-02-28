@@ -91,7 +91,7 @@ pub async fn launch(c: &Config) -> Result<()> {
 
     // Execute multi-agent research stage
     let research_start = Instant::now();
-    let research_orchestrator = ResearchOrchestrator::default();
+    let research_orchestrator = ResearchOrchestrator;
     research_orchestrator
         .execute_research_pipeline(&context)
         .await?;
@@ -107,7 +107,7 @@ pub async fn launch(c: &Config) -> Result<()> {
     // Execute document generation process
     let compose_start = Instant::now();
     let mut doc_tree = DocTree::new(&context.config.target_language);
-    let documentation_orchestrator = DocumentationComposer::default();
+    let documentation_orchestrator = DocumentationComposer;
     documentation_orchestrator
         .execute(&context, &mut doc_tree)
         .await?;
@@ -162,10 +162,8 @@ pub async fn launch(c: &Config) -> Result<()> {
 
     // Save documentation manifest for incremental builds
     let mut manifest = DocumentationManifest::new(context.config.project_path.clone());
-    manifest.git_commit =
-        change_detector::get_git_commit(&context.config.project_path).await;
-    manifest.git_branch =
-        change_detector::get_git_branch(&context.config.project_path).await;
+    manifest.git_commit = change_detector::get_git_commit(&context.config.project_path).await;
+    manifest.git_branch = change_detector::get_git_branch(&context.config.project_path).await;
     manifest.total_generation_time_secs = total_time;
     if let Err(e) = manifest.save(&context.config.internal_path).await {
         eprintln!("⚠️  Warning: Failed to save manifest: {}", e);
@@ -256,7 +254,7 @@ pub async fn launch_incremental(c: &Config) -> Result<()> {
 
     // Selective research stage — only re-run research agents in the affected set.
     let research_start = Instant::now();
-    let research_orchestrator = ResearchOrchestrator::default();
+    let research_orchestrator = ResearchOrchestrator;
     research_orchestrator
         .execute_research_pipeline_selective(&context, &changeset.affected_agents)
         .await?;
@@ -272,7 +270,7 @@ pub async fn launch_incremental(c: &Config) -> Result<()> {
     // Selective compose stage — only re-run documentation agents in the affected set.
     let compose_start = Instant::now();
     let mut doc_tree = DocTree::new(&context.config.target_language);
-    let documentation_orchestrator = DocumentationComposer::default();
+    let documentation_orchestrator = DocumentationComposer;
     documentation_orchestrator
         .execute_selective(&context, &mut doc_tree, &changeset.affected_agents)
         .await?;

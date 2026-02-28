@@ -20,6 +20,12 @@ pub struct AICodePurposeAnalysis {
 /// Component type enhancer, combining rules and AI analysis
 pub struct CodePurposeEnhancer;
 
+impl Default for CodePurposeEnhancer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CodePurposeEnhancer {
     pub fn new() -> Self {
         Self {}
@@ -57,7 +63,7 @@ impl CodePurposeEnhancer {
         )
         .await;
 
-        return match analyze_result {
+        match analyze_result {
             Ok(ai_analysis) => {
                 // If AI analysis confidence is high, use AI result
                 if ai_analysis.confidence > 0.7 {
@@ -74,7 +80,7 @@ impl CodePurposeEnhancer {
                 // AI analysis failed, use rule result
                 Ok(rule_based_type)
             }
-        };
+        }
     }
 
     /// Build component type analysis prompt

@@ -210,7 +210,7 @@ impl DataFormatter {
                 ));
             }
         }
-        content.push_str("\n");
+        content.push('\n');
         content
     }
 
@@ -252,7 +252,7 @@ impl DataFormatter {
                 rel.dependency_type.as_str()
             ));
         }
-        content.push_str("\n");
+        content.push('\n');
         content
     }
 
@@ -433,7 +433,7 @@ impl GeneratorPromptBuilder {
         // Insert custom content (if any)
         if let Some(custom) = custom_content {
             prompt.push_str(&custom);
-            prompt.push_str("\n");
+            prompt.push('\n');
         }
 
         // Collect and format various data sources

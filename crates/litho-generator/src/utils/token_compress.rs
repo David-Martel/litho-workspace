@@ -131,7 +131,7 @@ fn strip_c_style_comments(source: &str) -> String {
 
 /// Consume a string literal delimited by `quote` (either `"` or `'`).
 /// Returns `(literal_slice, bytes_consumed)`.
-fn consume_string_literal<'a>(bytes: &'a [u8], start: usize, quote: u8) -> (&'a str, usize) {
+fn consume_string_literal(bytes: &[u8], start: usize, quote: u8) -> (&str, usize) {
     let mut i = start + 1; // skip opening quote
     while i < bytes.len() {
         if bytes[i] == b'\\' {
@@ -402,7 +402,7 @@ mod tests {
 
     #[test]
     fn python_standalone_hash_comment_stripped() {
-    let src = "# full line comment\ny = 2\n";
+        let src = "# full line comment\ny = 2\n";
         let out = compress_source_for_llm(src, Some("py"));
         assert!(!out.contains("full line comment"), "got: {out}");
         assert!(out.contains("y = 2"), "got: {out}");
@@ -448,7 +448,10 @@ mod tests {
     fn single_blank_line_kept() {
         let src = "fn a() {}\n\nfn b() {}\n";
         let out = compress_source_for_llm(src, Some("rs"));
-        assert!(out.contains("\n\n"), "expected one blank line preserved, got: {out}");
+        assert!(
+            out.contains("\n\n"),
+            "expected one blank line preserved, got: {out}"
+        );
     }
 
     // -----------------------------------------------------------------------

@@ -1,5 +1,6 @@
 use comrak::nodes::{AstNode, NodeValue};
-use comrak::{format_commonmark, parse_document, Arena, ExtensionOptions, Options};
+use comrak::options::Extension;
+use comrak::{Arena, Options, format_commonmark, parse_document};
 
 /// Structural markdown fixer using comrak's AST.
 ///
@@ -49,15 +50,16 @@ impl MarkdownFixer {
 
     /// Build comrak options with GFM extensions enabled.
     fn options() -> Options<'static> {
-        let mut opts = Options::default();
-        opts.extension = ExtensionOptions {
-            strikethrough: true,
-            table: true,
-            tasklist: true,
-            autolink: true,
+        Options {
+            extension: Extension {
+                strikethrough: true,
+                table: true,
+                tasklist: true,
+                autolink: true,
+                ..Default::default()
+            },
             ..Default::default()
-        };
-        opts
+        }
     }
 
     /// Ensure only one H1 exists; demote extras to H2.
@@ -65,14 +67,14 @@ impl MarkdownFixer {
         let mut h1_seen = false;
         for node in root.descendants() {
             let mut data = node.data.borrow_mut();
-            if let NodeValue::Heading(ref mut heading) = data.value {
-                if heading.level == 1 {
-                    if h1_seen {
-                        heading.level = 2;
-                        report.headings_fixed += 1;
-                    } else {
-                        h1_seen = true;
-                    }
+            if let NodeValue::Heading(ref mut heading) = data.value
+                && heading.level == 1
+            {
+                if h1_seen {
+                    heading.level = 2;
+                    report.headings_fixed += 1;
+                } else {
+                    h1_seen = true;
                 }
             }
         }
@@ -82,11 +84,11 @@ impl MarkdownFixer {
     fn fix_empty_links<'a>(root: &'a AstNode<'a>, report: &mut FixReport) {
         for node in root.descendants() {
             let mut data = node.data.borrow_mut();
-            if let NodeValue::Link(ref mut link) = data.value {
-                if link.url.is_empty() {
-                    link.url = "#".to_string();
-                    report.links_fixed += 1;
-                }
+            if let NodeValue::Link(ref mut link) = data.value
+                && link.url.is_empty()
+            {
+                link.url = "#".to_string();
+                report.links_fixed += 1;
             }
         }
     }
@@ -119,10 +121,10 @@ impl MarkdownFixer {
     fn audit_mermaid_blocks<'a>(root: &'a AstNode<'a>, report: &mut FixReport) {
         for node in root.descendants() {
             let data = node.data.borrow();
-            if let NodeValue::CodeBlock(ref cb) = data.value {
-                if cb.info.eq_ignore_ascii_case("mermaid") {
-                    report.mermaid_blocks_found += 1;
-                }
+            if let NodeValue::CodeBlock(ref cb) = data.value
+                && cb.info.eq_ignore_ascii_case("mermaid")
+            {
+                report.mermaid_blocks_found += 1;
             }
         }
     }

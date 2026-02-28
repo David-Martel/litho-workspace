@@ -1,6 +1,6 @@
 use crate::generator::{compose::memory::MemoryScope, context::GeneratorContext};
 use anyhow::Result;
-use pulldown_cmark::{html, Options, Parser};
+use pulldown_cmark::{Options, Parser, html};
 use std::fs;
 
 use super::{DocTree, MarkdownFixer, MermaidFixer, Outlet};
@@ -26,11 +26,7 @@ impl Outlet for HtmlOutlet {
         }
         fs::create_dir_all(output_dir)?;
 
-        let project_name = context
-            .config
-            .project_name
-            .as_deref()
-            .unwrap_or("Project");
+        let project_name = context.config.project_name.as_deref().unwrap_or("Project");
 
         for (scoped_key, relative_path) in &self.doc_tree.structure {
             if let Some(doc_markdown) = context
@@ -56,10 +52,10 @@ impl Outlet for HtmlOutlet {
 
                 let output_file_path = output_dir.join(&html_path);
 
-                if let Some(parent_dir) = output_file_path.parent() {
-                    if !parent_dir.exists() {
-                        fs::create_dir_all(parent_dir)?;
-                    }
+                if let Some(parent_dir) = output_file_path.parent()
+                    && !parent_dir.exists()
+                {
+                    fs::create_dir_all(parent_dir)?;
                 }
 
                 let html_content = markdown_to_html(&fixed_markdown, project_name, scoped_key);

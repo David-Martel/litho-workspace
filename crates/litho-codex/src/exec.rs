@@ -1,6 +1,6 @@
-use anyhow::Context;
 use crate::prompts;
 use crate::provider::{DocGenerator, DocumentSection};
+use anyhow::Context;
 use async_trait::async_trait;
 use litho_core::env::LithoEnv;
 use litho_core::types::ExtractedCodebase;
@@ -45,12 +45,12 @@ impl CodexExecGenerator {
         }
 
         // Check executable directory
-        if let Ok(current_exe) = env::current_exe() {
-            if let Some(parent) = current_exe.parent() {
-                let local_codex = parent.join("codex.exe");
-                if local_codex.exists() {
-                    return local_codex;
-                }
+        if let Ok(current_exe) = env::current_exe()
+            && let Some(parent) = current_exe.parent()
+        {
+            let local_codex = parent.join("codex.exe");
+            if local_codex.exists() {
+                return local_codex;
             }
         }
 
@@ -62,15 +62,13 @@ impl CodexExecGenerator {
 impl DocGenerator for CodexExecGenerator {
     async fn validate_readiness(&self) -> anyhow::Result<()> {
         let bin = self.resolve_binary();
-        let output = Command::new(&bin)
-            .arg("--version")
-            .output()
-            .map_err(|e| {
-                anyhow::anyhow!(
-                    "codex binary not found or not executable at {:?}: {}",
-                    bin, e
-                )
-            })?;
+        let output = Command::new(&bin).arg("--version").output().map_err(|e| {
+            anyhow::anyhow!(
+                "codex binary not found or not executable at {:?}: {}",
+                bin,
+                e
+            )
+        })?;
 
         if !output.status.success() {
             anyhow::bail!("codex --version failed with exit {}", output.status);
@@ -105,12 +103,9 @@ impl DocGenerator for CodexExecGenerator {
 
         cmd.arg(&prompt);
 
-        let output = cmd.output().map_err(|e| {
-            anyhow::anyhow!(
-                "failed to launch codex process: {}",
-                e
-            )
-        })?;
+        let output = cmd
+            .output()
+            .map_err(|e| anyhow::anyhow!("failed to launch codex process: {}", e))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);

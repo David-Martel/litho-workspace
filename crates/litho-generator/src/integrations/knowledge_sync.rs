@@ -261,16 +261,15 @@ impl KnowledgeSyncer {
                 // Check if any source file has been modified
                 for doc in &metadata.local_docs {
                     let source_path = PathBuf::from(&doc.file_path);
-                    if source_path.exists() {
-                        if let Ok(file_metadata) = fs::metadata(&source_path) {
-                            if let Ok(modified) = file_metadata.modified() {
-                                // Convert SystemTime to DateTime<Utc>
-                                let modified_datetime: DateTime<Utc> = modified.into();
-                                // Compare with cached modification time
-                                if modified_datetime > metadata.last_synced {
-                                    return Ok(true);
-                                }
-                            }
+                    if source_path.exists()
+                        && let Ok(file_metadata) = fs::metadata(&source_path)
+                        && let Ok(modified) = file_metadata.modified()
+                    {
+                        // Convert SystemTime to DateTime<Utc>
+                        let modified_datetime: DateTime<Utc> = modified.into();
+                        // Compare with cached modification time
+                        if modified_datetime > metadata.last_synced {
+                            return Ok(true);
                         }
                     }
                 }
@@ -318,8 +317,8 @@ impl KnowledgeSyncer {
 
         let filtered_docs: Vec<LocalDocMetadata> = docs
             .iter()
+            .filter(|&doc| Self::doc_visible_to_agent(doc, agent_filter))
             .cloned()
-            .filter(|doc| Self::doc_visible_to_agent(doc, agent_filter))
             .collect();
 
         if filtered_docs.is_empty() {

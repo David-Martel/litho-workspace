@@ -150,8 +150,15 @@ impl ProviderClient {
             | LLMProvider::Mistral
             | LLMProvider::OpenRouter
             | LLMProvider::Ollama => {
-                self.send_openai_compatible(model, messages, max_tokens, temperature, tools, tool_choice)
-                    .await
+                self.send_openai_compatible(
+                    model,
+                    messages,
+                    max_tokens,
+                    temperature,
+                    tools,
+                    tool_choice,
+                )
+                .await
             }
             LLMProvider::Anthropic => {
                 self.send_anthropic(model, messages, max_tokens, temperature, tools, tool_choice)
@@ -178,7 +185,7 @@ impl ProviderClient {
         tools: Option<&[ToolDefinition]>,
         tool_choice: Option<&ToolChoice>,
     ) -> Result<CompletionResponse> {
-        let api_messages = messages.iter().map(|m| chat_to_openai(m)).collect();
+        let api_messages = messages.iter().map(chat_to_openai).collect();
 
         let api_tools = tools.map(|ts| {
             ts.iter()
@@ -194,9 +201,9 @@ impl ProviderClient {
         });
 
         let api_tool_choice = tool_choice.map(|tc| match tc {
-            ToolChoice::Auto => serde_json::json!("auto"),
+            ToolChoice::_Auto => serde_json::json!("auto"),
             ToolChoice::Required => serde_json::json!("required"),
-            ToolChoice::None => serde_json::json!("none"),
+            ToolChoice::_None => serde_json::json!("none"),
         });
 
         let request = OpenAIRequest {
@@ -319,7 +326,7 @@ impl ProviderClient {
         });
 
         let api_tool_choice = tool_choice.map(|tc| match tc {
-            ToolChoice::Auto => AnthropicToolChoice {
+            ToolChoice::_Auto => AnthropicToolChoice {
                 choice_type: "auto".to_string(),
                 name: None,
             },
@@ -327,7 +334,7 @@ impl ProviderClient {
                 choice_type: "any".to_string(),
                 name: None,
             },
-            ToolChoice::None => AnthropicToolChoice {
+            ToolChoice::_None => AnthropicToolChoice {
                 choice_type: "none".to_string(),
                 name: None,
             },
@@ -410,9 +417,9 @@ impl ProviderClient {
                     let parts: Vec<GeminiPart> = content
                         .iter()
                         .filter_map(|c| match c {
-                            AssistantContent::Text(t) => {
-                                Some(GeminiPart::Text { text: t.text.clone() })
-                            }
+                            AssistantContent::Text(t) => Some(GeminiPart::Text {
+                                text: t.text.clone(),
+                            }),
                             AssistantContent::ToolCall(tc) => {
                                 let args = serde_json::from_str(&tc.function.arguments)
                                     .unwrap_or_default();
@@ -436,8 +443,8 @@ impl ProviderClient {
                     content,
                 } => {
                     // Gemini uses functionResponse in model turn
-                    let response_value =
-                        serde_json::from_str(content).unwrap_or(serde_json::json!({"result": content}));
+                    let response_value = serde_json::from_str(content)
+                        .unwrap_or(serde_json::json!({"result": content}));
                     contents.push(GeminiContent {
                         role: Some("function".to_string()),
                         parts: vec![GeminiPart::FunctionResponse {
@@ -532,10 +539,10 @@ impl ProviderAgent {
     /// Execute a single-turn prompt and return the text response.
     pub async fn prompt(&self, user_prompt: &str) -> Result<String> {
         // CodexRs uses subprocess
-        if let Some(ref codex) = self.client.codex_client {
-            if self.client.provider == LLMProvider::CodexRs {
-                return codex.prompt(&self.system_prompt, user_prompt).await;
-            }
+        if let Some(ref codex) = self.client.codex_client
+            && self.client.provider == LLMProvider::CodexRs
+        {
+            return codex.prompt(&self.system_prompt, user_prompt).await;
         }
 
         let messages = vec![
@@ -565,16 +572,16 @@ impl ProviderAgent {
         max_iterations: usize,
     ) -> Result<String, PromptError> {
         // CodexRs fallback — no multi-turn, delegate to single prompt
-        if let Some(ref codex) = self.client.codex_client {
-            if self.client.provider == LLMProvider::CodexRs {
-                return codex.prompt(&self.system_prompt, user_prompt).await.map_err(|e| {
-                    PromptError::CompletionError(e)
-                });
-            }
+        if let Some(ref codex) = self.client.codex_client
+            && self.client.provider == LLMProvider::CodexRs
+        {
+            return codex
+                .prompt(&self.system_prompt, user_prompt)
+                .await
+                .map_err(PromptError::CompletionError);
         }
 
-        let tool_defs: Vec<ToolDefinition> =
-            self.tools.iter().map(|t| t.definition()).collect();
+        let tool_defs: Vec<ToolDefinition> = self.tools.iter().map(|t| t.definition()).collect();
         let has_tools = !tool_defs.is_empty();
 
         let mut messages = vec![
@@ -601,8 +608,13 @@ impl ProviderAgent {
                 return Ok(resp.text_content());
             }
 
-            // Build assistant message with tool calls
+            // Build assistant message with tool calls (and any reasoning traces).
             let mut assistant_content = Vec::new();
+            if !resp.reasoning.is_empty() {
+                assistant_content.push(AssistantContent::Reasoning(ReasoningContent {
+                    reasoning: resp.reasoning.clone(),
+                }));
+            }
             if !resp.text.is_empty() {
                 assistant_content.push(AssistantContent::Text(TextContent {
                     text: resp.text.clone(),
@@ -626,7 +638,7 @@ impl ProviderAgent {
         Err(PromptError::MaxDepthError {
             max_depth: max_iterations,
             chat_history: messages,
-            prompt: user_prompt.to_string(),
+            _prompt: user_prompt.to_string(),
         })
     }
 
@@ -688,12 +700,16 @@ where
                 max_tokens,
                 ..
             } => {
-                Self::extract_via_function_calling(client, model, system_prompt, *max_tokens, prompt)
-                    .await
+                Self::extract_via_function_calling(
+                    client,
+                    model,
+                    system_prompt,
+                    *max_tokens,
+                    prompt,
+                )
+                .await
             }
-            ProviderExtractor::Ollama(wrapper) => {
-                wrapper.extract(prompt).await.map_err(|e| e.into())
-            }
+            ProviderExtractor::Ollama(wrapper) => wrapper.extract(prompt).await,
             ProviderExtractor::CodexRs {
                 client,
                 system_prompt,
@@ -743,21 +759,22 @@ where
         // Find the tool call with our extraction function
         for tc in &resp.tool_calls {
             if tc.function.name == "extract_data" {
-                let result: T = serde_json::from_str(&tc.function.arguments).with_context(|| {
-                    format!(
-                        "Failed to deserialize extracted data: {}",
-                        tc.function.arguments.chars().take(200).collect::<String>()
-                    )
-                })?;
+                let result: T =
+                    serde_json::from_str(&tc.function.arguments).with_context(|| {
+                        format!(
+                            "Failed to deserialize extracted data: {}",
+                            tc.function.arguments.chars().take(200).collect::<String>()
+                        )
+                    })?;
                 return Ok(result);
             }
         }
 
         // If no tool call was found, try parsing the text response as JSON
-        if !resp.text.is_empty() {
-            if let Ok(result) = serde_json::from_str::<T>(&resp.text) {
-                return Ok(result);
-            }
+        if !resp.text.is_empty()
+            && let Ok(result) = serde_json::from_str::<T>(&resp.text)
+        {
+            return Ok(result);
         }
 
         anyhow::bail!("Model did not produce structured extraction output")
@@ -770,6 +787,8 @@ where
 struct CompletionResponse {
     text: String,
     tool_calls: Vec<ToolCallInfo>,
+    /// Reasoning traces from models that expose chain-of-thought (e.g. Anthropic thinking blocks).
+    reasoning: Vec<String>,
 }
 
 impl CompletionResponse {
@@ -857,12 +876,17 @@ fn openai_to_completion(msg: OpenAIMessage) -> CompletionResponse {
         })
         .collect();
 
-    CompletionResponse { text, tool_calls }
+    CompletionResponse {
+        text,
+        tool_calls,
+        reasoning: Vec::new(),
+    }
 }
 
 fn anthropic_to_completion(resp: AnthropicResponse) -> CompletionResponse {
     let mut text_parts = Vec::new();
     let mut tool_calls = Vec::new();
+    let mut reasoning = Vec::new();
 
     for block in resp.content {
         match block {
@@ -876,12 +900,15 @@ fn anthropic_to_completion(resp: AnthropicResponse) -> CompletionResponse {
                     },
                 });
             }
+            // Collect extended thinking traces so callers can surface them via AssistantContent::Reasoning.
+            AnthropicContentBlock::Thinking { thinking } => reasoning.push(thinking),
         }
     }
 
     CompletionResponse {
         text: text_parts.join("\n"),
         tool_calls,
+        reasoning,
     }
 }
 
@@ -897,8 +924,7 @@ fn gemini_to_completion(content: GeminiContent) -> CompletionResponse {
                     id: format!("gemini_{}", uuid::Uuid::new_v4()),
                     function: FunctionCall {
                         name: function_call.name,
-                        arguments: serde_json::to_string(&function_call.args)
-                            .unwrap_or_default(),
+                        arguments: serde_json::to_string(&function_call.args).unwrap_or_default(),
                     },
                 });
             }
@@ -909,5 +935,6 @@ fn gemini_to_completion(content: GeminiContent) -> CompletionResponse {
     CompletionResponse {
         text: text_parts.join("\n"),
         tool_calls,
+        reasoning: Vec::new(),
     }
 }

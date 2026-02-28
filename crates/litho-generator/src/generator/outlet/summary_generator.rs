@@ -338,7 +338,7 @@ impl SummaryContentGenerator {
                 efficiency_ratio
             ));
         }
-        content.push_str("\n");
+        content.push('\n');
 
         // 4. Core research data summary
         content.push_str("## Core Research Data Summary\n\n");
@@ -398,7 +398,7 @@ impl SummaryContentGenerator {
                     scope, size, percentage
                 ));
             }
-            content.push_str("\n");
+            content.push('\n');
         }
 
         // 6. Generated documents statistics
@@ -451,7 +451,7 @@ impl SummaryContentGenerator {
             };
             content.push_str(&format!("- {}: {:.2}s ({:.1}%)\n", stage, time, percentage));
         }
-        content.push_str("\n");
+        content.push('\n');
 
         // 3. Cache effectiveness overview
         content.push_str("## Cache Effectiveness Overview\n\n");
@@ -499,7 +499,7 @@ impl SummaryContentGenerator {
                 cost_per_second
             ));
         }
-        content.push_str("\n");
+        content.push('\n');
 
         // 4. Research data overview
         content.push_str("## Research Data Overview\n\n");
@@ -566,7 +566,7 @@ impl SummaryContentGenerator {
                     scope, size, percentage
                 ));
             }
-            content.push_str("\n");
+            content.push('\n');
         }
 
         // 6. Document generation overview
@@ -579,9 +579,9 @@ impl SummaryContentGenerator {
         if !data.generated_docs.is_empty() {
             content.push_str("**Document Types**: \n - ");
             content.push_str(&data.generated_docs.join("\n - "));
-            content.push_str("\n");
+            content.push('\n');
         }
-        content.push_str("\n");
+        content.push('\n');
 
         // 7. Overall assessment
         content.push_str("## Overall Assessment\n\n");

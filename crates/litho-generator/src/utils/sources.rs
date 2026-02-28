@@ -1,15 +1,14 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::{
     generator::preprocess::extractors::language_processors::LanguageProcessorManager,
-    i18n::TargetLanguage, types::code::CodeInsight,
-    utils::token_compress::compress_source_for_llm,
+    i18n::TargetLanguage, types::code::CodeInsight, utils::token_compress::compress_source_for_llm,
 };
 
 pub fn read_code_source(
     language_processor: &LanguageProcessorManager,
-    project_path: &PathBuf,
-    file_path: &PathBuf,
+    project_path: &Path,
+    file_path: &Path,
     target_language: &TargetLanguage,
 ) -> String {
     // Build full file path
@@ -112,18 +111,16 @@ pub fn read_dependency_code_source(
         // Try to find dependency file
         if let Some(dep_path) =
             find_dependency_file(language_processor, project_path, &dep_info.name)
+            && let Ok(content) = std::fs::read_to_string(&dep_path)
         {
-            if let Ok(content) = std::fs::read_to_string(&dep_path) {
-                let truncated =
-                    truncate_source_code(language_processor, &dep_path, &content, 8_1024);
-                dependency_code.push_str(&format!(
-                    "\n### Dependency: {} ({})\n```\n{}\n```\n",
-                    dep_info.name,
-                    dep_path.display(),
-                    truncated
-                ));
-                total_length += truncated.len();
-            }
+            let truncated = truncate_source_code(language_processor, &dep_path, &content, 8_1024);
+            dependency_code.push_str(&format!(
+                "\n### Dependency: {} ({})\n```\n{}\n```\n",
+                dep_info.name,
+                dep_path.display(),
+                truncated
+            ));
+            total_length += truncated.len();
         }
     }
 
@@ -251,14 +248,12 @@ fn recursive_find_file(project_path: &PathBuf, file_name: &str) -> Option<std::p
                 let path = entry.path();
 
                 if path.is_file() {
-                    if let Some(file_name) = path.file_stem() {
-                        if let Some(ext) = path.extension() {
-                            if file_name.to_string_lossy() == target_name
-                                && extensions.contains(&ext.to_string_lossy().as_ref())
-                            {
-                                return Some(path);
-                            }
-                        }
+                    if let Some(file_name) = path.file_stem()
+                        && let Some(ext) = path.extension()
+                        && file_name.to_string_lossy() == target_name
+                        && extensions.contains(&ext.to_string_lossy().as_ref())
+                    {
+                        return Some(path);
                     }
                 } else if path.is_dir() {
                     // Skip common ignored directories
@@ -269,10 +264,9 @@ fn recursive_find_file(project_path: &PathBuf, file_name: &str) -> Option<std::p
                             && dir_name_str != "target"
                             && dir_name_str != "build"
                             && dir_name_str != "dist"
+                            && let Some(found) = search_directory(&path, target_name, extensions)
                         {
-                            if let Some(found) = search_directory(&path, target_name, extensions) {
-                                return Some(found);
-                            }
+                            return Some(found);
                         }
                     }
                 }

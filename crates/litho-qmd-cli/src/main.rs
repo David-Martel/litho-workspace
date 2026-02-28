@@ -643,10 +643,10 @@ fn resolve_filesystem_path(raw: &str, cwd: &Path) -> anyhow::Result<PathBuf> {
     if raw == "." || raw == "./" {
         return Ok(cwd.to_path_buf());
     }
-    if let Some(rest) = raw.strip_prefix("~/") {
-        if let Ok(home) = env::var("HOME").or_else(|_| env::var("USERPROFILE")) {
-            return Ok(PathBuf::from(home).join(rest));
-        }
+    if let Some(rest) = raw.strip_prefix("~/")
+        && let Ok(home) = env::var("HOME").or_else(|_| env::var("USERPROFILE"))
+    {
+        return Ok(PathBuf::from(home).join(rest));
     }
 
     let candidate = PathBuf::from(raw);

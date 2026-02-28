@@ -1,6 +1,6 @@
+use anyhow::{Context, Result};
 use std::env;
 use std::path::PathBuf;
-use anyhow::{Context, Result};
 
 pub struct LithoEnv;
 
@@ -64,7 +64,9 @@ mod tests {
     #[test]
     fn test_ollama_default() {
         // Ensure it returns default if not set
-        unsafe { env::remove_var("OLLAMA_URL"); }
+        unsafe {
+            env::remove_var("OLLAMA_URL");
+        }
         assert_eq!(LithoEnv::ollama_url(), "http://localhost:11434");
     }
 
@@ -77,7 +79,10 @@ mod tests {
         }
 
         assert_eq!(LithoEnv::database_url().unwrap(), "postgres://test");
-        assert_eq!(LithoEnv::codex_bin().unwrap(), PathBuf::from("C:\\bin\\codex.exe"));
+        assert_eq!(
+            LithoEnv::codex_bin().unwrap(),
+            PathBuf::from("C:\\bin\\codex.exe")
+        );
         assert_eq!(LithoEnv::codex_model().unwrap(), "gpt-4");
 
         unsafe {

@@ -165,17 +165,17 @@ where
         }
 
         // Strategy 2: Extract from markdown code blocks
-        if let Some(json_str) = self.extract_from_code_block(response) {
-            if let Ok(parsed) = serde_json::from_str::<Value>(&json_str) {
-                return Ok(parsed);
-            }
+        if let Some(json_str) = self.extract_from_code_block(response)
+            && let Ok(parsed) = serde_json::from_str::<Value>(&json_str)
+        {
+            return Ok(parsed);
         }
 
         // Strategy 3: Extract first JSON object
-        if let Some(json_str) = self.extract_first_json_object(response) {
-            if let Ok(parsed) = serde_json::from_str::<Value>(&json_str) {
-                return Ok(parsed);
-            }
+        if let Some(json_str) = self.extract_first_json_object(response)
+            && let Ok(parsed) = serde_json::from_str::<Value>(&json_str)
+        {
+            return Ok(parsed);
         }
 
         // Strategy 4: Clean fence markers and try parsing
@@ -186,12 +186,11 @@ where
 
         // Strategy 5: Detect double-encoded JSON — the model returned a JSON
         // string whose content is itself a JSON object, e.g. `"{\"x\":1}"`.
-        if let Ok(Value::String(inner)) = serde_json::from_str::<Value>(&cleaned) {
-            if let Ok(parsed) = serde_json::from_str::<Value>(&inner) {
-                if parsed.is_object() || parsed.is_array() {
-                    return Ok(parsed);
-                }
-            }
+        if let Ok(Value::String(inner)) = serde_json::from_str::<Value>(&cleaned)
+            && let Ok(parsed) = serde_json::from_str::<Value>(&inner)
+            && (parsed.is_object() || parsed.is_array())
+        {
+            return Ok(parsed);
         }
 
         Err(anyhow::anyhow!(
@@ -267,12 +266,12 @@ where
             let has_required = obj.contains_key("required");
             let has_type_object = obj.get("type").and_then(|v| v.as_str()) == Some("object");
 
-            if (has_schema || (has_required && has_type_object)) && has_properties {
-                if let Some(properties) = obj.get("properties") {
-                    if properties.is_object() {
-                        return properties.clone();
-                    }
-                }
+            if (has_schema || (has_required && has_type_object))
+                && has_properties
+                && let Some(properties) = obj.get("properties")
+                && properties.is_object()
+            {
+                return properties.clone();
             }
         }
         json

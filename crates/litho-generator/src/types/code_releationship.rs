@@ -186,7 +186,7 @@ pub struct ArchitectureLayer {
 }
 
 /// Dependency type enumeration
-#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema, Default)]
 pub enum DependencyType {
     /// Import dependency (use, import statements)
     #[serde(
@@ -200,6 +200,7 @@ pub enum DependencyType {
         alias = "Require",
         alias = "require"
     )]
+    #[default]
     Import,
     /// Function call dependency
     #[serde(alias = "function_call", alias = "Call", alias = "call")]
@@ -233,12 +234,6 @@ pub enum DependencyType {
     /// Unknown or unrecognized type (catch-all)
     #[serde(other)]
     Other,
-}
-
-impl Default for DependencyType {
-    fn default() -> Self {
-        DependencyType::Import
-    }
 }
 
 impl DependencyType {

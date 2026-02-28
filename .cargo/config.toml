@@ -1,11 +1,13 @@
-﻿[build]
-rustc-wrapper = "sccache"
-target-dir = "target"
+# Litho workspace Cargo configuration
+#
+# Inherits from ~/.cargo/config.toml (global) which provides:
+#   - sccache wrapper, T:\RustCache target-dir, CARGO_INCREMENTAL=0
+#   - jobs=2, sparse registry, net retry, profile overrides
+#
+# This file provides workspace-specific overrides only.
 
-[env]
-SCCACHE_DIR = ".cache/sccache"
-NEXTEST_RETRY_DATA_DIR = ".cache/nextest"
-CARGO_INCREMENTAL = "1"
+[build]
+rustc-wrapper = "sccache"
 
 [target.x86_64-pc-windows-msvc]
 linker = "rust-lld.exe"
@@ -16,8 +18,8 @@ rustflags = [
 [profile.dev]
 split-debuginfo = "packed"
 codegen-units = 256
-# Reduce per-unit object size to prevent rust-lld OOM on large binaries (codex-tui)
-# Trade: slightly slower runtime in dev, but builds succeed
+# codex-tui OOM prevention: many small compilation units
+# CARGO_INCREMENTAL must stay 0 (global config) for sccache compatibility
 
 [profile.release]
 split-debuginfo = "packed"

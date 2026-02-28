@@ -76,7 +76,7 @@ fn bench_lookup(c: &mut Criterion) {
             b.iter(|| {
                 let mut found = 0usize;
                 for key in &lookup_keys {
-                    if hmap.get(black_box(key)).is_some() {
+                    if hmap.contains_key(black_box(key)) {
                         found += 1;
                     }
                 }
@@ -88,7 +88,7 @@ fn bench_lookup(c: &mut Criterion) {
             b.iter(|| {
                 let mut found = 0usize;
                 for key in &lookup_keys {
-                    if btree.get(black_box(key)).is_some() {
+                    if btree.contains_key(black_box(key)) {
                         found += 1;
                     }
                 }

@@ -266,7 +266,7 @@ mod tests {
             },
         );
 
-        let changed = vec![PathBuf::from("src/main.rs")];
+        let changed = [PathBuf::from("src/main.rs")];
         let refs: Vec<&PathBuf> = changed.iter().collect();
         let affected = map_files_to_agents(&refs, &manifest);
 
@@ -277,7 +277,7 @@ mod tests {
     fn test_map_files_to_agents_unknown_triggers_research() {
         let manifest = DocumentationManifest::new(PathBuf::from("/test"));
 
-        let changed = vec![PathBuf::from("new_file.rs")];
+        let changed = [PathBuf::from("new_file.rs")];
         let refs: Vec<&PathBuf> = changed.iter().collect();
         let affected = map_files_to_agents(&refs, &manifest);
 
@@ -327,7 +327,11 @@ mod tests {
         let cs = ChangeSet {
             changed_files: vec![PathBuf::from("a.rs"), PathBuf::from("b.rs")],
             added_files: vec![PathBuf::from("c.rs")],
-            removed_files: vec![PathBuf::from("d.rs"), PathBuf::from("e.rs"), PathBuf::from("f.rs")],
+            removed_files: vec![
+                PathBuf::from("d.rs"),
+                PathBuf::from("e.rs"),
+                PathBuf::from("f.rs"),
+            ],
             affected_agents: HashSet::new(),
             full_rebuild_needed: false,
         };
@@ -364,7 +368,7 @@ mod tests {
             },
         );
 
-        let changed = vec![PathBuf::from("src/main.rs")];
+        let changed = [PathBuf::from("src/main.rs")];
         let refs: Vec<&PathBuf> = changed.iter().collect();
         let affected = map_files_to_agents(&refs, &manifest);
 
@@ -393,7 +397,7 @@ mod tests {
             },
         );
 
-        let changed = vec![PathBuf::from("docs/overview.md")];
+        let changed = [PathBuf::from("docs/overview.md")];
         let refs: Vec<&PathBuf> = changed.iter().collect();
         let affected = map_files_to_agents(&refs, &manifest);
 
@@ -422,7 +426,7 @@ mod tests {
         let total_changes: usize = 3;
         let ratio = total_changes as f64 / total_tracked as f64;
         assert!((ratio - 0.3).abs() < f64::EPSILON);
-        assert!(!(ratio > 0.3), "exactly 30% must NOT trigger full rebuild");
+        assert!(ratio <= 0.3, "exactly 30% must NOT trigger full rebuild");
 
         // 4 changes out of 10 = 0.40 → IS full rebuild
         let total_changes_over: usize = 4;

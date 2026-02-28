@@ -9,6 +9,12 @@ pub struct VueProcessor {
     import_regex: Regex,
 }
 
+impl Default for VueProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VueProcessor {
     pub fn new() -> Self {
         Self {
@@ -18,10 +24,10 @@ impl VueProcessor {
     }
 
     fn extract_script_content(&self, content: &str) -> String {
-        if let Some(captures) = self.script_regex.captures(content) {
-            if let Some(script_content) = captures.get(1) {
-                return script_content.as_str().to_string();
-            }
+        if let Some(captures) = self.script_regex.captures(content)
+            && let Some(script_content) = captures.get(1)
+        {
+            return script_content.as_str().to_string();
         }
         content.to_string()
     }
@@ -38,30 +44,30 @@ impl LanguageProcessor for VueProcessor {
         let source_file = file_path.to_string_lossy().to_string();
 
         for (line_num, line) in script_content.lines().enumerate() {
-            if let Some(captures) = self.import_regex.captures(line) {
-                if let Some(import_path) = captures.get(1) {
-                    let path_str = import_path.as_str();
-                    let is_external = !path_str.starts_with('.')
-                        && !path_str.starts_with('/')
-                        && !path_str.starts_with("@/");
+            if let Some(captures) = self.import_regex.captures(line)
+                && let Some(import_path) = captures.get(1)
+            {
+                let path_str = import_path.as_str();
+                let is_external = !path_str.starts_with('.')
+                    && !path_str.starts_with('/')
+                    && !path_str.starts_with("@/");
 
-                    let dependency_type = if path_str == "vue" || path_str.starts_with("vue/") {
-                        "vue_import"
-                    } else if path_str.ends_with(".vue") {
-                        "vue_component_import"
-                    } else {
-                        "import"
-                    };
+                let dependency_type = if path_str == "vue" || path_str.starts_with("vue/") {
+                    "vue_import"
+                } else if path_str.ends_with(".vue") {
+                    "vue_component_import"
+                } else {
+                    "import"
+                };
 
-                    dependencies.push(Dependency {
-                        name: source_file.clone(),
-                        path: Some(path_str.to_string()),
-                        is_external,
-                        line_number: Some(line_num + 1),
-                        dependency_type: dependency_type.to_string(),
-                        version: None,
-                    });
-                }
+                dependencies.push(Dependency {
+                    name: source_file.clone(),
+                    path: Some(path_str.to_string()),
+                    is_external,
+                    line_number: Some(line_num + 1),
+                    dependency_type: dependency_type.to_string(),
+                    version: None,
+                });
             }
         }
 
@@ -211,22 +217,23 @@ impl VueProcessor {
     /// Extract Vue method name
     fn extract_vue_method(&self, line: &str) -> Option<String> {
         // Match: methodName() { or methodName: function() {
-        if line.contains('(') && line.contains('{') {
-            if let Some(paren_pos) = line.find('(') {
-                let before_paren = &line[..paren_pos].trim();
-                if let Some(colon_pos) = before_paren.rfind(':') {
-                    let method_name = before_paren[colon_pos + 1..].trim();
-                    if !method_name.is_empty() && method_name != "function" {
-                        return Some(method_name.to_string());
-                    }
-                } else if let Some(space_pos) = before_paren.rfind(' ') {
-                    let method_name = before_paren[space_pos + 1..].trim();
-                    if !method_name.is_empty() {
-                        return Some(method_name.to_string());
-                    }
-                } else if !before_paren.is_empty() {
-                    return Some(before_paren.to_string());
+        if line.contains('(')
+            && line.contains('{')
+            && let Some(paren_pos) = line.find('(')
+        {
+            let before_paren = &line[..paren_pos].trim();
+            if let Some(colon_pos) = before_paren.rfind(':') {
+                let method_name = before_paren[colon_pos + 1..].trim();
+                if !method_name.is_empty() && method_name != "function" {
+                    return Some(method_name.to_string());
                 }
+            } else if let Some(space_pos) = before_paren.rfind(' ') {
+                let method_name = before_paren[space_pos + 1..].trim();
+                if !method_name.is_empty() {
+                    return Some(method_name.to_string());
+                }
+            } else if !before_paren.is_empty() {
+                return Some(before_paren.to_string());
             }
         }
         None

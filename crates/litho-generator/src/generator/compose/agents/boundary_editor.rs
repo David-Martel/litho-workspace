@@ -157,7 +157,7 @@ impl BoundaryEditor {
     }
 
     fn generate_cli_documentation(&self, cli_boundaries: &[CLIBoundary]) -> String {
-        if cli_boundaries.len() == 0 {
+        if cli_boundaries.is_empty() {
             return String::new();
         }
 
@@ -183,7 +183,7 @@ impl BoundaryEditor {
                         arg.name, arg.value_type, required_text, arg.description, default_text
                     ));
                 }
-                content.push_str("\n");
+                content.push('\n');
             }
 
             if !cli.options.is_empty() {
@@ -214,7 +214,7 @@ impl BoundaryEditor {
                         default_text
                     ));
                 }
-                content.push_str("\n");
+                content.push('\n');
             }
 
             if !cli.examples.is_empty() {
@@ -229,7 +229,7 @@ impl BoundaryEditor {
     }
 
     fn generate_api_documentation(&self, api_boundaries: &[APIBoundary]) -> String {
-        if api_boundaries.len() == 0 {
+        if api_boundaries.is_empty() {
             return String::new();
         }
 
@@ -258,7 +258,7 @@ impl BoundaryEditor {
     }
 
     fn generate_router_documentation(&self, router_boundaries: &[RouterBoundary]) -> String {
-        if router_boundaries.len() == 0 {
+        if router_boundaries.is_empty() {
             return String::new();
         }
 
@@ -291,7 +291,7 @@ impl BoundaryEditor {
         &self,
         integration_suggestions: &[IntegrationSuggestion],
     ) -> String {
-        if integration_suggestions.len() == 0 {
+        if integration_suggestions.is_empty() {
             return String::new();
         }
 
@@ -312,7 +312,7 @@ impl BoundaryEditor {
                 for practice in &suggestion.best_practices {
                     content.push_str(&format!("- {}\n", practice));
                 }
-                content.push_str("\n");
+                content.push('\n');
             }
         }
 

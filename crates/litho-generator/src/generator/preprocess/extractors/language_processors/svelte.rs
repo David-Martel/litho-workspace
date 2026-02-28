@@ -9,6 +9,12 @@ pub struct SvelteProcessor {
     import_regex: Regex,
 }
 
+impl Default for SvelteProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SvelteProcessor {
     pub fn new() -> Self {
         Self {
@@ -18,10 +24,10 @@ impl SvelteProcessor {
     }
 
     fn extract_script_content(&self, content: &str) -> String {
-        if let Some(captures) = self.script_regex.captures(content) {
-            if let Some(script_content) = captures.get(1) {
-                return script_content.as_str().to_string();
-            }
+        if let Some(captures) = self.script_regex.captures(content)
+            && let Some(script_content) = captures.get(1)
+        {
+            return script_content.as_str().to_string();
         }
         content.to_string()
     }
@@ -38,32 +44,32 @@ impl LanguageProcessor for SvelteProcessor {
         let source_file = file_path.to_string_lossy().to_string();
 
         for (line_num, line) in script_content.lines().enumerate() {
-            if let Some(captures) = self.import_regex.captures(line) {
-                if let Some(import_path) = captures.get(1) {
-                    let path_str = import_path.as_str();
-                    let is_external = !path_str.starts_with('.')
-                        && !path_str.starts_with('/')
-                        && !path_str.starts_with('$');
+            if let Some(captures) = self.import_regex.captures(line)
+                && let Some(import_path) = captures.get(1)
+            {
+                let path_str = import_path.as_str();
+                let is_external = !path_str.starts_with('.')
+                    && !path_str.starts_with('/')
+                    && !path_str.starts_with('$');
 
-                    let dependency_type = if path_str.starts_with("svelte") {
-                        "svelte_import"
-                    } else if path_str.ends_with(".svelte") {
-                        "svelte_component_import"
-                    } else if path_str.starts_with('$') {
-                        "svelte_store_import"
-                    } else {
-                        "import"
-                    };
+                let dependency_type = if path_str.starts_with("svelte") {
+                    "svelte_import"
+                } else if path_str.ends_with(".svelte") {
+                    "svelte_component_import"
+                } else if path_str.starts_with('$') {
+                    "svelte_store_import"
+                } else {
+                    "import"
+                };
 
-                    dependencies.push(Dependency {
-                        name: source_file.clone(),
-                        path: Some(path_str.to_string()),
-                        is_external,
-                        line_number: Some(line_num + 1),
-                        dependency_type: dependency_type.to_string(),
-                        version: None,
-                    });
-                }
+                dependencies.push(Dependency {
+                    name: source_file.clone(),
+                    path: Some(path_str.to_string()),
+                    is_external,
+                    line_number: Some(line_num + 1),
+                    dependency_type: dependency_type.to_string(),
+                    version: None,
+                });
             }
         }
 
@@ -194,17 +200,17 @@ impl LanguageProcessor for SvelteProcessor {
                 let trimmed = line.trim();
 
                 // Extract function definitions
-                if trimmed.starts_with("function ") || trimmed.contains("= function") {
-                    if let Some(func_name) = self.extract_svelte_function(trimmed) {
-                        interfaces.push(InterfaceInfo {
-                            name: func_name,
-                            interface_type: "svelte_function".to_string(),
-                            visibility: "public".to_string(),
-                            parameters: Vec::new(),
-                            return_type: None,
-                            description: None,
-                        });
-                    }
+                if (trimmed.starts_with("function ") || trimmed.contains("= function"))
+                    && let Some(func_name) = self.extract_svelte_function(trimmed)
+                {
+                    interfaces.push(InterfaceInfo {
+                        name: func_name,
+                        interface_type: "svelte_function".to_string(),
+                        visibility: "public".to_string(),
+                        parameters: Vec::new(),
+                        return_type: None,
+                        description: None,
+                    });
                 }
 
                 // Extract reactive declarations
@@ -238,14 +244,14 @@ impl SvelteProcessor {
                     }
                 }
             }
-        } else if line.contains("= function") {
-            if let Some(eq_pos) = line.find('=') {
-                let before_eq = &line[..eq_pos].trim();
-                if let Some(space_pos) = before_eq.rfind(' ') {
-                    let func_name = before_eq[space_pos + 1..].trim();
-                    if !func_name.is_empty() {
-                        return Some(func_name.to_string());
-                    }
+        } else if line.contains("= function")
+            && let Some(eq_pos) = line.find('=')
+        {
+            let before_eq = &line[..eq_pos].trim();
+            if let Some(space_pos) = before_eq.rfind(' ') {
+                let func_name = before_eq[space_pos + 1..].trim();
+                if !func_name.is_empty() {
+                    return Some(func_name.to_string());
                 }
             }
         }

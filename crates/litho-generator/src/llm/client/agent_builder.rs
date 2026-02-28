@@ -6,8 +6,8 @@ use crate::{
     config::Config,
     llm::client::providers::{ProviderAgent, ProviderClient},
     llm::tools::{
-        file_explorer::AgentToolFileExplorer, file_reader::AgentToolFileReader, time::AgentToolTime,
-        AgentTool,
+        AgentTool, file_explorer::AgentToolFileExplorer, file_reader::AgentToolFileReader,
+        time::AgentToolTime,
     },
 };
 

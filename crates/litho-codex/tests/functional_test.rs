@@ -19,16 +19,25 @@ async fn test_codex_readiness_failure() {
 
 #[tokio::test]
 async fn test_codex_readiness_with_env() {
-    // This test assumes 'cargo' is on the path, we can use it as a dummy binary 
+    // This test assumes 'cargo' is on the path, we can use it as a dummy binary
     // that supports '--version' to test the logic if codex isn't built yet.
     // However, it's better to test the real thing if possible.
-    
-    // We can't easily test success without a real binary, 
+
+    // We can't easily test success without a real binary,
     // but we can test that the environment variable is respected.
-    unsafe { env::set_var("CODEX_BIN", "non_existent_via_env"); }
+    unsafe {
+        env::set_var("CODEX_BIN", "non_existent_via_env");
+    }
     let generator = CodexExecGenerator::default();
     let result = generator.validate_readiness().await;
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("non_existent_via_env"));
-    unsafe { env::remove_var("CODEX_BIN"); }
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("non_existent_via_env")
+    );
+    unsafe {
+        env::remove_var("CODEX_BIN");
+    }
 }

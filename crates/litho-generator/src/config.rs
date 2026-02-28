@@ -7,9 +7,10 @@ use std::path::PathBuf;
 use crate::i18n::TargetLanguage;
 
 /// LLM Provider type
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Default)]
 pub enum LLMProvider {
     #[serde(rename = "openai")]
+    #[default]
     OpenAI,
     #[serde(rename = "moonshot")]
     Moonshot,
@@ -28,12 +29,6 @@ pub enum LLMProvider {
     /// Local codex-rs binary — used as an emergency fallback provider.
     #[serde(rename = "codexrs")]
     CodexRs,
-}
-
-impl Default for LLMProvider {
-    fn default() -> Self {
-        Self::OpenAI
-    }
 }
 
 impl std::fmt::Display for LLMProvider {
@@ -428,10 +423,10 @@ impl Config {
     /// Get project name, prioritize configured project_name, otherwise auto-infer
     pub fn get_project_name(&self) -> String {
         // Prioritize configured project name
-        if let Some(ref name) = self.project_name {
-            if !name.trim().is_empty() {
-                return name.clone();
-            }
+        if let Some(ref name) = self.project_name
+            && !name.trim().is_empty()
+        {
+            return name.clone();
         }
 
         // If not configured or empty, auto-infer
@@ -504,12 +499,14 @@ impl Config {
                         in_package_section = false;
                         continue;
                     }
-                    if in_package_section && line.starts_with("name") && line.contains("=") {
-                        if let Some(name_part) = line.split('=').nth(1) {
-                            let name = name_part.trim().trim_matches('"').trim_matches('\'');
-                            if !name.is_empty() {
-                                return Some(name.to_string());
-                            }
+                    if in_package_section
+                        && line.starts_with("name")
+                        && line.contains("=")
+                        && let Some(name_part) = line.split('=').nth(1)
+                    {
+                        let name = name_part.trim().trim_matches('"').trim_matches('\'');
+                        if !name.is_empty() {
+                            return Some(name.to_string());
                         }
                     }
                 }
@@ -531,16 +528,17 @@ impl Config {
                 // Simple JSON parsing, find "name": "..."
                 for line in content.lines() {
                     let line = line.trim();
-                    if line.starts_with("\"name\"") && line.contains(":") {
-                        if let Some(name_part) = line.split(':').nth(1) {
-                            let name = name_part
-                                .trim()
-                                .trim_matches(',')
-                                .trim_matches('"')
-                                .trim_matches('\'');
-                            if !name.is_empty() {
-                                return Some(name.to_string());
-                            }
+                    if line.starts_with("\"name\"")
+                        && line.contains(":")
+                        && let Some(name_part) = line.split(':').nth(1)
+                    {
+                        let name = name_part
+                            .trim()
+                            .trim_matches(',')
+                            .trim_matches('"')
+                            .trim_matches('\'');
+                        if !name.is_empty() {
+                            return Some(name.to_string());
                         }
                     }
                 }
@@ -583,12 +581,11 @@ impl Config {
                     if (in_project_section || in_poetry_section)
                         && line.starts_with("name")
                         && line.contains("=")
+                        && let Some(name_part) = line.split('=').nth(1)
                     {
-                        if let Some(name_part) = line.split('=').nth(1) {
-                            let name = name_part.trim().trim_matches('"').trim_matches('\'');
-                            if !name.is_empty() {
-                                return Some(name.to_string());
-                            }
+                        let name = name_part.trim().trim_matches('"').trim_matches('\'');
+                        if !name.is_empty() {
+                            return Some(name.to_string());
                         }
                     }
                 }
@@ -604,35 +601,33 @@ impl Config {
         if let Ok(entries) = std::fs::read_dir(&self.project_path) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().and_then(|e| e.to_str()) == Some("csproj") {
-                    if let Ok(content) = std::fs::read_to_string(&path) {
-                        // Extract project name from filename (remove .csproj extension)
-                        if let Some(file_stem) = path.file_stem() {
-                            if let Some(name) = file_stem.to_str() {
+                if path.extension().and_then(|e| e.to_str()) == Some("csproj")
+                    && let Ok(content) = std::fs::read_to_string(&path)
+                {
+                    // Extract project name from filename (remove .csproj extension)
+                    if let Some(file_stem) = path.file_stem()
+                        && let Some(name) = file_stem.to_str()
+                    {
+                        return Some(name.to_string());
+                    }
+
+                    // Try to extract <AssemblyName> or <PackageId> from XML
+                    for line in content.lines() {
+                        let line = line.trim();
+                        if line.starts_with("<AssemblyName>") && line.ends_with("</AssemblyName>") {
+                            let name = line
+                                .trim_start_matches("<AssemblyName>")
+                                .trim_end_matches("</AssemblyName>");
+                            if !name.is_empty() {
                                 return Some(name.to_string());
                             }
                         }
-
-                        // Try to extract <AssemblyName> or <PackageId> from XML
-                        for line in content.lines() {
-                            let line = line.trim();
-                            if line.starts_with("<AssemblyName>")
-                                && line.ends_with("</AssemblyName>")
-                            {
-                                let name = line
-                                    .trim_start_matches("<AssemblyName>")
-                                    .trim_end_matches("</AssemblyName>");
-                                if !name.is_empty() {
-                                    return Some(name.to_string());
-                                }
-                            }
-                            if line.starts_with("<PackageId>") && line.ends_with("</PackageId>") {
-                                let name = line
-                                    .trim_start_matches("<PackageId>")
-                                    .trim_end_matches("</PackageId>");
-                                if !name.is_empty() {
-                                    return Some(name.to_string());
-                                }
+                        if line.starts_with("<PackageId>") && line.ends_with("</PackageId>") {
+                            let name = line
+                                .trim_start_matches("<PackageId>")
+                                .trim_end_matches("</PackageId>");
+                            if !name.is_empty() {
+                                return Some(name.to_string());
                             }
                         }
                     }
@@ -814,10 +809,22 @@ mod tests {
 
     #[test]
     fn provider_from_str_case_insensitive() {
-        assert_eq!(LLMProvider::from_str("OLLAMA").unwrap(), LLMProvider::Ollama);
-        assert_eq!(LLMProvider::from_str("Gemini").unwrap(), LLMProvider::Gemini);
-        assert_eq!(LLMProvider::from_str("codexrs").unwrap(), LLMProvider::CodexRs);
-        assert_eq!(LLMProvider::from_str("codex-rs").unwrap(), LLMProvider::CodexRs);
+        assert_eq!(
+            LLMProvider::from_str("OLLAMA").unwrap(),
+            LLMProvider::Ollama
+        );
+        assert_eq!(
+            LLMProvider::from_str("Gemini").unwrap(),
+            LLMProvider::Gemini
+        );
+        assert_eq!(
+            LLMProvider::from_str("codexrs").unwrap(),
+            LLMProvider::CodexRs
+        );
+        assert_eq!(
+            LLMProvider::from_str("codex-rs").unwrap(),
+            LLMProvider::CodexRs
+        );
     }
 
     #[test]
@@ -999,24 +1006,30 @@ mod tests {
 
     #[test]
     fn get_project_name_returns_explicit_name() {
-        let mut cfg = Config::default();
-        cfg.project_name = Some("my-project".to_string());
+        let cfg = Config {
+            project_name: Some("my-project".to_string()),
+            ..Default::default()
+        };
         assert_eq!(cfg.get_project_name(), "my-project");
     }
 
     #[test]
     fn get_project_name_falls_back_to_path_stem() {
-        let mut cfg = Config::default();
-        cfg.project_name = None;
-        cfg.project_path = PathBuf::from("/home/user/cool-app");
+        let cfg = Config {
+            project_name: None,
+            project_path: PathBuf::from("/home/user/cool-app"),
+            ..Default::default()
+        };
         assert_eq!(cfg.get_project_name(), "cool-app");
     }
 
     #[test]
     fn get_project_name_whitespace_only_falls_back() {
-        let mut cfg = Config::default();
-        cfg.project_name = Some("   ".to_string());
-        cfg.project_path = PathBuf::from("/a/b/my-app");
+        let cfg = Config {
+            project_name: Some("   ".to_string()),
+            project_path: PathBuf::from("/a/b/my-app"),
+            ..Default::default()
+        };
         assert_eq!(cfg.get_project_name(), "my-app");
     }
 

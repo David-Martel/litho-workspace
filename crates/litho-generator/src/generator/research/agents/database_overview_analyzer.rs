@@ -340,7 +340,7 @@ impl DatabaseOverviewAnalyzer {
             }
         }
 
-        content.push_str("\n");
+        content.push('\n');
         content
     }
 
@@ -391,7 +391,7 @@ impl DatabaseOverviewAnalyzer {
         if !insight.code_dossier.interfaces.is_empty() {
             content.push_str("  - SQL Objects: ");
             content.push_str(&insight.code_dossier.interfaces.join(", "));
-            content.push_str("\n");
+            content.push('\n');
         }
 
         // Add source summary if available (only for high-importance files)
@@ -419,6 +419,6 @@ impl DatabaseOverviewAnalyzer {
             content.push_str("    ```\n");
         }
 
-        content.push_str("\n");
+        content.push('\n');
     }
 }

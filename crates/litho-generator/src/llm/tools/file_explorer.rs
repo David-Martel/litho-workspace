@@ -289,14 +289,13 @@ impl AgentToolFileExplorer {
         }
 
         // Check excluded extensions
-        if let Some(extension) = path.extension().and_then(|e| e.to_str()) {
-            if self
+        if let Some(extension) = path.extension().and_then(|e| e.to_str())
+            && self
                 .config
                 .excluded_extensions
                 .contains(&extension.to_lowercase())
-            {
-                return true;
-            }
+        {
+            return true;
         }
 
         // Check included extensions (if specified)
@@ -325,10 +324,10 @@ impl AgentToolFileExplorer {
         }
 
         // Check file size
-        if let Ok(metadata) = std::fs::metadata(path) {
-            if metadata.len() > self.config.max_file_size {
-                return true;
-            }
+        if let Ok(metadata) = std::fs::metadata(path)
+            && metadata.len() > self.config.max_file_size
+        {
+            return true;
         }
 
         false

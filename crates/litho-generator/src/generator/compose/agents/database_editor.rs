@@ -92,8 +92,8 @@ impl DatabaseEditor {
 
         // Summary statistics
         content.push_str("### Summary\n\n");
-        content.push_str(&format!("| Metric | Count |\n"));
-        content.push_str(&format!("|--------|-------|\n"));
+        content.push_str("| Metric | Count |\n");
+        content.push_str("|--------|-------|\n");
         content.push_str(&format!(
             "| Database Projects | {} |\n",
             report.database_projects.len()
@@ -112,7 +112,7 @@ impl DatabaseEditor {
             "| Relationships | {} |\n",
             report.table_relationships.len()
         ));
-        content.push_str("\n");
+        content.push('\n');
 
         // Database Projects
         if !report.database_projects.is_empty() {
@@ -169,7 +169,7 @@ impl DatabaseEditor {
             for rel in &report.table_relationships {
                 self.format_relationship_table(&mut content, rel);
             }
-            content.push_str("\n");
+            content.push('\n');
         }
 
         // Data Flows
@@ -202,7 +202,7 @@ impl DatabaseEditor {
                 project.references.join(", ")
             ));
         }
-        content.push_str("\n");
+        content.push('\n');
     }
 
     fn format_table(&self, content: &mut String, table: &DatabaseTable) {
@@ -223,7 +223,7 @@ impl DatabaseEditor {
                     col.name, col.data_type, nullable, identity
                 ));
             }
-            content.push_str("\n");
+            content.push('\n');
         }
 
         if !table.primary_key.is_empty() {
@@ -266,7 +266,7 @@ impl DatabaseEditor {
                     param.name, param.data_type, param.direction, optional
                 ));
             }
-            content.push_str("\n");
+            content.push('\n');
         }
 
         if !proc.referenced_tables.is_empty() {
@@ -297,14 +297,18 @@ impl DatabaseEditor {
                     param.name, param.data_type, optional
                 ));
             }
-            content.push_str("\n");
+            content.push('\n');
         }
     }
 
     fn format_relationship_mermaid(&self, content: &mut String, rel: &TableRelationship) {
         // Extract table names without schema for cleaner diagram
-        let from_table = rel.from_table.split('.').last().unwrap_or(&rel.from_table);
-        let to_table = rel.to_table.split('.').last().unwrap_or(&rel.to_table);
+        let from_table = rel
+            .from_table
+            .split('.')
+            .next_back()
+            .unwrap_or(&rel.from_table);
+        let to_table = rel.to_table.split('.').next_back().unwrap_or(&rel.to_table);
 
         let rel_symbol = match rel.relationship_type.as_str() {
             "ForeignKey" => "}o--||",
@@ -346,6 +350,6 @@ impl DatabaseEditor {
                 flow.procedures_involved.join(", ")
             ));
         }
-        content.push_str("\n");
+        content.push('\n');
     }
 }

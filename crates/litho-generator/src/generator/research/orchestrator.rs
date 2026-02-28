@@ -57,12 +57,11 @@ impl ResearchOrchestrator {
         self.execute_agent(&KeyModulesInsight, context).await?;
 
         // Boundary interface analysis
-        self.execute_agent(&BoundaryAnalyzer::default(), context)
-            .await?;
+        self.execute_agent(&BoundaryAnalyzer, context).await?;
 
         // Database overview analysis (only if database files exist)
         if self.has_database_files(context).await {
-            self.execute_agent(&DatabaseOverviewAnalyzer::default(), context)
+            self.execute_agent(&DatabaseOverviewAnalyzer, context)
                 .await?;
         }
 
@@ -171,8 +170,7 @@ impl ResearchOrchestrator {
 
         // Boundary interface analysis
         if is_affected("BoundaryAnalyzer") {
-            self.execute_agent(&BoundaryAnalyzer::default(), context)
-                .await?;
+            self.execute_agent(&BoundaryAnalyzer, context).await?;
         } else {
             println!("   Skipping BoundaryAnalyzer (not affected)");
         }
@@ -180,7 +178,7 @@ impl ResearchOrchestrator {
         // Database overview analysis: only when affected AND database files exist
         if is_affected("DatabaseOverviewAnalyzer") {
             if self.has_database_files(context).await {
-                self.execute_agent(&DatabaseOverviewAnalyzer::default(), context)
+                self.execute_agent(&DatabaseOverviewAnalyzer, context)
                     .await?;
             } else {
                 println!("   Skipping DatabaseOverviewAnalyzer (no database files found)");

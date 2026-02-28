@@ -4,7 +4,7 @@ use crate::{
 
 use std::sync::LazyLock;
 
-static TOKEN_ESTIMATOR: LazyLock<TokenEstimator> = LazyLock::new(|| TokenEstimator::new());
+static TOKEN_ESTIMATOR: LazyLock<TokenEstimator> = LazyLock::new(TokenEstimator::new);
 
 pub fn evaluate_befitting_model(
     llm_config: &LLMConfig,
@@ -17,7 +17,7 @@ pub fn evaluate_befitting_model(
             Some(llm_config.model_powerful.clone()),
         );
     }
-    return (llm_config.model_powerful.clone(), None);
+    (llm_config.model_powerful.clone(), None)
 }
 
 /// Estimate token usage (based on text length)

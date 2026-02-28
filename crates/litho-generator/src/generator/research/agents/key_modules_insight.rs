@@ -130,7 +130,7 @@ impl KeyModulesInsight {
                 let domain_clone = domain.clone();
                 let context_clone = context.clone();
                 Box::pin(async move {
-                    let key_modules_insight = KeyModulesInsight::default();
+                    let key_modules_insight = KeyModulesInsight;
                     let result = key_modules_insight
                         .analyze_single_domain(&domain_clone, &context_clone)
                         .await;
@@ -275,7 +275,7 @@ impl KeyModulesInsight {
             prompt_user: user_prompt,
             cache_scope: format!(
                 "{}/{}/{}",
-                crate::generator::research::memory::MemoryScope::STUDIES_RESEARCH.to_string(),
+                crate::generator::research::memory::MemoryScope::STUDIES_RESEARCH,
                 self.agent_type(),
                 domain.name
             ),

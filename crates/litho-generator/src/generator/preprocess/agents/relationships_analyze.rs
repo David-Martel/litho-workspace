@@ -12,6 +12,12 @@ pub struct RelationshipsAnalyze {
     prompt_compressor: PromptCompressor,
 }
 
+impl Default for RelationshipsAnalyze {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RelationshipsAnalyze {
     pub fn new() -> Self {
         Self {
@@ -22,7 +28,7 @@ impl RelationshipsAnalyze {
     pub async fn execute(
         &self,
         context: &GeneratorContext,
-        code_insights: &Vec<CodeInsight>,
+        code_insights: &[CodeInsight],
         _project_structure: &ProjectStructure,
     ) -> Result<RelationshipAnalysis> {
         let agent_params = self

@@ -15,6 +15,12 @@ pub struct TypeScriptProcessor {
     method_regex: Regex,
 }
 
+impl Default for TypeScriptProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TypeScriptProcessor {
     pub fn new() -> Self {
         Self {
@@ -57,20 +63,20 @@ impl LanguageProcessor for TypeScriptProcessor {
                 }
             }
             // Extract regular import statements
-            else if let Some(captures) = self.import_regex.captures(line) {
-                if let Some(import_path) = captures.get(1) {
-                    let path_str = import_path.as_str();
-                    let is_external = !path_str.starts_with('.') && !path_str.starts_with('/');
+            else if let Some(captures) = self.import_regex.captures(line)
+                && let Some(import_path) = captures.get(1)
+            {
+                let path_str = import_path.as_str();
+                let is_external = !path_str.starts_with('.') && !path_str.starts_with('/');
 
-                    dependencies.push(Dependency {
-                        name: source_file.clone(),
-                        path: Some(path_str.to_string()),
-                        is_external,
-                        line_number: Some(line_num + 1),
-                        dependency_type: "import".to_string(),
-                        version: None,
-                    });
-                }
+                dependencies.push(Dependency {
+                    name: source_file.clone(),
+                    path: Some(path_str.to_string()),
+                    is_external,
+                    line_number: Some(line_num + 1),
+                    dependency_type: "import".to_string(),
+                    version: None,
+                });
             }
         }
 

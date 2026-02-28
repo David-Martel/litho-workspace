@@ -28,6 +28,12 @@ pub struct TimeResult {
     pub utc_time: String,
 }
 
+impl Default for AgentToolTime {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AgentToolTime {
     pub fn new() -> Self {
         Self

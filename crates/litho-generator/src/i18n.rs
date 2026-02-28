@@ -1,11 +1,12 @@
 use serde::{Deserialize, Serialize};
 
 /// Target language type
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Default)]
 pub enum TargetLanguage {
     #[serde(rename = "zh")]
     Chinese,
     #[serde(rename = "en")]
+    #[default]
     English,
     #[serde(rename = "ja")]
     Japanese,
@@ -19,12 +20,6 @@ pub enum TargetLanguage {
     Russian,
     #[serde(rename = "vi")]
     Vietnamese,
-}
-
-impl Default for TargetLanguage {
-    fn default() -> Self {
-        Self::English
-    }
 }
 
 impl std::fmt::Display for TargetLanguage {

@@ -24,7 +24,7 @@ async fn main() -> Result<()> {
 
     // Default: run documentation generation
     let incremental = args.incremental;
-    let config = args.to_config();
+    let config = args.into_config();
     if incremental {
         crate::generator::workflow::launch_incremental(&config).await
     } else {

@@ -296,14 +296,11 @@ impl Display for Dependency {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}",
-            format!(
-                "(name={}, path={}, is_external={},dependency_type={})",
-                self.name,
-                self.path.as_deref().unwrap_or_default(),
-                self.is_external,
-                self.dependency_type
-            )
+            "(name={}, path={}, is_external={},dependency_type={})",
+            self.name,
+            self.path.as_deref().unwrap_or_default(),
+            self.is_external,
+            self.dependency_type
         )
     }
 }
@@ -324,6 +321,7 @@ pub struct CodeComplexity {
 /// Code functionality classification enum
 #[derive(Debug, Serialize, Clone, PartialEq, Eq, Hash, JsonSchema)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum CodePurpose {
     /// Project execution entry
     #[serde(alias = "Project execution entry")]
@@ -426,6 +424,7 @@ pub enum CodePurpose {
         alias = "miscellaneous",
         alias = "Other uncategorized or unknown"
     )]
+    #[default]
     Other,
 }
 
@@ -566,12 +565,6 @@ impl CodePurpose {
 impl Display for CodePurpose {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.display_name())
-    }
-}
-
-impl Default for CodePurpose {
-    fn default() -> Self {
-        CodePurpose::Other
     }
 }
 

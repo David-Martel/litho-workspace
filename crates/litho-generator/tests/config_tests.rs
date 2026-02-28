@@ -1,7 +1,5 @@
 //! Integration tests for configuration loading and validation.
 
-mod common;
-
 use litho_generator::config::{
     CacheConfig, ChunkingConfig, Config, DocumentCategory, KnowledgeConfig, LLMConfig, LLMProvider,
     LocalDocsConfig, QmdRetrieverConfig,
@@ -221,7 +219,10 @@ fn llm_config_default_temperature_some() {
     let llm = LLMConfig::default();
     // temperature may be None for reasoning models; default uses Some(0.1)
     if let Some(t) = llm.temperature {
-        assert!(t >= 0.0 && t <= 2.0, "temperature out of expected range");
+        assert!(
+            (0.0..=2.0).contains(&t),
+            "temperature out of expected range"
+        );
     }
 }
 
@@ -322,9 +323,14 @@ fn config_from_file_minimal_ollama() {
 
 #[test]
 fn config_from_file_with_project_name() {
-    let mut cfg = Config::default();
-    cfg.project_name = Some("my-test-project".to_string());
-    cfg.llm.provider = LLMProvider::Ollama;
+    let cfg = Config {
+        project_name: Some("my-test-project".to_string()),
+        llm: LLMConfig {
+            provider: LLMProvider::Ollama,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
 
     let (_dir, path) = config_to_temp_toml(&cfg);
     let loaded = Config::from_file(&path).unwrap();
@@ -354,8 +360,15 @@ fn config_from_file_all_providers() {
     use std::str::FromStr;
 
     let provider_strs = [
-        "openai", "moonshot", "deepseek", "mistral", "openrouter",
-        "anthropic", "gemini", "ollama", "codexrs",
+        "openai",
+        "moonshot",
+        "deepseek",
+        "mistral",
+        "openrouter",
+        "anthropic",
+        "gemini",
+        "ollama",
+        "codexrs",
     ];
     for p_str in provider_strs {
         let provider = LLMProvider::from_str(p_str).unwrap();
@@ -440,16 +453,20 @@ fn document_category_serde_round_trip() {
 
 #[test]
 fn get_project_name_uses_explicit_name() {
-    let mut cfg = Config::default();
-    cfg.project_name = Some("explicit-name".to_string());
+    let cfg = Config {
+        project_name: Some("explicit-name".to_string()),
+        ..Default::default()
+    };
     assert_eq!(cfg.get_project_name(), "explicit-name");
 }
 
 #[test]
 fn get_project_name_ignores_whitespace_only_name() {
-    let mut cfg = Config::default();
-    cfg.project_name = Some("   ".to_string());
-    cfg.project_path = PathBuf::from("/some/path/my-project");
+    let cfg = Config {
+        project_name: Some("   ".to_string()),
+        project_path: PathBuf::from("/some/path/my-project"),
+        ..Default::default()
+    };
     // Falls back to infer_project_name which uses path's file_name
     let name = cfg.get_project_name();
     assert_eq!(name, "my-project");
@@ -457,9 +474,11 @@ fn get_project_name_ignores_whitespace_only_name() {
 
 #[test]
 fn get_project_name_uses_path_when_no_name() {
-    let mut cfg = Config::default();
-    cfg.project_name = None;
-    cfg.project_path = PathBuf::from("/home/user/my-rust-app");
+    let cfg = Config {
+        project_name: None,
+        project_path: PathBuf::from("/home/user/my-rust-app"),
+        ..Default::default()
+    };
     let name = cfg.get_project_name();
     assert_eq!(name, "my-rust-app");
 }
@@ -478,8 +497,10 @@ fn extract_from_cargo_toml_finds_name() {
     )
     .unwrap();
 
-    let mut cfg = Config::default();
-    cfg.project_path = dir.path().to_path_buf();
+    let cfg = Config {
+        project_path: dir.path().to_path_buf(),
+        ..Default::default()
+    };
 
     let name = cfg.extract_from_cargo_toml().unwrap();
     assert_eq!(name, "my-crate");
@@ -489,8 +510,10 @@ fn extract_from_cargo_toml_finds_name() {
 fn extract_from_cargo_toml_returns_none_when_absent() {
     let dir = tempfile::TempDir::new().unwrap();
     // No Cargo.toml in the temp dir
-    let mut cfg = Config::default();
-    cfg.project_path = dir.path().to_path_buf();
+    let cfg = Config {
+        project_path: dir.path().to_path_buf(),
+        ..Default::default()
+    };
     assert!(cfg.extract_from_cargo_toml().is_none());
 }
 
@@ -509,8 +532,10 @@ fn extract_from_package_json_finds_name() {
     )
     .unwrap();
 
-    let mut cfg = Config::default();
-    cfg.project_path = dir.path().to_path_buf();
+    let cfg = Config {
+        project_path: dir.path().to_path_buf(),
+        ..Default::default()
+    };
     let name = cfg.extract_from_package_json().unwrap();
     assert_eq!(name, "my-npm-package");
 }
@@ -518,8 +543,10 @@ fn extract_from_package_json_finds_name() {
 #[test]
 fn extract_from_package_json_returns_none_when_absent() {
     let dir = tempfile::TempDir::new().unwrap();
-    let mut cfg = Config::default();
-    cfg.project_path = dir.path().to_path_buf();
+    let cfg = Config {
+        project_path: dir.path().to_path_buf(),
+        ..Default::default()
+    };
     assert!(cfg.extract_from_package_json().is_none());
 }
 
@@ -536,8 +563,10 @@ fn extract_from_pyproject_toml_finds_name_in_project_section() {
     )
     .unwrap();
 
-    let mut cfg = Config::default();
-    cfg.project_path = dir.path().to_path_buf();
+    let cfg = Config {
+        project_path: dir.path().to_path_buf(),
+        ..Default::default()
+    };
     let name = cfg.extract_from_pyproject_toml().unwrap();
     assert_eq!(name, "my-python-pkg");
 }
@@ -551,8 +580,10 @@ fn extract_from_pyproject_toml_finds_name_in_poetry_section() {
     )
     .unwrap();
 
-    let mut cfg = Config::default();
-    cfg.project_path = dir.path().to_path_buf();
+    let cfg = Config {
+        project_path: dir.path().to_path_buf(),
+        ..Default::default()
+    };
     let name = cfg.extract_from_pyproject_toml().unwrap();
     assert_eq!(name, "my-poetry-pkg");
 }

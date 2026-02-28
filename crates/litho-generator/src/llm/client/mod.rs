@@ -110,7 +110,12 @@ impl LLMClient {
             let (befitting_model, _) =
                 evaluate_befitting_model(&self.config.llm, system_prompt, user_prompt);
             return native
-                .extract::<T>(&befitting_model, system_prompt, user_prompt, &self.config.llm)
+                .extract::<T>(
+                    &befitting_model,
+                    system_prompt,
+                    user_prompt,
+                    &self.config.llm,
+                )
                 .await;
         }
 
@@ -176,7 +181,7 @@ impl LLMClient {
                             .replacen("{}", &llm_config.retry_attempts.to_string(), 1)
                             .replacen("{}", &e.to_string(), 1);
                         eprintln!("{}", msg);
-                        Err(e.into())
+                        Err(e)
                     }
                 },
             }
@@ -238,7 +243,6 @@ impl LLMClient {
                     &model_name,
                 )
                 .await
-                .map_err(|e| e.into())
             })
             .await?;
 
@@ -299,7 +303,6 @@ impl LLMClient {
                     &original_response.tool_calls_history,
                 )
                 .await
-                .map_err(|e| e.into())
             })
             .await?;
 
@@ -328,7 +331,7 @@ impl LLMClient {
         let agent_builder = self.get_agent_builder();
         let agent = agent_builder.build_agent_without_tools(system_prompt);
 
-        self.retry_with_backoff(|| async { agent.prompt(user_prompt).await.map_err(|e| e.into()) })
+        self.retry_with_backoff(|| async { agent.prompt(user_prompt).await })
             .await
     }
 }

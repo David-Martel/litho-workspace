@@ -128,7 +128,7 @@ fn compression_config_default_preserve_patterns_non_empty() {
 #[test]
 fn preserve_pattern_all_variants_representable() {
     // Ensure all enum variants can be constructed without panic
-    let _patterns = vec![
+    let _patterns = [
         PreservePattern::FunctionSignatures,
         PreservePattern::TypeDefinitions,
         PreservePattern::ImportStatements,

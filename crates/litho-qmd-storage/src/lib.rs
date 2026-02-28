@@ -138,9 +138,6 @@ impl PostgresQmdStore {
         config_path: PathBuf,
         runtime: RuntimeDbSettings,
     ) -> QmdResult<Self> {
-        let database_url = database_url;
-        let config_path = config_path;
-
         if let Some(parent) = config_path.parent() {
             fs::create_dir_all(parent).map_err(io_error)?;
         }
@@ -1588,18 +1585,16 @@ fn run_vector_scan_all(conn: &mut Client, collection: Option<&str>) -> QmdResult
 }
 
 fn parse_file_lookup(file: &str) -> (&str, Option<usize>) {
-    if let Some((head, tail)) = file.rsplit_once(':') {
-        if let Ok(line) = tail.parse::<usize>() {
-            return (head, Some(line));
-        }
+    if let Some((head, tail)) = file.rsplit_once(':')
+        && let Ok(line) = tail.parse::<usize>()
+    {
+        return (head, Some(line));
     }
     (file, None)
 }
 
 fn split_collection_path(input: &str) -> Option<(&str, &str)> {
-    let mut parts = input.splitn(2, '/');
-    let collection = parts.next()?;
-    let path = parts.next()?;
+    let (collection, path) = input.split_once('/')?;
     if collection.is_empty() || path.is_empty() {
         return None;
     }
@@ -1822,7 +1817,7 @@ fn encode_qvec(vec: &[i16]) -> Vec<u8> {
 }
 
 fn decode_qvec(blob: &[u8]) -> QmdResult<Vec<i16>> {
-    if blob.len() % 2 != 0 {
+    if !blob.len().is_multiple_of(2) {
         return Err(QmdError::Internal(
             "native vector blob has invalid byte length".to_string(),
         ));

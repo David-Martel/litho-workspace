@@ -29,13 +29,13 @@ impl DocumentationComposer {
             context.config.target_language.display_name()
         );
 
-        let overview_editor = OverviewEditor::default();
+        let overview_editor = OverviewEditor;
         overview_editor.execute(context).await?;
 
-        let architecture_editor = ArchitectureEditor::default();
+        let architecture_editor = ArchitectureEditor;
         architecture_editor.execute(context).await?;
 
-        let workflow_editor = WorkflowEditor::default();
+        let workflow_editor = WorkflowEditor;
         workflow_editor.execute(context).await?;
 
         let key_modules_insight_editor = KeyModulesInsightEditor::default();
@@ -43,12 +43,12 @@ impl DocumentationComposer {
             .execute(context, doc_tree)
             .await?;
 
-        let boundary_editor = BoundaryEditor::default();
+        let boundary_editor = BoundaryEditor;
         boundary_editor.execute(context).await?;
 
         // Database documentation (only if database files exist)
         if self.has_database_files(context).await {
-            let database_editor = DatabaseEditor::default();
+            let database_editor = DatabaseEditor;
             database_editor.execute(context).await?;
         }
 
@@ -82,21 +82,21 @@ impl DocumentationComposer {
         let is_affected = |name: &str| affected_agents.contains(name);
 
         if is_affected("Overview") {
-            let overview_editor = OverviewEditor::default();
+            let overview_editor = OverviewEditor;
             overview_editor.execute(context).await?;
         } else {
             println!("   Skipping Overview editor (not affected)");
         }
 
         if is_affected("Architecture") {
-            let architecture_editor = ArchitectureEditor::default();
+            let architecture_editor = ArchitectureEditor;
             architecture_editor.execute(context).await?;
         } else {
             println!("   Skipping Architecture editor (not affected)");
         }
 
         if is_affected("Workflow") {
-            let workflow_editor = WorkflowEditor::default();
+            let workflow_editor = WorkflowEditor;
             workflow_editor.execute(context).await?;
         } else {
             println!("   Skipping Workflow editor (not affected)");
@@ -112,7 +112,7 @@ impl DocumentationComposer {
         }
 
         if is_affected("Boundary") {
-            let boundary_editor = BoundaryEditor::default();
+            let boundary_editor = BoundaryEditor;
             boundary_editor.execute(context).await?;
         } else {
             println!("   Skipping Boundary editor (not affected)");
@@ -121,7 +121,7 @@ impl DocumentationComposer {
         // Database editor: only when affected AND database files exist
         if is_affected("Database") {
             if self.has_database_files(context).await {
-                let database_editor = DatabaseEditor::default();
+                let database_editor = DatabaseEditor;
                 database_editor.execute(context).await?;
             } else {
                 println!("   Skipping Database editor (no database files found)");

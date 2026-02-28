@@ -40,6 +40,12 @@ pub struct PreprocessingResult {
 
 pub struct PreProcessAgent {}
 
+impl Default for PreProcessAgent {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PreProcessAgent {
     pub fn new() -> Self {
         Self {}

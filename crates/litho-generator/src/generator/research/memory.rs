@@ -8,9 +8,16 @@ impl MemoryScope {
 }
 
 pub trait MemoryRetriever {
-    async fn store_research(&self, agent_type: &str, result: Value) -> anyhow::Result<()>;
+    fn store_research(
+        &self,
+        agent_type: &str,
+        result: Value,
+    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send;
 
-    async fn get_research(&self, agent_type: &str) -> Option<Value>;
+    fn get_research(
+        &self,
+        agent_type: &str,
+    ) -> impl std::future::Future<Output = Option<Value>> + Send;
 }
 
 impl MemoryRetriever for GeneratorContext {

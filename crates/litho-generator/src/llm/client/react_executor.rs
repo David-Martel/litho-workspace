@@ -39,7 +39,7 @@ impl ReActExecutor {
             Err(PromptError::MaxDepthError {
                 max_depth,
                 chat_history,
-                prompt: _,
+                _prompt,
             }) => {
                 if config.verbose {
                     let msg = target_language.msg_max_iterations();

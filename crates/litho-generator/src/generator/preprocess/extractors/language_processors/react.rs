@@ -9,6 +9,12 @@ pub struct ReactProcessor {
     hook_regex: Regex,
 }
 
+impl Default for ReactProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ReactProcessor {
     pub fn new() -> Self {
         Self {
@@ -29,28 +35,28 @@ impl LanguageProcessor for ReactProcessor {
 
         for (line_num, line) in content.lines().enumerate() {
             // Extract import statements
-            if let Some(captures) = self.import_regex.captures(line) {
-                if let Some(import_path) = captures.get(1) {
-                    let path_str = import_path.as_str();
-                    let is_external = !path_str.starts_with('.')
-                        && !path_str.starts_with('/')
-                        && !path_str.starts_with("@/");
+            if let Some(captures) = self.import_regex.captures(line)
+                && let Some(import_path) = captures.get(1)
+            {
+                let path_str = import_path.as_str();
+                let is_external = !path_str.starts_with('.')
+                    && !path_str.starts_with('/')
+                    && !path_str.starts_with("@/");
 
-                    let dependency_type = if path_str == "react" || path_str.starts_with("react/") {
-                        "react_import"
-                    } else {
-                        "import"
-                    };
+                let dependency_type = if path_str == "react" || path_str.starts_with("react/") {
+                    "react_import"
+                } else {
+                    "import"
+                };
 
-                    dependencies.push(Dependency {
-                        name: source_file.clone(),
-                        path: Some(path_str.to_string()),
-                        is_external,
-                        line_number: Some(line_num + 1),
-                        dependency_type: dependency_type.to_string(),
-                        version: None,
-                    });
-                }
+                dependencies.push(Dependency {
+                    name: source_file.clone(),
+                    path: Some(path_str.to_string()),
+                    is_external,
+                    line_number: Some(line_num + 1),
+                    dependency_type: dependency_type.to_string(),
+                    version: None,
+                });
             }
         }
 
@@ -206,27 +212,28 @@ impl ReactProcessor {
     /// Extract function component name
     fn extract_function_component(&self, line: &str) -> Option<String> {
         // Match: function ComponentName, const ComponentName = (), export function ComponentName
-        if line.contains("function") && (line.contains("return") || line.contains("=>")) {
-            if let Some(start) = line.find("function") {
-                let after_function = &line[start + 8..].trim();
-                if let Some(space_pos) = after_function.find(' ') {
-                    let name = after_function[..space_pos].trim();
-                    if name.chars().next().map_or(false, |c| c.is_uppercase()) {
-                        return Some(name.to_string());
-                    }
+        if line.contains("function")
+            && (line.contains("return") || line.contains("=>"))
+            && let Some(start) = line.find("function")
+        {
+            let after_function = &line[start + 8..].trim();
+            if let Some(space_pos) = after_function.find(' ') {
+                let name = after_function[..space_pos].trim();
+                if name.chars().next().is_some_and(|c| c.is_uppercase()) {
+                    return Some(name.to_string());
                 }
             }
         }
 
         // Match: const ComponentName = () => or const ComponentName: React.FC
-        if line.starts_with("const") || line.starts_with("export const") {
-            if let Some(eq_pos) = line.find('=') {
-                let before_eq = &line[..eq_pos];
-                if let Some(name_start) = before_eq.rfind(' ') {
-                    let name = before_eq[name_start + 1..].trim().trim_end_matches(':');
-                    if name.chars().next().map_or(false, |c| c.is_uppercase()) {
-                        return Some(name.to_string());
-                    }
+        if (line.starts_with("const") || line.starts_with("export const"))
+            && let Some(eq_pos) = line.find('=')
+        {
+            let before_eq = &line[..eq_pos];
+            if let Some(name_start) = before_eq.rfind(' ') {
+                let name = before_eq[name_start + 1..].trim().trim_end_matches(':');
+                if name.chars().next().is_some_and(|c| c.is_uppercase()) {
+                    return Some(name.to_string());
                 }
             }
         }
@@ -238,14 +245,13 @@ impl ReactProcessor {
     fn extract_class_component(&self, line: &str) -> Option<String> {
         if line.contains("class")
             && (line.contains("extends React.Component") || line.contains("extends Component"))
+            && let Some(class_pos) = line.find("class")
         {
-            if let Some(class_pos) = line.find("class") {
-                let after_class = &line[class_pos + 5..].trim();
-                if let Some(space_pos) = after_class.find(' ') {
-                    let name = after_class[..space_pos].trim();
-                    if name.chars().next().map_or(false, |c| c.is_uppercase()) {
-                        return Some(name.to_string());
-                    }
+            let after_class = &line[class_pos + 5..].trim();
+            if let Some(space_pos) = after_class.find(' ') {
+                let name = after_class[..space_pos].trim();
+                if name.chars().next().is_some_and(|c| c.is_uppercase()) {
+                    return Some(name.to_string());
                 }
             }
         }
@@ -266,14 +272,14 @@ impl ReactProcessor {
                         }
                     }
                 }
-            } else if line.contains("const") {
-                if let Some(eq_pos) = line.find('=') {
-                    let before_eq = &line[..eq_pos];
-                    if let Some(name_start) = before_eq.rfind(' ') {
-                        let name = before_eq[name_start + 1..].trim();
-                        if name.starts_with("use") && name.len() > 3 {
-                            return Some(name.to_string());
-                        }
+            } else if line.contains("const")
+                && let Some(eq_pos) = line.find('=')
+            {
+                let before_eq = &line[..eq_pos];
+                if let Some(name_start) = before_eq.rfind(' ') {
+                    let name = before_eq[name_start + 1..].trim();
+                    if name.starts_with("use") && name.len() > 3 {
+                        return Some(name.to_string());
                     }
                 }
             }

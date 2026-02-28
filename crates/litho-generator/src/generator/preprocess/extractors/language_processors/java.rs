@@ -14,6 +14,12 @@ pub struct JavaProcessor {
     constructor_regex: Regex,
 }
 
+impl Default for JavaProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl JavaProcessor {
     pub fn new() -> Self {
         Self {
@@ -39,39 +45,39 @@ impl LanguageProcessor for JavaProcessor {
 
         for (line_num, line) in content.lines().enumerate() {
             // Extract import statements
-            if let Some(captures) = self.import_regex.captures(line) {
-                if let Some(import_path) = captures.get(1) {
-                    let import_str = import_path.as_str().trim();
-                    let is_external = import_str.starts_with("java.")
-                        || import_str.starts_with("javax.")
-                        || !import_str.contains(".");
+            if let Some(captures) = self.import_regex.captures(line)
+                && let Some(import_path) = captures.get(1)
+            {
+                let import_str = import_path.as_str().trim();
+                let is_external = import_str.starts_with("java.")
+                    || import_str.starts_with("javax.")
+                    || !import_str.contains(".");
 
-                    // Parse dependency name
-                    let dependency_name = self.extract_dependency_name(import_str);
+                // Parse dependency name
+                let dependency_name = self.extract_dependency_name(import_str);
 
-                    dependencies.push(Dependency {
-                        name: dependency_name,
-                        path: Some(source_file.clone()),
-                        is_external,
-                        line_number: Some(line_num + 1),
-                        dependency_type: "import".to_string(),
-                        version: None,
-                    });
-                }
+                dependencies.push(Dependency {
+                    name: dependency_name,
+                    path: Some(source_file.clone()),
+                    is_external,
+                    line_number: Some(line_num + 1),
+                    dependency_type: "import".to_string(),
+                    version: None,
+                });
             }
 
             // Extract package statement
-            if let Some(captures) = self.package_regex.captures(line) {
-                if let Some(package_name) = captures.get(1) {
-                    dependencies.push(Dependency {
-                        name: package_name.as_str().trim().to_string(),
-                        path: Some(source_file.clone()),
-                        is_external: false,
-                        line_number: Some(line_num + 1),
-                        dependency_type: "package".to_string(),
-                        version: None,
-                    });
-                }
+            if let Some(captures) = self.package_regex.captures(line)
+                && let Some(package_name) = captures.get(1)
+            {
+                dependencies.push(Dependency {
+                    name: package_name.as_str().trim().to_string(),
+                    path: Some(source_file.clone()),
+                    is_external: false,
+                    line_number: Some(line_num + 1),
+                    dependency_type: "package".to_string(),
+                    version: None,
+                });
             }
         }
 
@@ -256,7 +262,7 @@ impl LanguageProcessor for JavaProcessor {
                 let params_str = captures.get(3).map(|m| m.as_str()).unwrap_or("");
 
                 // Simple check if it's a constructor (name starts with uppercase)
-                if name.chars().next().map_or(false, |c| c.is_uppercase()) {
+                if name.chars().next().is_some_and(|c| c.is_uppercase()) {
                     let parameters = self.parse_java_parameters(params_str);
 
                     interfaces.push(InterfaceInfo {
@@ -300,12 +306,8 @@ impl JavaProcessor {
                     (parts[0].to_string(), parts[1].to_string())
                 };
 
-                // Handle generic types
-                let clean_type = if param_type.contains('<') {
-                    param_type
-                } else {
-                    param_type
-                };
+                // Handle generic types (kept as-is regardless)
+                let clean_type = param_type;
 
                 parameters.push(ParameterInfo {
                     name,
@@ -371,7 +373,7 @@ impl JavaProcessor {
     /// Extract dependency name from Java import path
     fn extract_dependency_name(&self, import_path: &str) -> String {
         // For com.example.package.ClassName, return ClassName
-        if let Some(class_name) = import_path.split('.').last() {
+        if let Some(class_name) = import_path.split('.').next_back() {
             class_name.to_string()
         } else {
             import_path.to_string()

@@ -17,7 +17,10 @@ pub use md_fixer::MarkdownFixer;
 pub use summary_outlet::SummaryOutlet;
 
 pub trait Outlet {
-    async fn save(&self, context: &GeneratorContext) -> Result<()>;
+    fn save(
+        &self,
+        context: &GeneratorContext,
+    ) -> impl std::future::Future<Output = Result<()>> + Send;
 }
 
 /// Enum-based dispatch over all format-dependent outlet variants.
@@ -149,10 +152,10 @@ impl Outlet for DiskOutlet {
                 let output_file_path = output_dir.join(relative_path);
 
                 // Ensure parent directory exists
-                if let Some(parent_dir) = output_file_path.parent() {
-                    if !parent_dir.exists() {
-                        fs::create_dir_all(parent_dir)?;
-                    }
+                if let Some(parent_dir) = output_file_path.parent()
+                    && !parent_dir.exists()
+                {
+                    fs::create_dir_all(parent_dir)?;
                 }
 
                 // Write fixed document content to file

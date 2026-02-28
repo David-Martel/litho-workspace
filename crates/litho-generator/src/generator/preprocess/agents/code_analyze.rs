@@ -44,6 +44,12 @@ pub struct CodeAnalyze {
     language_processor: LanguageProcessorManager,
 }
 
+impl Default for CodeAnalyze {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CodeAnalyze {
     pub fn new() -> Self {
         Self {
@@ -190,13 +196,11 @@ impl CodeAnalyze {
 
             all_futures.push(Box::pin(async move {
                 let code_analyze = CodeAnalyze { language_processor };
-                let agent_params = code_analyze
-                    .prepare_single_code_agent_params_from_analysis(
-                        &project_structure_clone,
-                        &analysis,
-                    );
-                let mut code_insight =
-                    extract::<CodeInsight>(&context_clone, agent_params).await?;
+                let agent_params = code_analyze.prepare_single_code_agent_params_from_analysis(
+                    &project_structure_clone,
+                    &analysis,
+                );
+                let mut code_insight = extract::<CodeInsight>(&context_clone, agent_params).await?;
 
                 // LLM will rewrite source_summary, so exclude it and override here
                 code_insight.code_dossier.source_summary = code.source_summary.to_owned();
@@ -520,10 +524,7 @@ mod tests {
     #[test]
     fn test_group_into_batches_fits_exactly() {
         // Two files that together exactly reach the limit
-        let files = vec![
-            make_pair("a", 25_000),
-            make_pair("b", 25_000),
-        ];
+        let files = vec![make_pair("a", 25_000), make_pair("b", 25_000)];
         let batches = CodeAnalyze::group_into_batches(files);
         assert_eq!(batches.len(), 1);
         assert_eq!(batches[0].len(), 2);

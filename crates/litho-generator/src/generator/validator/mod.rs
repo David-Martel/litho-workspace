@@ -79,8 +79,7 @@ impl ContentValidator {
         let doc_sections = Self::load_generated_docs(context).await;
 
         // 1. Structural completeness
-        let completeness_score =
-            Self::check_completeness(&doc_sections, &mut findings);
+        let completeness_score = Self::check_completeness(&doc_sections, &mut findings);
 
         // 2. File path accuracy
         let accuracy_score = if let Some(ref ps) = project_structure {
@@ -129,9 +128,7 @@ impl ContentValidator {
     }
 
     /// Load all generated document sections from memory.
-    async fn load_generated_docs(
-        context: &GeneratorContext,
-    ) -> Vec<(String, String)> {
+    async fn load_generated_docs(context: &GeneratorContext) -> Vec<(String, String)> {
         let agent_types = [
             AgentType::Overview,
             AgentType::Architecture,
@@ -154,10 +151,7 @@ impl ContentValidator {
     }
 
     /// Check that all expected C4 document sections are present and non-trivial.
-    fn check_completeness(
-        doc_sections: &[(String, String)],
-        findings: &mut Vec<Finding>,
-    ) -> f64 {
+    fn check_completeness(doc_sections: &[(String, String)], findings: &mut Vec<Finding>) -> f64 {
         let expected = [
             "Project Overview",
             "Architecture Description",
@@ -165,10 +159,7 @@ impl ContentValidator {
             "Boundary Interfaces",
         ];
 
-        let present_keys: HashSet<&str> = doc_sections
-            .iter()
-            .map(|(k, _)| k.as_str())
-            .collect();
+        let present_keys: HashSet<&str> = doc_sections.iter().map(|(k, _)| k.as_str()).collect();
 
         let mut present_count = 0;
         let mut total = expected.len();
@@ -185,7 +176,11 @@ impl ContentValidator {
                     findings.push(Finding {
                         severity: Severity::Error,
                         category: "completeness".to_string(),
-                        message: format!("Section '{}' is present but too short ({} chars)", name, content.len()),
+                        message: format!(
+                            "Section '{}' is present but too short ({} chars)",
+                            name,
+                            content.len()
+                        ),
                         section: Some(name.to_string()),
                     });
                 } else {
@@ -234,11 +229,7 @@ impl ContentValidator {
         let known_filenames: HashSet<String> = project_structure
             .files
             .iter()
-            .filter_map(|f| {
-                f.path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-            })
+            .filter_map(|f| f.path.file_name().map(|n| n.to_string_lossy().to_string()))
             .collect();
 
         // Extract file references from markdown (backtick-wrapped paths)
@@ -377,22 +368,22 @@ impl ContentValidator {
 
         // Parse Cargo.toml dependencies
         let cargo_toml = project_path.join("Cargo.toml");
-        if cargo_toml.exists() {
-            if let Ok(content) = tokio::fs::read_to_string(&cargo_toml).await {
-                known_tech.insert("rust".to_string());
-                known_tech.insert("cargo".to_string());
-                Self::extract_cargo_deps(&content, &mut known_tech);
-            }
+        if cargo_toml.exists()
+            && let Ok(content) = tokio::fs::read_to_string(&cargo_toml).await
+        {
+            known_tech.insert("rust".to_string());
+            known_tech.insert("cargo".to_string());
+            Self::extract_cargo_deps(&content, &mut known_tech);
         }
 
         // Parse package.json dependencies
         let package_json = project_path.join("package.json");
-        if package_json.exists() {
-            if let Ok(content) = tokio::fs::read_to_string(&package_json).await {
-                known_tech.insert("node".to_string());
-                known_tech.insert("npm".to_string());
-                Self::extract_npm_deps(&content, &mut known_tech);
-            }
+        if package_json.exists()
+            && let Ok(content) = tokio::fs::read_to_string(&package_json).await
+        {
+            known_tech.insert("node".to_string());
+            known_tech.insert("npm".to_string());
+            Self::extract_npm_deps(&content, &mut known_tech);
         }
 
         // Parse pyproject.toml / requirements.txt
@@ -451,8 +442,7 @@ impl ContentValidator {
 
         // Look for technology/framework claims in docs
         let tech_claim_re =
-            Regex::new(r"(?i)\b(built with|uses|powered by|written in|framework|stack)\b")
-                .unwrap();
+            Regex::new(r"(?i)\b(built with|uses|powered by|written in|framework|stack)\b").unwrap();
 
         let mut grounded_claims = 0usize;
         let mut total_claims = 0usize;
@@ -506,13 +496,11 @@ impl ContentValidator {
                 in_deps = false;
                 continue;
             }
-            if in_deps {
-                if let Some(cap) = dep_re.captures(trimmed) {
-                    let dep_name = cap[1].to_lowercase().replace('-', "_");
-                    known_tech.insert(dep_name);
-                    // Also insert the original crate name
-                    known_tech.insert(cap[1].to_lowercase());
-                }
+            if in_deps && let Some(cap) = dep_re.captures(trimmed) {
+                let dep_name = cap[1].to_lowercase().replace('-', "_");
+                known_tech.insert(dep_name);
+                // Also insert the original crate name
+                known_tech.insert(cap[1].to_lowercase());
             }
         }
     }
@@ -649,9 +637,7 @@ tempfile = "3"
         let mut findings = Vec::new();
         let score = ContentValidator::check_completeness(&docs, &mut findings);
         assert!(score < 1.0);
-        assert!(findings
-            .iter()
-            .any(|f| f.message.contains("too short")));
+        assert!(findings.iter().any(|f| f.message.contains("too short")));
     }
 
     #[test]

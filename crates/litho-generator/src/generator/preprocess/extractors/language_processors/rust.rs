@@ -14,6 +14,12 @@ pub struct RustProcessor {
     enum_regex: Regex,
 }
 
+impl Default for RustProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RustProcessor {
     pub fn new() -> Self {
         Self {
@@ -42,42 +48,42 @@ impl LanguageProcessor for RustProcessor {
 
         for (line_num, line) in content.lines().enumerate() {
             // Extract use statements
-            if let Some(captures) = self.use_regex.captures(line) {
-                if let Some(use_path) = captures.get(1) {
-                    let use_str = use_path.as_str().trim();
-                    let is_external = !use_str.starts_with("crate::")
-                        && !use_str.starts_with("super::")
-                        && !use_str.starts_with("self::");
+            if let Some(captures) = self.use_regex.captures(line)
+                && let Some(use_path) = captures.get(1)
+            {
+                let use_str = use_path.as_str().trim();
+                let is_external = !use_str.starts_with("crate::")
+                    && !use_str.starts_with("super::")
+                    && !use_str.starts_with("self::");
 
-                    // Parse dependency name
-                    let dependency_name = self
-                        .extract_dependency_name(use_str)
-                        .unwrap_or_else(|| use_str.to_string());
+                // Parse dependency name
+                let dependency_name = self
+                    .extract_dependency_name(use_str)
+                    .unwrap_or_else(|| use_str.to_string());
 
-                    dependencies.push(Dependency {
-                        name: dependency_name,
-                        path: Some(source_file.clone()),
-                        is_external,
-                        line_number: Some(line_num + 1),
-                        dependency_type: "use".to_string(),
-                        version: None,
-                    });
-                }
+                dependencies.push(Dependency {
+                    name: dependency_name,
+                    path: Some(source_file.clone()),
+                    is_external,
+                    line_number: Some(line_num + 1),
+                    dependency_type: "use".to_string(),
+                    version: None,
+                });
             }
 
             // Extract mod statements
-            if let Some(captures) = self.mod_regex.captures(line) {
-                if let Some(mod_name) = captures.get(1) {
-                    let mod_str = mod_name.as_str().trim();
-                    dependencies.push(Dependency {
-                        name: mod_str.to_string(),
-                        path: Some(source_file.clone()),
-                        is_external: false,
-                        line_number: Some(line_num + 1),
-                        dependency_type: "mod".to_string(),
-                        version: None,
-                    });
-                }
+            if let Some(captures) = self.mod_regex.captures(line)
+                && let Some(mod_name) = captures.get(1)
+            {
+                let mod_str = mod_name.as_str().trim();
+                dependencies.push(Dependency {
+                    name: mod_str.to_string(),
+                    path: Some(source_file.clone()),
+                    is_external: false,
+                    line_number: Some(line_num + 1),
+                    dependency_type: "mod".to_string(),
+                    version: None,
+                });
             }
         }
 
@@ -364,15 +370,15 @@ impl RustProcessor {
     /// Extract dependency name from use path
     fn extract_dependency_name(&self, use_path: &str) -> Option<String> {
         // Handle complex use statements, like use crate::{module1, module2}
-        if use_path.contains('{') && use_path.contains('}') {
-            if let Some(start) = use_path.find('{') {
-                if let Some(end) = use_path.find('}') {
-                    let inner = &use_path[start + 1..end];
-                    // Return first module name
-                    if let Some(first_module) = inner.split(',').next() {
-                        return Some(first_module.trim().to_string());
-                    }
-                }
+        if use_path.contains('{')
+            && use_path.contains('}')
+            && let Some(start) = use_path.find('{')
+            && let Some(end) = use_path.find('}')
+        {
+            let inner = &use_path[start + 1..end];
+            // Return first module name
+            if let Some(first_module) = inner.split(',').next() {
+                return Some(first_module.trim().to_string());
             }
         }
 

@@ -33,6 +33,12 @@ pub struct PhpProcessor {
     internal_namespaces: HashSet<String>,
 }
 
+impl Default for PhpProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PhpProcessor {
     pub fn new() -> Self {
         Self {
@@ -186,7 +192,7 @@ impl LanguageProcessor for PhpProcessor {
 }
 
 impl PhpProcessor {
-    fn extract_class_interface<'a>(
+    fn extract_class_interface(
         &self,
         line: &str,
         lines: &[&str],
@@ -361,17 +367,17 @@ impl PhpProcessor {
         source_file: &str,
         dependencies: &mut Vec<Dependency>,
     ) {
-        if let Some(captures) = self.namespace_regex.captures(line) {
-            if let Some(namespace) = captures.get(1) {
-                dependencies.push(Dependency {
-                    name: namespace.as_str().trim().to_string(),
-                    path: Some(source_file.to_string()),
-                    is_external: false,
-                    line_number: Some(line_num + 1),
-                    dependency_type: "namespace".to_string(),
-                    version: None,
-                });
-            }
+        if let Some(captures) = self.namespace_regex.captures(line)
+            && let Some(namespace) = captures.get(1)
+        {
+            dependencies.push(Dependency {
+                name: namespace.as_str().trim().to_string(),
+                path: Some(source_file.to_string()),
+                is_external: false,
+                line_number: Some(line_num + 1),
+                dependency_type: "namespace".to_string(),
+                version: None,
+            });
         }
     }
 
@@ -382,18 +388,18 @@ impl PhpProcessor {
         source_file: &str,
         dependencies: &mut Vec<Dependency>,
     ) {
-        if let Some(captures) = self.use_regex.captures(line) {
-            if let Some(use_segment) = captures.get(1) {
-                for import_path in self.iter_use_entries(use_segment.as_str()) {
-                    dependencies.push(Dependency {
-                        name: import_path.clone(),
-                        path: Some(source_file.to_string()),
-                        is_external: !self.is_internal_namespace(&import_path),
-                        line_number: Some(line_num + 1),
-                        dependency_type: "use".to_string(),
-                        version: None,
-                    });
-                }
+        if let Some(captures) = self.use_regex.captures(line)
+            && let Some(use_segment) = captures.get(1)
+        {
+            for import_path in self.iter_use_entries(use_segment.as_str()) {
+                dependencies.push(Dependency {
+                    name: import_path.clone(),
+                    path: Some(source_file.to_string()),
+                    is_external: !self.is_internal_namespace(&import_path),
+                    line_number: Some(line_num + 1),
+                    dependency_type: "use".to_string(),
+                    version: None,
+                });
             }
         }
     }
@@ -440,19 +446,19 @@ impl PhpProcessor {
         source_file: &str,
         dependencies: &mut Vec<Dependency>,
     ) {
-        if let Some(captures) = self.composer_regex.captures(line) {
-            if let Some(composer_info) = captures.get(1) {
-                let composer_info = composer_info.as_str().trim();
-                if !composer_info.is_empty() {
-                    dependencies.push(Dependency {
-                        name: composer_info.to_string(),
-                        path: Some(source_file.to_string()),
-                        is_external: true,
-                        line_number: Some(line_num + 1),
-                        dependency_type: "composer".to_string(),
-                        version: None,
-                    });
-                }
+        if let Some(captures) = self.composer_regex.captures(line)
+            && let Some(composer_info) = captures.get(1)
+        {
+            let composer_info = composer_info.as_str().trim();
+            if !composer_info.is_empty() {
+                dependencies.push(Dependency {
+                    name: composer_info.to_string(),
+                    path: Some(source_file.to_string()),
+                    is_external: true,
+                    line_number: Some(line_num + 1),
+                    dependency_type: "composer".to_string(),
+                    version: None,
+                });
             }
         }
     }
@@ -605,32 +611,32 @@ impl PhpProcessor {
         }
 
         let mut entries = Vec::new();
-        if let Some(open_brace) = part.find('{') {
-            if let Some(close_brace) = part.rfind('}') {
-                let prefix = part[..open_brace].trim().trim_end_matches('\\').trim();
-                let inner = &part[open_brace + 1..close_brace];
+        if let Some(open_brace) = part.find('{')
+            && let Some(close_brace) = part.rfind('}')
+        {
+            let prefix = part[..open_brace].trim().trim_end_matches('\\').trim();
+            let inner = &part[open_brace + 1..close_brace];
 
-                for inner_entry in inner.split(',') {
-                    let entry = inner_entry.trim();
-                    if entry.is_empty() {
-                        continue;
-                    }
-                    let combined = if prefix.is_empty() {
-                        Self::strip_use_alias(entry)
-                    } else {
-                        format!(
-                            "{}\\{}",
-                            prefix.trim_end_matches('\\'),
-                            Self::strip_use_alias(entry)
-                        )
-                    };
-                    let cleaned = Self::strip_use_alias(&combined);
-                    if !cleaned.is_empty() {
-                        entries.push(cleaned);
-                    }
+            for inner_entry in inner.split(',') {
+                let entry = inner_entry.trim();
+                if entry.is_empty() {
+                    continue;
                 }
-                return entries;
+                let combined = if prefix.is_empty() {
+                    Self::strip_use_alias(entry)
+                } else {
+                    format!(
+                        "{}\\{}",
+                        prefix.trim_end_matches('\\'),
+                        Self::strip_use_alias(entry)
+                    )
+                };
+                let cleaned = Self::strip_use_alias(&combined);
+                if !cleaned.is_empty() {
+                    entries.push(cleaned);
+                }
             }
+            return entries;
         }
 
         let cleaned = Self::strip_use_alias(part);
@@ -742,11 +748,11 @@ impl PhpProcessor {
         let mut namespaces = HashSet::new();
         let composer_path = project_root.join("composer.json");
 
-        if let Ok(contents) = fs::read_to_string(composer_path) {
-            if let Ok(value) = serde_json::from_str::<Value>(&contents) {
-                Self::collect_psr_namespaces(&value, "autoload", &mut namespaces);
-                Self::collect_psr_namespaces(&value, "autoload-dev", &mut namespaces);
-            }
+        if let Ok(contents) = fs::read_to_string(composer_path)
+            && let Ok(value) = serde_json::from_str::<Value>(&contents)
+        {
+            Self::collect_psr_namespaces(&value, "autoload", &mut namespaces);
+            Self::collect_psr_namespaces(&value, "autoload-dev", &mut namespaces);
         }
 
         namespaces

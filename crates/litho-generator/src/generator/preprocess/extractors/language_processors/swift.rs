@@ -302,22 +302,22 @@ impl LanguageProcessor for SwiftProcessor {
         let source_file = file_path.to_string_lossy().to_string();
 
         for (line_num, line) in content.lines().enumerate() {
-            if let Some(captures) = self.import_regex.captures(line) {
-                if let Some(module) = captures.get(1) {
-                    let name = module.as_str().to_string();
-                    // In Swift, all imports are external dependencies because:
-                    // - Code within the same target doesn't require import statements
-                    // - Both system frameworks (Foundation, UIKit) and third-party
-                    //   packages (Alamofire, etc.) require explicit imports
-                    dependencies.push(Dependency {
-                        name: name.clone(),
-                        path: Some(source_file.clone()),
-                        is_external: true,
-                        line_number: Some(line_num + 1),
-                        dependency_type: "import".to_string(),
-                        version: None,
-                    });
-                }
+            if let Some(captures) = self.import_regex.captures(line)
+                && let Some(module) = captures.get(1)
+            {
+                let name = module.as_str().to_string();
+                // In Swift, all imports are external dependencies because:
+                // - Code within the same target doesn't require import statements
+                // - Both system frameworks (Foundation, UIKit) and third-party
+                //   packages (Alamofire, etc.) require explicit imports
+                dependencies.push(Dependency {
+                    name: name.clone(),
+                    path: Some(source_file.clone()),
+                    is_external: true,
+                    line_number: Some(line_num + 1),
+                    dependency_type: "import".to_string(),
+                    version: None,
+                });
             }
         }
 
@@ -451,27 +451,27 @@ impl LanguageProcessor for SwiftProcessor {
             }
 
             // Extract function definitions
-            if self.func_regex.is_match(trimmed) {
-                if let Some(name) = Self::extract_func_name(trimmed) {
-                    let visibility = Self::extract_visibility(trimmed);
-                    let is_async = trimmed.contains(" async ");
-                    let params_str = Self::extract_params_string(trimmed);
-                    let return_type = Self::extract_return_type(trimmed);
+            if self.func_regex.is_match(trimmed)
+                && let Some(name) = Self::extract_func_name(trimmed)
+            {
+                let visibility = Self::extract_visibility(trimmed);
+                let is_async = trimmed.contains(" async ");
+                let params_str = Self::extract_params_string(trimmed);
+                let return_type = Self::extract_return_type(trimmed);
 
-                    interfaces.push(InterfaceInfo {
-                        name,
-                        interface_type: if is_async {
-                            "async_function"
-                        } else {
-                            "function"
-                        }
-                        .to_string(),
-                        visibility,
-                        parameters: Self::parse_parameters(&params_str),
-                        return_type,
-                        description: Self::extract_doc_comment(&lines, i),
-                    });
-                }
+                interfaces.push(InterfaceInfo {
+                    name,
+                    interface_type: if is_async {
+                        "async_function"
+                    } else {
+                        "function"
+                    }
+                    .to_string(),
+                    visibility,
+                    parameters: Self::parse_parameters(&params_str),
+                    return_type,
+                    description: Self::extract_doc_comment(&lines, i),
+                });
             }
 
             // Extract initializer definitions
@@ -499,78 +499,78 @@ impl LanguageProcessor for SwiftProcessor {
             }
 
             // Extract class definitions
-            if trimmed.contains("class ") && !trimmed.contains("class func") {
-                if let Some(name) = Self::extract_name_after_keyword(trimmed, "class ") {
-                    let visibility = Self::extract_visibility(trimmed);
-                    let is_final = trimmed.contains("final ");
+            if trimmed.contains("class ")
+                && !trimmed.contains("class func")
+                && let Some(name) = Self::extract_name_after_keyword(trimmed, "class ")
+            {
+                let visibility = Self::extract_visibility(trimmed);
+                let is_final = trimmed.contains("final ");
 
-                    interfaces.push(InterfaceInfo {
-                        name,
-                        interface_type: if is_final { "final_class" } else { "class" }.to_string(),
-                        visibility,
-                        parameters: Vec::new(),
-                        return_type: None,
-                        description: Self::extract_doc_comment(&lines, i),
-                    });
-                }
+                interfaces.push(InterfaceInfo {
+                    name,
+                    interface_type: if is_final { "final_class" } else { "class" }.to_string(),
+                    visibility,
+                    parameters: Vec::new(),
+                    return_type: None,
+                    description: Self::extract_doc_comment(&lines, i),
+                });
             }
 
             // Extract struct definitions
-            if trimmed.contains("struct ") {
-                if let Some(name) = Self::extract_name_after_keyword(trimmed, "struct ") {
-                    interfaces.push(InterfaceInfo {
-                        name,
-                        interface_type: "struct".to_string(),
-                        visibility: Self::extract_visibility(trimmed),
-                        parameters: Vec::new(),
-                        return_type: None,
-                        description: Self::extract_doc_comment(&lines, i),
-                    });
-                }
+            if trimmed.contains("struct ")
+                && let Some(name) = Self::extract_name_after_keyword(trimmed, "struct ")
+            {
+                interfaces.push(InterfaceInfo {
+                    name,
+                    interface_type: "struct".to_string(),
+                    visibility: Self::extract_visibility(trimmed),
+                    parameters: Vec::new(),
+                    return_type: None,
+                    description: Self::extract_doc_comment(&lines, i),
+                });
             }
 
             // Extract protocol definitions
-            if trimmed.contains("protocol ") {
-                if let Some(name) = Self::extract_name_after_keyword(trimmed, "protocol ") {
-                    interfaces.push(InterfaceInfo {
-                        name,
-                        interface_type: "protocol".to_string(),
-                        visibility: Self::extract_visibility(trimmed),
-                        parameters: Vec::new(),
-                        return_type: None,
-                        description: Self::extract_doc_comment(&lines, i),
-                    });
-                }
+            if trimmed.contains("protocol ")
+                && let Some(name) = Self::extract_name_after_keyword(trimmed, "protocol ")
+            {
+                interfaces.push(InterfaceInfo {
+                    name,
+                    interface_type: "protocol".to_string(),
+                    visibility: Self::extract_visibility(trimmed),
+                    parameters: Vec::new(),
+                    return_type: None,
+                    description: Self::extract_doc_comment(&lines, i),
+                });
             }
 
             // Extract enum definitions
-            if trimmed.contains("enum ") {
-                if let Some(name) = Self::extract_name_after_keyword(trimmed, "enum ") {
-                    let is_indirect = trimmed.contains("indirect ");
-                    interfaces.push(InterfaceInfo {
-                        name,
-                        interface_type: if is_indirect { "indirect_enum" } else { "enum" }
-                            .to_string(),
-                        visibility: Self::extract_visibility(trimmed),
-                        parameters: Vec::new(),
-                        return_type: None,
-                        description: Self::extract_doc_comment(&lines, i),
-                    });
-                }
+            if trimmed.contains("enum ")
+                && let Some(name) = Self::extract_name_after_keyword(trimmed, "enum ")
+            {
+                let is_indirect = trimmed.contains("indirect ");
+                interfaces.push(InterfaceInfo {
+                    name,
+                    interface_type: if is_indirect { "indirect_enum" } else { "enum" }.to_string(),
+                    visibility: Self::extract_visibility(trimmed),
+                    parameters: Vec::new(),
+                    return_type: None,
+                    description: Self::extract_doc_comment(&lines, i),
+                });
             }
 
             // Extract extension definitions
-            if trimmed.contains("extension ") {
-                if let Some(name) = Self::extract_name_after_keyword(trimmed, "extension ") {
-                    interfaces.push(InterfaceInfo {
-                        name,
-                        interface_type: "extension".to_string(),
-                        visibility: Self::extract_visibility(trimmed),
-                        parameters: Vec::new(),
-                        return_type: None,
-                        description: Self::extract_doc_comment(&lines, i),
-                    });
-                }
+            if trimmed.contains("extension ")
+                && let Some(name) = Self::extract_name_after_keyword(trimmed, "extension ")
+            {
+                interfaces.push(InterfaceInfo {
+                    name,
+                    interface_type: "extension".to_string(),
+                    visibility: Self::extract_visibility(trimmed),
+                    parameters: Vec::new(),
+                    return_type: None,
+                    description: Self::extract_doc_comment(&lines, i),
+                });
             }
 
             // Extract property definitions (var/let)
@@ -644,23 +644,21 @@ impl LanguageProcessor for SwiftProcessor {
             }
 
             // Extract typealias definitions
-            if trimmed.contains("typealias ") {
-                if let Some(name) = Self::extract_name_after_keyword(trimmed, "typealias ") {
-                    let aliased_type = if let Some(eq_pos) = trimmed.find('=') {
-                        Some(trimmed[eq_pos + 1..].trim().to_string())
-                    } else {
-                        None
-                    };
+            if trimmed.contains("typealias ")
+                && let Some(name) = Self::extract_name_after_keyword(trimmed, "typealias ")
+            {
+                let aliased_type = trimmed
+                    .find('=')
+                    .map(|eq_pos| trimmed[eq_pos + 1..].trim().to_string());
 
-                    interfaces.push(InterfaceInfo {
-                        name,
-                        interface_type: "typealias".to_string(),
-                        visibility: Self::extract_visibility(trimmed),
-                        parameters: Vec::new(),
-                        return_type: aliased_type,
-                        description: Self::extract_doc_comment(&lines, i),
-                    });
-                }
+                interfaces.push(InterfaceInfo {
+                    name,
+                    interface_type: "typealias".to_string(),
+                    visibility: Self::extract_visibility(trimmed),
+                    parameters: Vec::new(),
+                    return_type: aliased_type,
+                    description: Self::extract_doc_comment(&lines, i),
+                });
             }
         }
 

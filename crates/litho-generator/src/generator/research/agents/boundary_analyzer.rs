@@ -249,7 +249,7 @@ impl BoundaryAnalyzer {
             }
         }
 
-        content.push_str("\n");
+        content.push('\n');
         content
     }
 
@@ -291,6 +291,6 @@ impl BoundaryAnalyzer {
             ));
         }
 
-        content.push_str("\n");
+        content.push('\n');
     }
 }

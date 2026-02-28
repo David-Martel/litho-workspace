@@ -304,15 +304,15 @@ impl QmdLlmEngine for AdaptiveLlmEngine {
     fn local_models(&self) -> QmdResult<Vec<ModelStatus>> {
         let mut out = self.fallback.local_models()?;
 
-        if self.ollama_enabled() {
-            if let Ok(models) = ollama_list_models() {
-                for model in models {
-                    out.push(ModelStatus {
-                        name: format!("ollama:{model}"),
-                        available: true,
-                        location: Some("ollama".to_string()),
-                    });
-                }
+        if self.ollama_enabled()
+            && let Ok(models) = ollama_list_models()
+        {
+            for model in models {
+                out.push(ModelStatus {
+                    name: format!("ollama:{model}"),
+                    available: true,
+                    location: Some("ollama".to_string()),
+                });
             }
         }
 

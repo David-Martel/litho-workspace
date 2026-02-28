@@ -276,14 +276,14 @@ async fn cmd_generate(args: GenerateArgs) -> anyhow::Result<()> {
 
     let generator: Box<dyn litho_codex::provider::DocGenerator> = match args.provider {
         Provider::CodexLib => Box::new(litho_codex::exec::CodexLibGenerator {
-            model: args.model.unwrap_or_else(|| {
-                litho_core::env::LithoEnv::codex_model().unwrap_or_default()
-            }),
+            model: args
+                .model
+                .unwrap_or_else(|| litho_core::env::LithoEnv::codex_model().unwrap_or_default()),
         }),
         Provider::CodexExec => Box::new(CodexExecGenerator {
-            model: args.model.unwrap_or_else(|| {
-                litho_core::env::LithoEnv::codex_model().unwrap_or_default()
-            }),
+            model: args
+                .model
+                .unwrap_or_else(|| litho_core::env::LithoEnv::codex_model().unwrap_or_default()),
             sandbox: "read-only".into(),
             ..Default::default()
         }),
@@ -339,7 +339,10 @@ async fn cmd_status(args: StatusArgs) -> anyhow::Result<()> {
 
     let manifest_path = project_path.join(".litho").join("manifest.json");
     if !manifest_path.exists() {
-        println!("No documentation manifest found at {}", manifest_path.display());
+        println!(
+            "No documentation manifest found at {}",
+            manifest_path.display()
+        );
         println!("Run `litho-generator` to generate documentation first.");
         return Ok(());
     }
@@ -365,10 +368,7 @@ async fn cmd_status(args: StatusArgs) -> anyhow::Result<()> {
     );
     println!("Files tracked    : {}", info.file_hashes.len());
     println!("Modules generated: {}", info.modules.len());
-    println!(
-        "Generation time  : {:.1}s",
-        info.total_generation_time_secs
-    );
+    println!("Generation time  : {:.1}s", info.total_generation_time_secs);
 
     // Compute staleness: how many commits since the manifest
     if let Some(ref commit) = info.git_commit {
@@ -378,20 +378,17 @@ async fn cmd_status(args: StatusArgs) -> anyhow::Result<()> {
             .output()
             .await;
 
-        if let Ok(out) = output {
-            if out.status.success() {
-                let count = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                println!(
-                    "Staleness        : {} commit(s) behind HEAD",
-                    count
-                );
-            }
+        if let Ok(out) = output
+            && out.status.success()
+        {
+            let count = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            println!("Staleness        : {} commit(s) behind HEAD", count);
         }
     }
 
     if !info.modules.is_empty() {
         println!("\nModules:");
-        for (key, _) in &info.modules {
+        for key in info.modules.keys() {
             println!("  - {}", key);
         }
     }
@@ -416,7 +413,12 @@ async fn cmd_serve(args: ServeArgs) -> anyhow::Result<()> {
         Some(bin) => {
             println!("Serving docs at http://localhost:{}", args.port);
             let status = tokio::process::Command::new(bin)
-                .args(["serve", &docs_path.to_string_lossy(), "--port", &args.port.to_string()])
+                .args([
+                    "serve",
+                    &docs_path.to_string_lossy(),
+                    "--port",
+                    &args.port.to_string(),
+                ])
                 .status()
                 .await?;
 
@@ -427,7 +429,11 @@ async fn cmd_serve(args: ServeArgs) -> anyhow::Result<()> {
         None => {
             println!("litho-book not found in PATH.");
             println!("To serve documentation, install litho-book or use any static file server:");
-            println!("  python -m http.server {} --directory {}", args.port, docs_path.display());
+            println!(
+                "  python -m http.server {} --directory {}",
+                args.port,
+                docs_path.display()
+            );
         }
     }
 
@@ -437,21 +443,22 @@ async fn cmd_serve(args: ServeArgs) -> anyhow::Result<()> {
 /// Try to find the litho-book binary in common locations.
 fn which_litho_book() -> Option<PathBuf> {
     // Check PATH using platform-appropriate command
-    let cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
-    if let Ok(output) = std::process::Command::new(cmd)
-        .arg("litho-book")
-        .output()
+    let cmd = if cfg!(target_os = "windows") {
+        "where"
+    } else {
+        "which"
+    };
+    if let Ok(output) = std::process::Command::new(cmd).arg("litho-book").output()
+        && output.status.success()
     {
-        if output.status.success() {
-            let path = String::from_utf8_lossy(&output.stdout)
-                .lines()
-                .next()
-                .unwrap_or("")
-                .trim()
-                .to_string();
-            if !path.is_empty() {
-                return Some(PathBuf::from(path));
-            }
+        let path = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if !path.is_empty() {
+            return Some(PathBuf::from(path));
         }
     }
 

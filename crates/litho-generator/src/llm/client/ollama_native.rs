@@ -11,8 +11,8 @@
 
 use anyhow::{Context, Result};
 use ollama_rs::{
-    generation::chat::{request::ChatMessageRequest, ChatMessage},
     Ollama,
+    generation::chat::{ChatMessage, request::ChatMessageRequest},
 };
 use regex::Regex;
 use schemars::JsonSchema;
@@ -46,7 +46,11 @@ impl OllamaNativeClient {
         // ollama-rs wants  (host_without_port, port)  as separate values.
         let url = url::Url::parse(base)
             .unwrap_or_else(|_| url::Url::parse("http://localhost:11434").unwrap());
-        let host = format!("{}://{}", url.scheme(), url.host_str().unwrap_or("localhost"));
+        let host = format!(
+            "{}://{}",
+            url.scheme(),
+            url.host_str().unwrap_or("localhost")
+        );
         let port = url.port().unwrap_or(11434);
 
         let ollama = Ollama::new(host, port);
@@ -112,10 +116,8 @@ impl OllamaNativeClient {
                 Err(e) => {
                     last_error = Some(format!("{e:#}"));
                     if attempt < max_retries {
-                        tokio::time::sleep(std::time::Duration::from_millis(
-                            config.retry_delay_ms,
-                        ))
-                        .await;
+                        tokio::time::sleep(std::time::Duration::from_millis(config.retry_delay_ms))
+                            .await;
                     }
                 }
             }
@@ -147,10 +149,7 @@ impl OllamaNativeClient {
         opts
     }
 
-    fn build_extraction_prompt<T: JsonSchema>(
-        base: &str,
-        previous_error: Option<&str>,
-    ) -> String {
+    fn build_extraction_prompt<T: JsonSchema>(base: &str, previous_error: Option<&str>) -> String {
         let schema = schemars::schema_for!(T);
         let schema_json =
             serde_json::to_string_pretty(&schema).unwrap_or_else(|_| "{}".to_string());
@@ -221,19 +220,18 @@ pub fn parse_json_response(response: &str, _attempt: usize) -> Result<Value> {
     }
 
     // Strategy 2: code block
-    if let Some(cap) = JSON_CODE_BLOCK_RE.captures(response) {
-        if let Some(m) = cap.get(1) {
-            if let Ok(v) = serde_json::from_str::<Value>(m.as_str()) {
-                return Ok(v);
-            }
-        }
+    if let Some(cap) = JSON_CODE_BLOCK_RE.captures(response)
+        && let Some(m) = cap.get(1)
+        && let Ok(v) = serde_json::from_str::<Value>(m.as_str())
+    {
+        return Ok(v);
     }
 
     // Strategy 3: first balanced `{…}`
-    if let Some(obj) = extract_first_json_object(response) {
-        if let Ok(v) = serde_json::from_str::<Value>(&obj) {
-            return Ok(v);
-        }
+    if let Some(obj) = extract_first_json_object(response)
+        && let Ok(v) = serde_json::from_str::<Value>(&obj)
+    {
+        return Ok(v);
     }
 
     // Strategy 4: strip fences
@@ -248,12 +246,11 @@ pub fn parse_json_response(response: &str, _attempt: usize) -> Result<Value> {
     }
 
     // Strategy 5: double-encoded
-    if let Ok(Value::String(inner)) = serde_json::from_str::<Value>(cleaned) {
-        if let Ok(v) = serde_json::from_str::<Value>(&inner) {
-            if v.is_object() || v.is_array() {
-                return Ok(v);
-            }
-        }
+    if let Ok(Value::String(inner)) = serde_json::from_str::<Value>(cleaned)
+        && let Ok(v) = serde_json::from_str::<Value>(&inner)
+        && (v.is_object() || v.is_array())
+    {
+        return Ok(v);
     }
 
     Err(anyhow::anyhow!(
@@ -289,12 +286,12 @@ fn unwrap_schema_wrapper(json: Value) -> Value {
         let has_required = obj.contains_key("required");
         let has_type_object = obj.get("type").and_then(|v| v.as_str()) == Some("object");
 
-        if (has_schema || (has_required && has_type_object)) && has_properties {
-            if let Some(props) = obj.get("properties") {
-                if props.is_object() {
-                    return props.clone();
-                }
-            }
+        if (has_schema || (has_required && has_type_object))
+            && has_properties
+            && let Some(props) = obj.get("properties")
+            && props.is_object()
+        {
+            return props.clone();
         }
     }
     json

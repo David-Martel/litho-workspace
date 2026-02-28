@@ -121,7 +121,7 @@ pub enum Commands {
 
 impl Args {
     /// Convert CLI arguments to configuration
-    pub fn to_config(self) -> Config {
+    pub fn into_config(self) -> Config {
         // Determine target language early for proper message localization
         let target_lang = if let Some(ref lang_str) = self.target_language {
             lang_str.parse::<TargetLanguage>().unwrap_or_default()
@@ -192,10 +192,8 @@ impl Args {
         }
         if let Some(llm_api_base_url) = self.llm_api_base_url {
             config.llm.api_base_url = llm_api_base_url;
-        } else {
-            if config.llm.provider == LLMProvider::Ollama {
-                config.llm.api_base_url = "http://localhost:11434".to_owned();
-            }
+        } else if config.llm.provider == LLMProvider::Ollama {
+            config.llm.api_base_url = "http://localhost:11434".to_owned();
         }
         if let Some(llm_api_key) = self.llm_api_key {
             config.llm.api_key = llm_api_key;

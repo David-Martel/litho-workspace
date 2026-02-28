@@ -87,7 +87,7 @@ impl DocumentChunker {
         match self.config.strategy.as_str() {
             "semantic" => self.chunk_semantic(content, file_type),
             "paragraph" => self.chunk_by_paragraph(content),
-            "fixed" | _ => self.chunk_fixed_size(content),
+            _ => self.chunk_fixed_size(content),
         }
     }
 
@@ -110,7 +110,7 @@ impl DocumentChunker {
 
         for line in content.lines() {
             // Detect headers
-            if line.starts_with("# ") {
+            if let Some(heading) = line.strip_prefix("# ") {
                 // H1 - major section boundary
                 if !current_chunk.is_empty() {
                     chunks.push(DocumentChunk {
@@ -121,10 +121,11 @@ impl DocumentChunker {
                     });
                     current_chunk.clear();
                 }
+                let title = heading.trim().to_string();
                 section_stack.clear();
-                section_stack.push(line[2..].trim().to_string());
-                current_section = line[2..].trim().to_string();
-            } else if line.starts_with("## ") {
+                section_stack.push(title.clone());
+                current_section = title;
+            } else if let Some(heading) = line.strip_prefix("## ") {
                 // H2 - check if we should split
                 if current_chunk.len() >= self.config.max_chunk_size {
                     chunks.push(DocumentChunk {
@@ -138,9 +139,9 @@ impl DocumentChunker {
                 if section_stack.len() > 1 {
                     section_stack.truncate(1);
                 }
-                section_stack.push(line[3..].trim().to_string());
+                section_stack.push(heading.trim().to_string());
                 current_section = section_stack.join(" > ");
-            } else if line.starts_with("### ") {
+            } else if let Some(heading) = line.strip_prefix("### ") {
                 // H3 - subsection
                 if current_chunk.len() >= self.config.max_chunk_size {
                     chunks.push(DocumentChunk {
@@ -154,7 +155,7 @@ impl DocumentChunker {
                 if section_stack.len() > 2 {
                     section_stack.truncate(2);
                 }
-                section_stack.push(line[4..].trim().to_string());
+                section_stack.push(heading.trim().to_string());
                 current_section = section_stack.join(" > ");
             }
 
@@ -227,10 +228,10 @@ impl DocumentChunker {
             }
 
             // Extract context from CREATE statements
-            if upper_line.contains("CREATE TABLE") || upper_line.contains("CREATE VIEW") {
-                if let Some(name) = Self::extract_sql_object_name(line) {
-                    current_context = name;
-                }
+            if (upper_line.contains("CREATE TABLE") || upper_line.contains("CREATE VIEW"))
+                && let Some(name) = Self::extract_sql_object_name(line)
+            {
+                current_context = name;
             }
 
             current_chunk.push_str(line);
@@ -605,17 +606,16 @@ impl LocalDocsProcessor {
             }
 
             // Add chunk context if present
-            if let Some(ref chunk_info) = doc.chunk_info {
-                if chunk_info.total_chunks > 1 {
-                    formatted.push_str(&format!(
-                        "**Chunk:** {}/{}\n",
-                        chunk_info.chunk_index + 1,
-                        chunk_info.total_chunks
-                    ));
-                    if !chunk_info.section_context.is_empty() {
-                        formatted
-                            .push_str(&format!("**Section:** {}\n", chunk_info.section_context));
-                    }
+            if let Some(ref chunk_info) = doc.chunk_info
+                && chunk_info.total_chunks > 1
+            {
+                formatted.push_str(&format!(
+                    "**Chunk:** {}/{}\n",
+                    chunk_info.chunk_index + 1,
+                    chunk_info.total_chunks
+                ));
+                if !chunk_info.section_context.is_empty() {
+                    formatted.push_str(&format!("**Section:** {}\n", chunk_info.section_context));
                 }
             }
 

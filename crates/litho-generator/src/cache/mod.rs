@@ -269,7 +269,11 @@ impl CacheManager {
     }
 
     /// Look up a previously cached result by content hash.
-    pub async fn get_by_content_hash<T>(&self, category: &str, content_hash: &str) -> Result<Option<T>>
+    pub async fn get_by_content_hash<T>(
+        &self,
+        category: &str,
+        content_hash: &str,
+    ) -> Result<Option<T>>
     where
         T: for<'de> Deserialize<'de>,
     {

@@ -13,6 +13,12 @@ pub struct PythonProcessor {
     async_function_regex: Regex,
 }
 
+impl Default for PythonProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PythonProcessor {
     pub fn new() -> Self {
         Self {
@@ -58,20 +64,20 @@ impl LanguageProcessor for PythonProcessor {
                 }
             }
             // Extract import statements
-            else if let Some(captures) = self.import_regex.captures(line) {
-                if let Some(import_path) = captures.get(1) {
-                    let import_str = import_path.as_str();
-                    let is_external = !import_str.starts_with('.') && !import_str.starts_with("__");
+            else if let Some(captures) = self.import_regex.captures(line)
+                && let Some(import_path) = captures.get(1)
+            {
+                let import_str = import_path.as_str();
+                let is_external = !import_str.starts_with('.') && !import_str.starts_with("__");
 
-                    dependencies.push(Dependency {
-                        name: source_file.clone(),
-                        path: Some(import_str.to_string()),
-                        is_external,
-                        line_number: Some(line_num + 1),
-                        dependency_type: "import".to_string(),
-                        version: None,
-                    });
-                }
+                dependencies.push(Dependency {
+                    name: source_file.clone(),
+                    path: Some(import_str.to_string()),
+                    is_external,
+                    line_number: Some(line_num + 1),
+                    dependency_type: "import".to_string(),
+                    version: None,
+                });
             }
         }
 
@@ -332,8 +338,8 @@ impl PythonProcessor {
                 }
 
                 // Find ending marker
-                for i in (current_line + 2)..lines.len() {
-                    let line = lines[i].trim();
+                for line_raw in lines.iter().skip(current_line + 2) {
+                    let line = line_raw.trim();
                     if line.ends_with(quote_type) {
                         let content = line.trim_end_matches(quote_type).trim();
                         if !content.is_empty() {

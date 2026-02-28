@@ -14,6 +14,12 @@ pub struct MemoryMetadata {
     pub total_size: usize,
 }
 
+impl Default for MemoryMetadata {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MemoryMetadata {
     pub fn new() -> Self {
         Self {
@@ -31,6 +37,12 @@ impl MemoryMetadata {
 pub struct Memory {
     data: HashMap<String, Value>,
     metadata: MemoryMetadata,
+}
+
+impl Default for Memory {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Memory {

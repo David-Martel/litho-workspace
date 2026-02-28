@@ -87,10 +87,10 @@ where
     }
 
     // If the LLM double-encoded the value as a JSON string, try to decode it.
-    if let serde_json::Value::String(s) = &val {
-        if let Ok(inner) = serde_json::from_str::<T>(s) {
-            return Ok(inner);
-        }
+    if let serde_json::Value::String(s) = &val
+        && let Ok(inner) = serde_json::from_str::<T>(s)
+    {
+        return Ok(inner);
     }
 
     Ok(T::default())
@@ -136,15 +136,14 @@ where
 ///
 /// This is the canonical coercion used by all other helpers in this module.
 ///
-/// - `String`  → returned unchanged
-/// - `Number`  → `.to_string()` (e.g. `42` → `"42"`, `3.14` → `"3.14"`)
-/// - `Bool`    → `"true"` or `"false"`
-/// - `Null`    → `""` (empty string)
-/// - `Array`   → elements joined with `", "` (non-string elements are
-///               coerced recursively); objects inside the array prefer their
-///               `name` field
-/// - `Object`  → the value of the `name` field when present, otherwise the
-///               compact JSON representation of the object
+/// - `String` → returned unchanged
+/// - `Number` → `.to_string()` (e.g. `42` → `"42"`, `3.14` → `"3.14"`)
+/// - `Bool` → `"true"` or `"false"`
+/// - `Null` → `""` (empty string)
+/// - `Array` → elements joined with `", "` (non-string elements are
+///   coerced recursively); objects inside the array prefer their `name` field
+/// - `Object` → the value of the `name` field when present, otherwise the
+///   compact JSON representation of the object
 pub fn deserialize_string_flexible<'de, D>(deserializer: D) -> Result<String, D::Error>
 where
     D: Deserializer<'de>,
@@ -230,10 +229,10 @@ pub(crate) fn unwrap_envelope(val: serde_json::Value) -> serde_json::Value {
                 }
                 // Inner value is a string — try double-encoded JSON.
                 serde_json::Value::String(s) => {
-                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(s) {
-                        if parsed.is_object() || parsed.is_array() {
-                            return parsed;
-                        }
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(s)
+                        && (parsed.is_object() || parsed.is_array())
+                    {
+                        return parsed;
                     }
                 }
                 _ => {}

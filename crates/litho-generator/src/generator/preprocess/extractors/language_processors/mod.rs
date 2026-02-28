@@ -37,6 +37,12 @@ impl Clone for LanguageProcessorManager {
     }
 }
 
+impl Default for LanguageProcessorManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LanguageProcessorManager {
     pub fn new() -> Self {
         Self {

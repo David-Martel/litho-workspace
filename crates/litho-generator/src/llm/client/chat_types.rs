@@ -37,14 +37,6 @@ impl ChatMessage {
         }
     }
 
-    pub fn assistant_text(text: &str) -> Self {
-        ChatMessage::Assistant {
-            content: vec![AssistantContent::Text(TextContent {
-                text: text.to_string(),
-            })],
-        }
-    }
-
     pub fn tool_result(tool_call_id: &str, content: &str) -> Self {
         ChatMessage::Tool {
             tool_call_id: tool_call_id.to_string(),
@@ -63,6 +55,7 @@ pub enum AssistantContent {
     /// A tool/function call request.
     ToolCall(ToolCallInfo),
     /// Reasoning trace (e.g. from models that expose chain-of-thought).
+    /// Constructed from Anthropic `thinking` content blocks.
     Reasoning(ReasoningContent),
 }
 
@@ -109,12 +102,12 @@ pub struct ToolDefinition {
 /// Tool choice configuration.
 #[derive(Debug, Clone)]
 pub enum ToolChoice {
-    /// Model can choose whether to use tools.
-    Auto,
+    /// Model can choose whether to use tools (future use).
+    _Auto,
     /// Model must use at least one tool.
     Required,
-    /// Model must not use tools.
-    None,
+    /// Model must not use tools (future use).
+    _None,
 }
 
 // ── Error types ────────────────────────────────────────────────────────────
@@ -126,7 +119,7 @@ pub enum PromptError {
     MaxDepthError {
         max_depth: usize,
         chat_history: Vec<ChatMessage>,
-        prompt: String,
+        _prompt: String,
     },
     /// An error occurred during completion.
     CompletionError(anyhow::Error),
@@ -255,7 +248,7 @@ pub(crate) struct AnthropicToolChoice {
 pub(crate) struct AnthropicResponse {
     pub content: Vec<AnthropicContentBlock>,
     #[serde(default)]
-    pub stop_reason: Option<String>,
+    pub _stop_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -269,6 +262,9 @@ pub(crate) enum AnthropicContentBlock {
         name: String,
         input: serde_json::Value,
     },
+    /// Extended thinking trace (Anthropic Claude 3.7+ with thinking enabled).
+    #[serde(rename = "thinking")]
+    Thinking { thinking: String },
 }
 
 // ── Internal API types (Gemini) ────────────────────────────────────────────

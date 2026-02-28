@@ -68,12 +68,12 @@ fn unwrap_schema_wrapper(json: Value) -> Value {
         let has_required = obj.contains_key("required");
         let has_type_object = obj.get("type").and_then(|v| v.as_str()) == Some("object");
 
-        if (has_schema || (has_required && has_type_object)) && has_properties {
-            if let Some(properties) = obj.get("properties") {
-                if properties.is_object() {
-                    return properties.clone();
-                }
-            }
+        if (has_schema || (has_required && has_type_object))
+            && has_properties
+            && let Some(properties) = obj.get("properties")
+            && properties.is_object()
+        {
+            return properties.clone();
         }
     }
     json
@@ -86,16 +86,16 @@ fn parse_json_response(response: &str) -> Result<Value, String> {
         return Ok(v);
     }
     // Strategy 2: markdown code block
-    if let Some(block) = extract_from_code_block(response) {
-        if let Ok(v) = serde_json::from_str::<Value>(&block) {
-            return Ok(v);
-        }
+    if let Some(block) = extract_from_code_block(response)
+        && let Ok(v) = serde_json::from_str::<Value>(&block)
+    {
+        return Ok(v);
     }
     // Strategy 3: first JSON object
-    if let Some(obj_str) = extract_first_json_object(response) {
-        if let Ok(v) = serde_json::from_str::<Value>(&obj_str) {
-            return Ok(v);
-        }
+    if let Some(obj_str) = extract_first_json_object(response)
+        && let Ok(v) = serde_json::from_str::<Value>(&obj_str)
+    {
+        return Ok(v);
     }
     // Strategy 4: clean & parse
     let cleaned = clean_response(response);

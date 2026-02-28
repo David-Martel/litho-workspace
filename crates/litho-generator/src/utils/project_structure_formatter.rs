@@ -62,8 +62,8 @@ impl ProjectStructureFormatter {
     /// Normalize path format, remove "./" prefix
     fn normalize_path(path: &Path) -> PathBuf {
         let path_str = path.to_string_lossy();
-        if path_str.starts_with("./") {
-            PathBuf::from(&path_str[2..])
+        if let Some(rest) = path_str.strip_prefix("./") {
+            PathBuf::from(rest)
         } else {
             path.to_path_buf()
         }
@@ -205,7 +205,7 @@ impl PathTree {
 
         let mut current = &mut self.root;
 
-        for (_i, component) in components.iter().enumerate() {
+        for component in components.iter() {
             current
                 .children
                 .entry(component.to_string())

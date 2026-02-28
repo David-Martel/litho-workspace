@@ -44,6 +44,12 @@ pub struct TokenEstimation {
     pub english_char_count: usize,
 }
 
+impl Default for TokenEstimator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TokenEstimator {
     pub fn new() -> Self {
         Self {
@@ -171,7 +177,8 @@ mod tests {
     fn longer_text_more_tokens_than_short() {
         let est = estimator();
         let short = est.estimate_tokens("hi");
-        let long = est.estimate_tokens("This is a considerably longer English sentence with many words.");
+        let long =
+            est.estimate_tokens("This is a considerably longer English sentence with many words.");
         assert!(long.estimated_tokens > short.estimated_tokens);
     }
 

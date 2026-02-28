@@ -1,0 +1,42 @@
+# Lefthook pre-commit hooks for litho-workspace
+# Install: lefthook install
+# Skip:    LEFTHOOK=0 git commit ...
+
+pre-commit:
+  parallel: false
+  commands:
+    fmt-check:
+      run: cargo fmt --check
+      glob: "crates/**/*.rs"
+      fail_text: "Formatting check failed. Run 'cargo fmt' to fix."
+
+    clippy-litho:
+      run: >-
+        cargo clippy
+        -p litho-core
+        -p litho-extract
+        -p litho-generator
+        -p litho-book
+        -p litho-cli
+        -p litho-codex
+        -p litho-qmd-core
+        -p litho-qmd-storage
+        -p litho-qmd-llm
+        -p litho-qmd-mcp
+        -p litho-qmd-cli
+        --all-targets
+        -- -D warnings
+      glob: "crates/**/*.rs"
+      fail_text: "Clippy found warnings (treated as errors). Fix all warnings before committing."
+
+pre-push:
+  parallel: false
+  commands:
+    test-litho:
+      run: >-
+        cargo nextest run
+        -p litho-core
+        -p litho-extract
+        -p litho-generator
+        --no-fail-fast
+      fail_text: "Tests failed. Fix all test failures before pushing."

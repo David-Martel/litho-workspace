@@ -11,7 +11,15 @@ use futures::future::BoxFuture;
 use futures::stream::{self, StreamExt};
 use std::collections::HashMap;
 use std::fs::Metadata;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// Mutable output collections accumulated during a directory scan.
+struct ScanCollector<'c> {
+    directories: &'c mut Vec<DirectoryInfo>,
+    files: &'c mut Vec<FileInfo>,
+    file_types: &'c mut HashMap<String, usize>,
+    size_distribution: &'c mut HashMap<String, usize>,
+}
 
 /// Project structure extractor
 pub struct StructureExtractor {
@@ -30,7 +38,7 @@ impl StructureExtractor {
     }
 
     /// Extract project structure
-    pub async fn extract_structure(&self, project_path: &PathBuf) -> Result<ProjectStructure> {
+    pub async fn extract_structure(&self, project_path: &Path) -> Result<ProjectStructure> {
         let cache_key = format!("structure_{}", project_path.display());
 
         // Execute structure extraction
@@ -47,20 +55,23 @@ impl StructureExtractor {
         Ok(structure)
     }
 
-    async fn extract_structure_impl(&self, project_path: &PathBuf) -> Result<ProjectStructure> {
+    async fn extract_structure_impl(&self, project_path: &Path) -> Result<ProjectStructure> {
         let mut directories = Vec::new();
         let mut files = Vec::new();
         let mut file_types = HashMap::new();
         let mut size_distribution = HashMap::new();
 
         // Scan directory, extract internal directory and file structure and basic file information
+        let mut collector = ScanCollector {
+            directories: &mut directories,
+            files: &mut files,
+            file_types: &mut file_types,
+            size_distribution: &mut size_distribution,
+        };
         self.scan_directory(
             project_path,
             project_path,
-            &mut directories,
-            &mut files,
-            &mut file_types,
-            &mut size_distribution,
+            &mut collector,
             0,
             self.context.config.max_depth.into(),
         )
@@ -73,7 +84,7 @@ impl StructureExtractor {
 
         Ok(ProjectStructure {
             project_name,
-            root_path: project_path.clone(),
+            root_path: project_path.to_path_buf(),
             total_files: files.len(),
             total_directories: directories.len(),
             directories,
@@ -85,12 +96,9 @@ impl StructureExtractor {
 
     fn scan_directory<'a>(
         &'a self,
-        current_path: &'a PathBuf,
-        root_path: &'a PathBuf,
-        directories: &'a mut Vec<DirectoryInfo>,
-        files: &'a mut Vec<FileInfo>,
-        file_types: &'a mut HashMap<String, usize>,
-        size_distribution: &'a mut HashMap<String, usize>,
+        current_path: &'a Path,
+        root_path: &'a Path,
+        col: &'a mut ScanCollector<'_>,
         current_depth: usize,
         max_depth: usize,
     ) -> BoxFuture<'a, Result<()>> {
@@ -110,23 +118,23 @@ impl StructureExtractor {
 
                 if file_type.is_file() {
                     // Check if this file should be ignored
-                    if !self.should_ignore_file(&path) {
-                        if let Ok(metadata) = tokio::fs::metadata(&path).await {
-                            let file_info = self.create_file_info(&path, root_path, &metadata)?;
+                    if !self.should_ignore_file(&path)
+                        && let Ok(metadata) = tokio::fs::metadata(&path).await
+                    {
+                        let file_info = self.create_file_info(&path, root_path, &metadata)?;
 
-                            // Update statistics
-                            if let Some(ext) = &file_info.extension {
-                                *file_types.entry(ext.clone()).or_insert(0) += 1;
-                            }
-
-                            let size_category = self.categorize_file_size(file_info.size);
-                            *size_distribution.entry(size_category).or_insert(0) += 1;
-
-                            dir_file_count += 1;
-                            dir_total_size += file_info.size;
-
-                            files.push(file_info);
+                        // Update statistics
+                        if let Some(ext) = &file_info.extension {
+                            *col.file_types.entry(ext.clone()).or_insert(0) += 1;
                         }
+
+                        let size_category = self.categorize_file_size(file_info.size);
+                        *col.size_distribution.entry(size_category).or_insert(0) += 1;
+
+                        dir_file_count += 1;
+                        dir_total_size += file_info.size;
+
+                        col.files.push(file_info);
                     }
                 } else if file_type.is_dir() {
                     let dir_name = path
@@ -150,17 +158,8 @@ impl StructureExtractor {
                         dir_subdirectory_count += 1;
 
                         // Recursively scan subdirectories
-                        self.scan_directory(
-                            &path,
-                            root_path,
-                            directories,
-                            files,
-                            file_types,
-                            size_distribution,
-                            current_depth + 1,
-                            max_depth,
-                        )
-                        .await?;
+                        self.scan_directory(&path, root_path, col, current_depth + 1, max_depth)
+                            .await?;
                     }
                 }
             }
@@ -168,7 +167,7 @@ impl StructureExtractor {
             // Create directory information
             if current_path != root_path {
                 let dir_info = DirectoryInfo {
-                    path: current_path.clone(),
+                    path: current_path.to_path_buf(),
                     name: current_path
                         .file_name()
                         .unwrap_or_default()
@@ -179,7 +178,7 @@ impl StructureExtractor {
                     total_size: dir_total_size,
                     importance_score: 0.0, // Calculate later
                 };
-                directories.push(dir_info);
+                col.directories.push(dir_info);
             }
 
             Ok(())
@@ -188,8 +187,8 @@ impl StructureExtractor {
 
     fn create_file_info(
         &self,
-        path: &PathBuf,
-        root_path: &PathBuf,
+        path: &Path,
+        root_path: &Path,
         metadata: &Metadata,
     ) -> Result<FileInfo> {
         let name = path
@@ -308,13 +307,12 @@ impl StructureExtractor {
         }
 
         // Check excluded extensions
-        if let Some(extension) = path.extension().and_then(|e| e.to_str()) {
-            if config
+        if let Some(extension) = path.extension().and_then(|e| e.to_str())
+            && config
                 .excluded_extensions
                 .contains(&extension.to_lowercase())
-            {
-                return true;
-            }
+        {
+            return true;
         }
 
         // Check included extensions (if specified)
@@ -342,10 +340,10 @@ impl StructureExtractor {
         }
 
         // Check file size
-        if let Ok(metadata) = std::fs::metadata(path) {
-            if metadata.len() > config.max_file_size {
-                return true;
-            }
+        if let Ok(metadata) = std::fs::metadata(path)
+            && metadata.len() > config.max_file_size
+        {
+            return true;
         }
 
         // Check binary files
@@ -464,8 +462,15 @@ impl StructureExtractor {
         &self,
         structure: &ProjectStructure,
     ) -> Result<Vec<CodeDossier>> {
-        // Filter core files based on importance score
-        let mut core_files: Vec<_> = structure.files.iter().filter(|f| f.is_core).collect();
+        // Filter core files based on importance score.
+        // Collect into owned Vec<FileInfo> so the stream closure can move owned values
+        // without capturing &structure (which would create non-universal HRTB lifetimes).
+        let mut core_files: Vec<FileInfo> = structure
+            .files
+            .iter()
+            .filter(|f| f.is_core)
+            .cloned()
+            .collect();
 
         // Sort by importance score in descending order, ensuring the most important components are processed first
         core_files.sort_by(|a, b| {
@@ -475,9 +480,11 @@ impl StructureExtractor {
         });
 
         let max_parallel = self.context.config.llm.max_parallels.max(1);
+        // Clone root_path so the async block owns it (avoids HRTB lifetime conflicts).
+        let root_path = structure.root_path.clone();
         let indexed_results =
             stream::iter(core_files.into_iter().enumerate().map(|(idx, file)| {
-                let file = file.clone();
+                let root_path = root_path.clone();
                 async move {
                     let code_purpose = self.determine_code_purpose(&file).await;
 
@@ -492,7 +499,7 @@ impl StructureExtractor {
                     // Extract core code summary
                     let source_summary = read_code_source(
                         &self.language_processor,
-                        &structure.root_path,
+                        &root_path,
                         &file.path,
                         &self.context.config.target_language,
                     );
@@ -555,11 +562,7 @@ impl StructureExtractor {
         file: &FileInfo,
     ) -> Result<Vec<crate::types::code::InterfaceInfo>> {
         // Build complete file path
-        let full_path = if file.path.is_absolute() {
-            file.path.clone()
-        } else {
-            file.path.clone()
-        };
+        let full_path = file.path.clone();
 
         // Try to read file content
         if let Ok(content) = tokio::fs::read_to_string(&full_path).await {
@@ -579,11 +582,8 @@ impl StructureExtractor {
 mod tests {
     use super::*;
     use crate::{
-        cache::CacheManager,
-        config::Config,
-        generator::context::GeneratorContext,
-        llm::client::LLMClient,
-        memory::Memory,
+        cache::CacheManager, config::Config, generator::context::GeneratorContext,
+        llm::client::LLMClient, memory::Memory,
     };
     use std::sync::Arc;
     use tokio::sync::RwLock;
@@ -747,7 +747,11 @@ mod tests {
             "File in tools/ with py ext + size bonus should be core, score={}",
             score
         );
-        assert!(files[0].is_core, "tools/ file must be is_core, score={}", score);
+        assert!(
+            files[0].is_core,
+            "tools/ file must be is_core, score={}",
+            score
+        );
     }
 
     #[test]
@@ -858,7 +862,9 @@ mod tests {
     fn test_should_ignore_multi_component_excluded_path() {
         // Simulate a config that excludes a sub-path (don't need a default extractor here)
         let mut config = Config::default();
-        config.excluded_dirs.push("facts/reference_templates".to_string());
+        config
+            .excluded_dirs
+            .push("facts/reference_templates".to_string());
 
         let llm_client = LLMClient::new(config.clone()).unwrap();
         let cache_manager = Arc::new(RwLock::new(CacheManager::new(
@@ -866,7 +872,12 @@ mod tests {
             config.target_language.clone(),
         )));
         let memory = Arc::new(RwLock::new(Memory::new()));
-        let context = GeneratorContext { llm_client, config, cache_manager, memory };
+        let context = GeneratorContext {
+            llm_client,
+            config,
+            cache_manager,
+            memory,
+        };
         let ex2 = StructureExtractor::new(context);
 
         // The leaf name is "reference_templates", the relative path is the multi-component pattern

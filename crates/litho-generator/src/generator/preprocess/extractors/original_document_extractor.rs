@@ -31,11 +31,7 @@ async fn read_optional_file(path: &Path) -> Option<String> {
 
 /// Read supplementary documentation files that provide additional project context.
 async fn read_supplementary_docs(project_path: &Path) -> Option<String> {
-    let candidates = [
-        "CLAUDE.md",
-        "CONTRIBUTING.md",
-        "docs/README.md",
-    ];
+    let candidates = ["CLAUDE.md", "CONTRIBUTING.md", "docs/README.md"];
 
     let mut combined = String::new();
 
@@ -102,11 +98,7 @@ async fn extract_tech_stack(project_path: &Path) -> Option<Vec<String>> {
         }
     }
 
-    if stack.is_empty() {
-        None
-    } else {
-        Some(stack)
-    }
+    if stack.is_empty() { None } else { Some(stack) }
 }
 
 /// Trim markdown content while preserving structural headings.
@@ -143,7 +135,10 @@ fn parse_cargo_deps(content: &str) -> Vec<String> {
 
     for line in content.lines() {
         let trimmed = line.trim();
-        if trimmed == "[dependencies]" || trimmed == "[dev-dependencies]" || trimmed == "[build-dependencies]" {
+        if trimmed == "[dependencies]"
+            || trimmed == "[dev-dependencies]"
+            || trimmed == "[build-dependencies]"
+        {
             in_deps = trimmed == "[dependencies]";
             continue;
         }
@@ -205,7 +200,11 @@ fn parse_pyproject_deps(content: &str) -> Vec<String> {
 
 /// Extract package name from a pyproject dependency string like `"httpx>=0.27"`.
 fn extract_pyproject_dep_name(s: &str) -> Option<String> {
-    let s = s.trim().trim_matches(',').trim_matches('"').trim_matches('\'');
+    let s = s
+        .trim()
+        .trim_matches(',')
+        .trim_matches('"')
+        .trim_matches('\'');
     if s.is_empty() {
         return None;
     }
@@ -226,11 +225,11 @@ fn extract_pyproject_dep_name(s: &str) -> Option<String> {
 fn parse_package_json_deps(content: &str) -> Vec<String> {
     let mut deps = Vec::new();
 
-    if let Ok(json) = serde_json::from_str::<serde_json::Value>(content) {
-        if let Some(obj) = json.get("dependencies").and_then(|v| v.as_object()) {
-            for key in obj.keys() {
-                deps.push(key.clone());
-            }
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(content)
+        && let Some(obj) = json.get("dependencies").and_then(|v| v.as_object())
+    {
+        for key in obj.keys() {
+            deps.push(key.clone());
         }
     }
 
@@ -303,8 +302,14 @@ tempfile = "3"
 
     #[test]
     fn test_extract_pyproject_dep_name() {
-        assert_eq!(extract_pyproject_dep_name("\"httpx>=0.27\""), Some("httpx".into()));
-        assert_eq!(extract_pyproject_dep_name("\"pydantic\""), Some("pydantic".into()));
+        assert_eq!(
+            extract_pyproject_dep_name("\"httpx>=0.27\""),
+            Some("httpx".into())
+        );
+        assert_eq!(
+            extract_pyproject_dep_name("\"pydantic\""),
+            Some("pydantic".into())
+        );
         assert_eq!(extract_pyproject_dep_name(""), None);
     }
 
@@ -360,7 +365,14 @@ tempfile = "3"
     fn test_trim_markdown_preserves_all_heading_levels() {
         let input = "# H1\n## H2\n### H3\n#### H4\n##### H5\n###### H6\ntext";
         let result = trim_markdown(input);
-        for heading in &["# H1", "## H2", "### H3", "#### H4", "##### H5", "###### H6"] {
+        for heading in &[
+            "# H1",
+            "## H2",
+            "### H3",
+            "#### H4",
+            "##### H5",
+            "###### H6",
+        ] {
             assert!(result.contains(heading), "Missing heading: {}", heading);
         }
     }
@@ -504,8 +516,20 @@ dependencies = [
 ]
 "#;
         let deps = parse_pyproject_deps(input);
-        assert!(deps.contains(&"httpx".to_string()), "Expected httpx in {:?}", deps);
-        assert!(deps.contains(&"pydantic".to_string()), "Expected pydantic in {:?}", deps);
-        assert!(deps.contains(&"fastapi".to_string()), "Expected fastapi in {:?}", deps);
+        assert!(
+            deps.contains(&"httpx".to_string()),
+            "Expected httpx in {:?}",
+            deps
+        );
+        assert!(
+            deps.contains(&"pydantic".to_string()),
+            "Expected pydantic in {:?}",
+            deps
+        );
+        assert!(
+            deps.contains(&"fastapi".to_string()),
+            "Expected fastapi in {:?}",
+            deps
+        );
     }
 }
