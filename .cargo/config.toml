@@ -15,9 +15,11 @@ rustflags = [
 
 [profile.dev]
 split-debuginfo = "packed"
+codegen-units = 256
+# Reduce per-unit object size to prevent rust-lld OOM on large binaries (codex-tui)
+# Trade: slightly slower runtime in dev, but builds succeed
 
 [profile.release]
 split-debuginfo = "packed"
-# lto = "thin" — disabled: causes rustc stack overflow on rig-core 0.23
-# codegen-units = 4
+lto = "thin"
 codegen-units = 16
