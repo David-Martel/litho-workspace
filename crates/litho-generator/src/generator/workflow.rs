@@ -89,6 +89,12 @@ pub async fn launch(c: &Config) -> Result<()> {
         preprocess_time
     );
 
+    // Store preprocessing digest for downstream stages
+    let preprocess_digest = context.memory_digest("preprocess").await;
+    context
+        .store_to_memory("digests", "preprocess", preprocess_digest)
+        .await?;
+
     // Execute multi-agent research stage
     let research_start = Instant::now();
     let research_orchestrator = ResearchOrchestrator;
@@ -103,6 +109,12 @@ pub async fn launch(c: &Config) -> Result<()> {
         "\n=== Project in-depth research completed (Duration: {:.2}s) ===",
         research_time
     );
+
+    // Store research digest for compose stage
+    let research_digest = context.memory_digest("research").await;
+    context
+        .store_to_memory("digests", "research", research_digest)
+        .await?;
 
     // Execute document generation process
     let compose_start = Instant::now();
@@ -252,6 +264,12 @@ pub async fn launch_incremental(c: &Config) -> Result<()> {
         preprocess_time
     );
 
+    // Store preprocessing digest for downstream stages
+    let preprocess_digest = context.memory_digest("preprocess").await;
+    context
+        .store_to_memory("digests", "preprocess", preprocess_digest)
+        .await?;
+
     // Selective research stage — only re-run research agents in the affected set.
     let research_start = Instant::now();
     let research_orchestrator = ResearchOrchestrator;
@@ -266,6 +284,12 @@ pub async fn launch_incremental(c: &Config) -> Result<()> {
         "\n=== Selective research completed (Duration: {:.2}s) ===",
         research_time
     );
+
+    // Store research digest for compose stage
+    let research_digest = context.memory_digest("research").await;
+    context
+        .store_to_memory("digests", "research", research_digest)
+        .await?;
 
     // Selective compose stage — only re-run documentation agents in the affected set.
     let compose_start = Instant::now();

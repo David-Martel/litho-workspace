@@ -56,6 +56,26 @@ impl GeneratorContext {
         memory.get_usage_stats()
     }
 
+    /// Append a learned inference to the specified memory scope.
+    #[allow(dead_code)]
+    pub async fn append_inference(&self, scope: &str, inference: String) {
+        let mut memory = self.memory.write().await;
+        memory.append_inference(scope, inference);
+    }
+
+    /// Get all accumulated inferences for a scope.
+    #[allow(dead_code)]
+    pub async fn get_inferences(&self, scope: &str) -> Vec<String> {
+        let memory = self.memory.read().await;
+        memory.get_inferences(scope)
+    }
+
+    /// Produce a compressed digest of all data in the specified memory scope.
+    pub async fn memory_digest(&self, scope: &str) -> String {
+        let memory = self.memory.read().await;
+        memory.digest(scope)
+    }
+
     /// Load external knowledge for multiple categories
     pub async fn load_external_knowledge_by_categories(
         &self,

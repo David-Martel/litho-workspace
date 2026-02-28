@@ -52,6 +52,29 @@ impl DocumentationComposer {
             database_editor.execute(context).await?;
         }
 
+        // Secondary review pass (when enabled in config)
+        if context.config.review.enabled {
+            println!("\n Running secondary review pass...");
+            let reviews = agents::review_agent::ReviewAgent::review_sections(context).await?;
+            let failed: Vec<_> = reviews.iter().filter(|r| !r.passed).collect();
+            if !failed.is_empty() {
+                println!(
+                    "   {} section(s) below threshold ({:.0}%): {}",
+                    failed.len(),
+                    context.config.review.min_review_score * 100.0,
+                    failed
+                        .iter()
+                        .map(|r| r.section.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+            // Store review results in memory for downstream consumption
+            context
+                .store_to_memory("review", "section_reviews", reviews)
+                .await?;
+        }
+
         Ok(())
     }
 
@@ -128,6 +151,29 @@ impl DocumentationComposer {
             }
         } else {
             println!("   Skipping Database editor (not affected)");
+        }
+
+        // Secondary review pass (when enabled in config)
+        if context.config.review.enabled {
+            println!("\n Running secondary review pass...");
+            let reviews = agents::review_agent::ReviewAgent::review_sections(context).await?;
+            let failed: Vec<_> = reviews.iter().filter(|r| !r.passed).collect();
+            if !failed.is_empty() {
+                println!(
+                    "   {} section(s) below threshold ({:.0}%): {}",
+                    failed.len(),
+                    context.config.review.min_review_score * 100.0,
+                    failed
+                        .iter()
+                        .map(|r| r.section.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+            // Store review results in memory for downstream consumption
+            context
+                .store_to_memory("review", "section_reviews", reviews)
+                .await?;
         }
 
         Ok(())
