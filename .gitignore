@@ -4,10 +4,14 @@
 *.exe
 *.pdb
 
-# Caches
+# Caches & telemetry
 .cache/
 .litho/cache/
+.litho/*.jsonl
 *.log
+
+# Insta test snapshot artifacts (unreviewed)
+*.snap.new
 
 # Coverage & benchmarks
 /coverage/
