@@ -3,6 +3,7 @@ use std::time::Instant;
 
 use crate::generator::compose::DocumentationComposer;
 use crate::generator::outlet::{DocTree, Outlet, OutletKind, SummaryOutlet};
+use crate::generator::validator::ContentValidator;
 use crate::integrations::change_detector;
 use crate::integrations::manifest::DocumentationManifest;
 use crate::{
@@ -118,6 +119,22 @@ pub async fn launch(c: &Config) -> Result<()> {
         "\n=== Document generation completed (Duration: {:.2}s) ===",
         compose_time
     );
+
+    // Validate generated content against source truth
+    let validation_report = ContentValidator::validate(&context).await?;
+    println!(
+        "\n=== Content Validation: score={:.0}% ({} errors, {} warnings) ===",
+        validation_report.quality_score * 100.0,
+        validation_report.errors(),
+        validation_report.warnings(),
+    );
+    if validation_report.errors() > 0 {
+        for finding in &validation_report.findings {
+            if finding.severity == crate::generator::validator::Severity::Error {
+                eprintln!("  \u{274c} [{}] {}", finding.category, finding.message);
+            }
+        }
+    }
 
     // Execute document storage (format-aware outlet selection)
     let output_start = Instant::now();
@@ -266,6 +283,15 @@ pub async fn launch_incremental(c: &Config) -> Result<()> {
     println!(
         "\n=== Selective document generation completed (Duration: {:.2}s) ===",
         compose_time
+    );
+
+    // Validate generated content against source truth
+    let validation_report = ContentValidator::validate(&context).await?;
+    println!(
+        "\n=== Content Validation: score={:.0}% ({} errors, {} warnings) ===",
+        validation_report.quality_score * 100.0,
+        validation_report.errors(),
+        validation_report.warnings(),
     );
 
     // Output stage always runs — it writes whatever the agents produced (or re-produced).

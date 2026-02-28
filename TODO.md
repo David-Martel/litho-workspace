@@ -1,8 +1,8 @@
 # Litho Workspace TODOs
 
-Last updated: 2026-02-27 (post-Session 50: smart file batching)
+Last updated: 2026-02-28 (post-Session 51: content validator + markdown fixer)
 
-## P0: Testing — Expanded (489 tests passing)
+## P0: Testing — Expanded (500 tests passing)
 
 The codebase now has **476 tests across litho-core, litho-extract, litho-generator** (466 litho-generator + litho-core + litho-extract).
 Previous count of "12" was incorrect — litho-generator alone has 456+ inline tests.
@@ -26,7 +26,7 @@ Remaining gaps:
   - [ ] litho-qmd-storage with PostgreSQL 18
   - [ ] CodexRs fallback: Ollama failure triggers codex-rs generation
   - [ ] Incremental mode: full run → small change → verify only affected agents re-run
-- [ ] Target: 600+ tests, 60% coverage (up from 489 tests)
+- [ ] Target: 600+ tests, 60% coverage (up from 500 tests)
 - [ ] Test fixture: `tests/fixtures/david-t-martel-litho.toml` (Gemma3 128K config) available
 - [ ] litho-cli and litho-codex test binaries fail to link (codex-rs rlib format issue)
 
@@ -48,11 +48,11 @@ Pipeline evaluation on david-t-martel (253 files, 44 source, 12 markdown):
 Sprint 1 fixes (README trust, grounding constraints, tech stack extraction) dramatically
 improved output, but there's no automated way to detect quality regressions.
 
-- [ ] **Content validator** — verify generated docs against source truth:
-  - [ ] Completeness: all public APIs mentioned (cross-reference litho-extract AST)
-  - [ ] Accuracy: code references match actual file paths on disk
-  - [ ] Freshness: flag stale references to renamed/deleted files
-  - [ ] Anti-hallucination: tech stack mentions must appear in manifest files
+- [x] **Content validator** — verify generated docs against source truth:
+  - [x] Completeness: C1-C4 section presence and minimum length checks
+  - [x] Accuracy: code references match actual file paths on disk
+  - [x] Freshness: flag stale references to renamed/deleted files
+  - [x] Anti-hallucination: tech stack mentions must appear in manifest files (Cargo.toml/package.json/requirements.txt)
 - [ ] **Quality scoring** — inspired by david-t-martel's `cv_quality_scorer.py` (47 correction rules):
   - [ ] Terminology consistency across sections
   - [ ] Structural completeness (C1-C4 all present, non-empty)
@@ -134,6 +134,23 @@ but needs real-world hardening.
 ---
 
 ## Completed
+
+### Session 51 — Content validator + Markdown fixer (2026-02-28)
+- [x] **Content validator** (`validator/mod.rs`, ~300 LOC, 8 tests)
+  - 4-dimensional quality checks: completeness, accuracy, freshness, grounding
+  - Weighted quality score (completeness 0.30, accuracy 0.30, freshness 0.15, grounding 0.25)
+  - Wired into both `launch()` and `launch_incremental()` workflows
+  - Regex-based file path extraction, tech stack manifest parsing
+- [x] **comrak-based markdown fixer** (`md_fixer.rs`, ~200 LOC, 8 tests)
+  - AST-based structural markdown fixes using comrak 0.50
+  - Enforce single H1 heading (demote duplicates to H2)
+  - Fix empty links (replace `[]()` with `[](#)`)
+  - Remove empty heading nodes (LLM artifacts)
+  - Audit mermaid blocks and tables in fix report
+  - Wired into DiskOutlet and HtmlOutlet (runs before MermaidFixer)
+- [x] **pulldown-cmark 0.10→0.13** upgrade (workspace-wide, litho-book unified)
+- [x] **Removed unused `markdown` crate** from litho-generator (replaced by comrak)
+- [x] 500 litho-generator tests pass, 0 regressions
 
 ### Session 50 — Smart file batching (2026-02-27)
 - [x] **Smart file batching** in `code_analyze.rs` — files <3KB source grouped into batched LLM calls
@@ -250,6 +267,6 @@ but needs real-world hardening.
 | External codex-rs crates | 52 | `external/codex-rs/` |
 | Total litho LOC | 32,425 | Across 127 source files |
 | Shipping binaries | 5 | litho, litho-generator, litho-book, litho-qmd-cli, litho-qmd-mcp |
-| Tests (litho crates) | 489 | litho-core + litho-extract + litho-generator |
+| Tests (litho crates) | 500 | litho-core + litho-extract + litho-generator |
 | New Sprint 1-4 code | ~1,900 LOC | 5 new files + 22 modified files |
 | Session 48 new code | ~1,000 LOC | token_compress, outlet factory, selective agents |

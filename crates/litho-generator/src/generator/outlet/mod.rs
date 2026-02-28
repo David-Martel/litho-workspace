@@ -7,11 +7,13 @@ use std::fs;
 
 pub mod fixer;
 pub mod html_outlet;
+pub mod md_fixer;
 pub mod summary_generator;
 pub mod summary_outlet;
 
 pub use fixer::MermaidFixer;
 pub use html_outlet::HtmlOutlet;
+pub use md_fixer::MarkdownFixer;
 pub use summary_outlet::SummaryOutlet;
 
 pub trait Outlet {
@@ -130,6 +132,19 @@ impl Outlet for DiskOutlet {
                 .get_from_memory::<String>(MemoryScope::DOCUMENTATION, scoped_key)
                 .await
             {
+                // Apply structural markdown fixes before writing
+                let (fixed_markdown, fix_report) = MarkdownFixer::fix(&doc_markdown);
+                if fix_report.total_fixes() > 0 {
+                    println!(
+                        "  [md-fixer] {}: {} fixes (headings={}, links={}, empty={})",
+                        scoped_key,
+                        fix_report.total_fixes(),
+                        fix_report.headings_fixed,
+                        fix_report.links_fixed,
+                        fix_report.empty_headings_removed,
+                    );
+                }
+
                 // Build full output file path
                 let output_file_path = output_dir.join(relative_path);
 
@@ -140,8 +155,8 @@ impl Outlet for DiskOutlet {
                     }
                 }
 
-                // Write document content to file
-                fs::write(&output_file_path, doc_markdown)?;
+                // Write fixed document content to file
+                fs::write(&output_file_path, fixed_markdown)?;
 
                 println!("Document saved: {}", output_file_path.display());
             } else {

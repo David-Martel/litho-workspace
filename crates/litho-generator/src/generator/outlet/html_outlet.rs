@@ -3,7 +3,7 @@ use anyhow::Result;
 use pulldown_cmark::{html, Options, Parser};
 use std::fs;
 
-use super::{DocTree, MermaidFixer, Outlet};
+use super::{DocTree, MarkdownFixer, MermaidFixer, Outlet};
 
 /// Outlet that converts markdown documents to HTML and writes them to disk.
 pub struct HtmlOutlet {
@@ -37,6 +37,16 @@ impl Outlet for HtmlOutlet {
                 .get_from_memory::<String>(MemoryScope::DOCUMENTATION, scoped_key)
                 .await
             {
+                // Apply structural markdown fixes before HTML conversion
+                let (fixed_markdown, fix_report) = MarkdownFixer::fix(&doc_markdown);
+                if fix_report.total_fixes() > 0 {
+                    println!(
+                        "  [md-fixer] {}: {} fixes applied before HTML conversion",
+                        scoped_key,
+                        fix_report.total_fixes(),
+                    );
+                }
+
                 // Convert .md extension to .html
                 let html_path = if relative_path.ends_with(".md") {
                     format!("{}.html", &relative_path[..relative_path.len() - 3])
@@ -52,7 +62,7 @@ impl Outlet for HtmlOutlet {
                     }
                 }
 
-                let html_content = markdown_to_html(&doc_markdown, project_name, scoped_key);
+                let html_content = markdown_to_html(&fixed_markdown, project_name, scoped_key);
                 fs::write(&output_file_path, html_content)?;
 
                 println!("💾 HTML document saved: {}", output_file_path.display());

@@ -6,4 +6,5 @@ pub mod preprocess;
 pub mod research;
 pub mod step_forward_agent;
 pub mod types;
+pub mod validator;
 pub mod workflow;
