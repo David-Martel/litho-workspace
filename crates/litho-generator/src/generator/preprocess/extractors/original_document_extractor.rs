@@ -205,7 +205,7 @@ fn parse_pyproject_deps(content: &str) -> Vec<String> {
 
 /// Extract package name from a pyproject dependency string like `"httpx>=0.27"`.
 fn extract_pyproject_dep_name(s: &str) -> Option<String> {
-    let s = s.trim().trim_matches('"').trim_matches('\'').trim_matches(',');
+    let s = s.trim().trim_matches(',').trim_matches('"').trim_matches('\'');
     if s.is_empty() {
         return None;
     }
@@ -306,5 +306,206 @@ tempfile = "3"
         assert_eq!(extract_pyproject_dep_name("\"httpx>=0.27\""), Some("httpx".into()));
         assert_eq!(extract_pyproject_dep_name("\"pydantic\""), Some("pydantic".into()));
         assert_eq!(extract_pyproject_dep_name(""), None);
+    }
+
+    // --- New tests ---
+
+    #[test]
+    fn test_trim_markdown_skips_code_fence_content() {
+        let input = "Before\n```rust\nlet x = 1;\nlet y = 2;\n```\nAfter";
+        let result = trim_markdown(input);
+        assert!(result.contains("Before"));
+        assert!(result.contains("After"));
+        assert!(!result.contains("let x = 1;"));
+        assert!(!result.contains("let y = 2;"));
+        // The fence delimiters themselves are also excluded
+        assert!(!result.contains("```"));
+    }
+
+    #[test]
+    fn test_trim_markdown_skips_blank_lines() {
+        let input = "Line one\n\n\nLine two\n\nLine three";
+        let result = trim_markdown(input);
+        // Content lines preserved, blank lines collapsed
+        assert!(result.contains("Line one"));
+        assert!(result.contains("Line two"));
+        assert!(result.contains("Line three"));
+        // No double blank lines in output (each blank line is stripped)
+        assert!(!result.contains("\n\n\n"));
+    }
+
+    #[test]
+    fn test_trim_markdown_500_line_truncation() {
+        // Build a document with 600 non-empty lines
+        let input: String = (1..=600).map(|i| format!("Line {}\n", i)).collect();
+        let result = trim_markdown(&input);
+        let line_count = result.lines().count();
+        // Must not exceed 500 content lines
+        assert!(
+            line_count <= 500,
+            "Expected at most 500 lines, got {}",
+            line_count
+        );
+        // The 500th line must appear, the 501st must not
+        assert!(result.contains("Line 500"));
+        assert!(!result.contains("Line 501"));
+    }
+
+    #[test]
+    fn test_trim_markdown_empty_input() {
+        assert_eq!(trim_markdown(""), "");
+    }
+
+    #[test]
+    fn test_trim_markdown_preserves_all_heading_levels() {
+        let input = "# H1\n## H2\n### H3\n#### H4\n##### H5\n###### H6\ntext";
+        let result = trim_markdown(input);
+        for heading in &["# H1", "## H2", "### H3", "#### H4", "##### H5", "###### H6"] {
+            assert!(result.contains(heading), "Missing heading: {}", heading);
+        }
+    }
+
+    #[test]
+    fn test_parse_cargo_deps_excludes_dev_and_build_deps() {
+        let input = r#"
+[dependencies]
+tokio = "1"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[build-dependencies]
+cc = "1"
+"#;
+        let deps = parse_cargo_deps(input);
+        // Only [dependencies] entries should be returned
+        assert!(deps.contains(&"tokio".to_string()));
+        assert!(!deps.contains(&"criterion".to_string()));
+        assert!(!deps.contains(&"cc".to_string()));
+    }
+
+    #[test]
+    fn test_parse_cargo_deps_ignores_comments() {
+        let input = r#"
+[dependencies]
+# this is a comment
+tokio = "1"
+# serde = "1"
+"#;
+        let deps = parse_cargo_deps(input);
+        assert_eq!(deps, vec!["tokio"]);
+    }
+
+    #[test]
+    fn test_parse_cargo_deps_caps_at_30() {
+        // Generate more than 30 dependency lines
+        let mut lines = String::from("[dependencies]\n");
+        for i in 0..40 {
+            lines.push_str(&format!("dep_{} = \"1\"\n", i));
+        }
+        let deps = parse_cargo_deps(&lines);
+        assert_eq!(deps.len(), 30, "Should be capped at 30 entries");
+    }
+
+    #[test]
+    fn test_parse_cargo_deps_empty_section() {
+        let input = "[package]\nname = \"foo\"\n\n[dependencies]\n\n[features]\n";
+        let deps = parse_cargo_deps(input);
+        assert!(deps.is_empty());
+    }
+
+    #[test]
+    fn test_parse_requirements_txt_skips_flags_and_urls() {
+        let input = "-r other.txt\n-e git+https://github.com/foo/bar.git\nrequests==2.31\nnumpy";
+        let deps = parse_requirements_txt(input);
+        // Lines starting with '-' are skipped
+        assert!(!deps.iter().any(|d| d.starts_with('-')));
+        assert!(deps.contains(&"requests".to_string()));
+        assert!(deps.contains(&"numpy".to_string()));
+    }
+
+    #[test]
+    fn test_parse_requirements_txt_version_specifiers() {
+        let input = "django>=4.0,<5.0\ncelery~=5.3\nredis!=4.0\nflask==2.3";
+        let deps = parse_requirements_txt(input);
+        assert!(deps.contains(&"django".to_string()));
+        assert!(deps.contains(&"celery".to_string()));
+        assert!(deps.contains(&"redis".to_string()));
+        assert!(deps.contains(&"flask".to_string()));
+        // No version specifiers should appear in the names
+        for d in &deps {
+            assert!(!d.contains('>'), "dep '{}' contains version specifier", d);
+            assert!(!d.contains('='), "dep '{}' contains version specifier", d);
+        }
+    }
+
+    #[test]
+    fn test_parse_package_json_deps_basic() {
+        let json = r#"{"dependencies": {"react": "^18.0.0", "axios": "^1.6.0"}}"#;
+        let deps = parse_package_json_deps(json);
+        assert!(deps.contains(&"react".to_string()));
+        assert!(deps.contains(&"axios".to_string()));
+    }
+
+    #[test]
+    fn test_parse_package_json_deps_missing_key() {
+        // devDependencies only — no "dependencies" key
+        let json = r#"{"devDependencies": {"jest": "^29.0.0"}}"#;
+        let deps = parse_package_json_deps(json);
+        assert!(deps.is_empty());
+    }
+
+    #[test]
+    fn test_parse_package_json_deps_invalid_json() {
+        let bad = "not json at all {{{";
+        let deps = parse_package_json_deps(bad);
+        assert!(deps.is_empty());
+    }
+
+    #[test]
+    fn test_parse_package_json_deps_caps_at_30() {
+        // Build a JSON object with 40 dependencies
+        let entries: String = (0..40)
+            .map(|i| format!("\"pkg_{}\": \"^1.0\"", i))
+            .collect::<Vec<_>>()
+            .join(",");
+        let json = format!("{{\"dependencies\": {{{}}}}}", entries);
+        let deps = parse_package_json_deps(&json);
+        assert_eq!(deps.len(), 30, "Should be capped at 30 entries");
+    }
+
+    #[test]
+    fn test_extract_pyproject_dep_name_with_extras() {
+        // Package with extras like "requests[security]>=2.28"
+        assert_eq!(
+            extract_pyproject_dep_name("\"requests[security]>=2.28\""),
+            Some("requests".into())
+        );
+    }
+
+    #[test]
+    fn test_extract_pyproject_dep_name_with_semicolon_marker() {
+        // Conditional dependency: "pywin32; sys_platform == 'win32'"
+        assert_eq!(
+            extract_pyproject_dep_name("\"pywin32; sys_platform == 'win32'\""),
+            Some("pywin32".into())
+        );
+    }
+
+    #[test]
+    fn test_parse_pyproject_deps_multiline_array() {
+        let input = r#"
+[project]
+name = "myapp"
+dependencies = [
+    "httpx>=0.27",
+    "pydantic>=2.0",
+    "fastapi",
+]
+"#;
+        let deps = parse_pyproject_deps(input);
+        assert!(deps.contains(&"httpx".to_string()), "Expected httpx in {:?}", deps);
+        assert!(deps.contains(&"pydantic".to_string()), "Expected pydantic in {:?}", deps);
+        assert!(deps.contains(&"fastapi".to_string()), "Expected fastapi in {:?}", deps);
     }
 }

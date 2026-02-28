@@ -1,3 +1,4 @@
+use crate::cache::CacheManager;
 use crate::generator::agent_executor::{AgentExecuteParams, extract};
 use crate::{
     generator::{
@@ -15,6 +16,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::pin::Pin;
+
+/// Cache category for content-hash keyed preprocessing results.
+const CONTENT_HASH_CACHE_CATEGORY: &str = "content_hash_insights";
 
 /// Files with source_summary shorter than this (bytes) are eligible for batching.
 const BATCH_SOURCE_THRESHOLD: usize = 3000;
@@ -55,9 +59,46 @@ impl CodeAnalyze {
     ) -> Result<Vec<CodeInsight>> {
         let max_parallels = context.config.llm.max_parallels;
 
-        // Phase 1: Run static analysis for ALL files upfront (no LLM calls, fast)
-        let mut static_analyses: Vec<(CodeDossier, CodeInsight)> = Vec::with_capacity(codes.len());
+        // Phase 0: Content-hash cache warming — skip files whose source hasn't changed
+        let mut cached_insights: Vec<CodeInsight> = Vec::new();
+        let mut uncached_codes: Vec<CodeDossier> = Vec::new();
+
         for code in codes {
+            let content_hash = CacheManager::content_hash(&code.source_summary);
+            if let Some(cached) = context
+                .cache_manager
+                .read()
+                .await
+                .get_by_content_hash::<CodeInsight>(CONTENT_HASH_CACHE_CATEGORY, &content_hash)
+                .await?
+            {
+                cached_insights.push(cached);
+            } else {
+                uncached_codes.push(code.clone());
+            }
+        }
+
+        if !cached_insights.is_empty() {
+            println!(
+                "   \u{26a1} Content-hash cache: {} files cached, {} need analysis",
+                cached_insights.len(),
+                uncached_codes.len(),
+            );
+        }
+
+        // If all files are cached, return early
+        if uncached_codes.is_empty() {
+            println!(
+                "\u{2713} All {} files served from content-hash cache",
+                cached_insights.len()
+            );
+            return Ok(cached_insights);
+        }
+
+        // Phase 1: Run static analysis for uncached files (no LLM calls, fast)
+        let mut static_analyses: Vec<(CodeDossier, CodeInsight)> =
+            Vec::with_capacity(uncached_codes.len());
+        for code in &uncached_codes {
             let analysis = self.analyze_code_by_rules(code, project_structure).await?;
             static_analyses.push((code.clone(), analysis));
         }
@@ -167,11 +208,28 @@ impl CodeAnalyze {
         // Phase 5: Execute all with concurrency control
         let results = do_parallel_with_limit(all_futures, max_parallels).await;
 
-        // Phase 6: Flatten results
+        // Phase 6: Flatten results and store in content-hash cache
         let mut code_insights = Vec::new();
         for result in results {
             match result {
-                Ok(insights) => code_insights.extend(insights),
+                Ok(insights) => {
+                    for insight in insights {
+                        // Store each insight in the content-hash cache for future runs
+                        let content_hash =
+                            CacheManager::content_hash(&insight.code_dossier.source_summary);
+                        let _ = context
+                            .cache_manager
+                            .write()
+                            .await
+                            .set_by_content_hash(
+                                CONTENT_HASH_CACHE_CATEGORY,
+                                &content_hash,
+                                &insight,
+                            )
+                            .await;
+                        code_insights.push(insight);
+                    }
+                }
                 Err(e) => {
                     eprintln!("\u{274c} Code analysis failed: {}", e);
                     return Err(e);
@@ -179,9 +237,14 @@ impl CodeAnalyze {
             }
         }
 
+        // Combine cached + freshly analyzed insights
+        code_insights.extend(cached_insights);
+
         println!(
-            "\u{2713} Concurrent code analysis completed, successfully analyzed {} files",
-            code_insights.len()
+            "\u{2713} Code analysis completed: {} files ({} cached, {} freshly analyzed)",
+            code_insights.len(),
+            codes.len() - uncached_codes.len(),
+            uncached_codes.len(),
         );
         Ok(code_insights)
     }
@@ -474,5 +537,28 @@ mod tests {
 
         assert!(small.source_summary.len() < BATCH_SOURCE_THRESHOLD);
         assert!(large.source_summary.len() >= BATCH_SOURCE_THRESHOLD);
+    }
+
+    #[test]
+    fn test_content_hash_deterministic() {
+        let source = "fn main() { println!(\"hello\"); }";
+        let h1 = CacheManager::content_hash(source);
+        let h2 = CacheManager::content_hash(source);
+        assert_eq!(h1, h2, "same content should produce same hash");
+    }
+
+    #[test]
+    fn test_content_hash_different_for_different_content() {
+        let h1 = CacheManager::content_hash("fn main() {}");
+        let h2 = CacheManager::content_hash("fn main() { todo!() }");
+        assert_ne!(h1, h2, "different content should produce different hashes");
+    }
+
+    #[test]
+    fn test_content_hash_is_blake3_hex() {
+        let hash = CacheManager::content_hash("test");
+        // BLAKE3 produces 64-char hex strings
+        assert_eq!(hash.len(), 64);
+        assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
     }
 }

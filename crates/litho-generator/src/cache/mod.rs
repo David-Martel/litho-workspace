@@ -259,6 +259,118 @@ impl CacheManager {
         Duration::from_secs_f64(estimated_seconds)
     }
 
+    /// Compute a BLAKE3 content hash for a source file.
+    ///
+    /// Unlike prompt-keyed caching (MD5 of full prompt), this produces a hash
+    /// that depends only on the source content. Template changes, model changes,
+    /// and config changes do NOT invalidate content-hash cached results.
+    pub fn content_hash(source: &str) -> String {
+        blake3::hash(source.as_bytes()).to_hex().to_string()
+    }
+
+    /// Look up a previously cached result by content hash.
+    pub async fn get_by_content_hash<T>(&self, category: &str, content_hash: &str) -> Result<Option<T>>
+    where
+        T: for<'de> Deserialize<'de>,
+    {
+        if !self.config.enabled {
+            return Ok(None);
+        }
+
+        let cache_path = self.get_cache_path(category, content_hash);
+
+        if !fs::try_exists(&cache_path).await.unwrap_or(false) {
+            self.performance_monitor.record_cache_miss(category);
+            return Ok(None);
+        }
+
+        match fs::read_to_string(&cache_path).await {
+            Ok(content) => match serde_json::from_str::<CacheEntry<T>>(&content) {
+                Ok(entry) => {
+                    if self.is_expired(entry.timestamp) {
+                        let _ = fs::remove_file(&cache_path).await;
+                        self.performance_monitor.record_cache_miss(category);
+                        return Ok(None);
+                    }
+
+                    let estimated_inference_time = self.estimate_inference_time(&content);
+                    if let Some(token_usage) = &entry.token_usage {
+                        self.performance_monitor.record_cache_hit(
+                            category,
+                            estimated_inference_time,
+                            token_usage.clone(),
+                            "",
+                        );
+                    }
+                    Ok(Some(entry.data))
+                }
+                Err(_) => {
+                    self.performance_monitor
+                        .record_cache_error(category, "content-hash deserialization failed");
+                    Ok(None)
+                }
+            },
+            Err(_) => {
+                self.performance_monitor
+                    .record_cache_error(category, "content-hash read failed");
+                Ok(None)
+            }
+        }
+    }
+
+    /// Store a result keyed by content hash.
+    pub async fn set_by_content_hash<T>(
+        &self,
+        category: &str,
+        content_hash: &str,
+        data: T,
+    ) -> Result<()>
+    where
+        T: Serialize,
+    {
+        if !self.config.enabled {
+            return Ok(());
+        }
+
+        let cache_path = self.get_cache_path(category, content_hash);
+
+        if let Some(parent) = cache_path.parent() {
+            fs::create_dir_all(parent).await?;
+        }
+
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let entry = CacheEntry {
+            data,
+            timestamp,
+            prompt_hash: content_hash.to_string(),
+            token_usage: None,
+            model_name: None,
+        };
+
+        match serde_json::to_string_pretty(&entry) {
+            Ok(content) => match fs::write(&cache_path, content).await {
+                Ok(_) => {
+                    self.performance_monitor.record_cache_write(category);
+                    Ok(())
+                }
+                Err(e) => {
+                    self.performance_monitor
+                        .record_cache_error(category, &format!("content-hash write failed: {}", e));
+                    Err(e.into())
+                }
+            },
+            Err(e) => {
+                self.performance_monitor
+                    .record_cache_error(category, &format!("content-hash serialize failed: {}", e));
+                Err(e.into())
+            }
+        }
+    }
+
     /// Generate performance report
     pub fn generate_performance_report(&self) -> CachePerformanceReport {
         self.performance_monitor.generate_report()
