@@ -1,8 +1,8 @@
 //! ReAct executor - Responsible for executing ReAct pattern multi-turn dialogue logic
 
 use anyhow::Result;
-use rig::completion::{AssistantContent, Message, PromptError};
 
+use super::chat_types::{AssistantContent, ChatMessage, PromptError};
 use super::providers::ProviderAgent;
 use super::react::{ReActConfig, ReActResponse};
 use crate::i18n::TargetLanguage;
@@ -57,7 +57,7 @@ impl ReActExecutor {
                         ),
                         max_depth,
                         tool_calls_history,
-                        chat_history.to_vec(),
+                        chat_history,
                     ))
                 } else {
                     Err(anyhow::anyhow!(
@@ -66,7 +66,7 @@ impl ReActExecutor {
                     ))
                 }
             }
-            Err(e) => {
+            Err(PromptError::CompletionError(e)) => {
                 if config.verbose {
                     println!("   ❌ ReAct Agent error: {:?}", e);
                 }
@@ -80,7 +80,7 @@ impl ReActExecutor {
     }
 
     /// Extract partial result from chat history
-    fn extract_partial_result(chat_history: &[Message]) -> (String, Vec<String>) {
+    fn extract_partial_result(chat_history: &[ChatMessage]) -> (String, Vec<String>) {
         let mut tool_calls = Vec::new();
 
         // Try to extract the last assistant response from chat history
@@ -88,8 +88,7 @@ impl ReActExecutor {
             .iter()
             .rev()
             .find_map(|msg| {
-                if let Message::Assistant { content, .. } = msg {
-                    // 提取文本内容
+                if let ChatMessage::Assistant { content, .. } = msg {
                     let text_content = content
                         .iter()
                         .filter_map(|c| {
@@ -117,7 +116,7 @@ impl ReActExecutor {
 
         // Extract tool call information from chat history
         for msg in chat_history {
-            if let Message::Assistant { content, .. } = msg {
+            if let ChatMessage::Assistant { content, .. } = msg {
                 for c in content.iter() {
                     if let AssistantContent::ToolCall(tool_call) = c {
                         tool_calls.push(format!(

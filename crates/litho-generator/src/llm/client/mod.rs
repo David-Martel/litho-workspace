@@ -11,6 +11,7 @@ use crate::{
 };
 
 mod agent_builder;
+pub mod chat_types;
 pub mod codex_provider;
 mod ollama_extractor;
 pub mod ollama_native;

@@ -1,380 +1,99 @@
-//! LLM Provider support module
+//! LLM Provider support module — direct HTTP implementation.
+//!
+//! Replaces the rig-core 0.23 abstraction with direct `reqwest` calls to
+//! OpenAI-compatible, Anthropic, and Gemini APIs.
 
-use anyhow::Result;
-use rig::{
-    agent::Agent,
-    client::CompletionClient,
-    completion::{Prompt, PromptError},
-    extractor::Extractor,
-    message::ToolChoice,
-    providers::gemini::completion::gemini_api_types::{AdditionalParameters, GenerationConfig},
-};
+use std::sync::Arc;
+use std::time::Duration;
+
+use anyhow::{Context, Result};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    config::{LLMConfig, LLMProvider},
-    llm::tools::time::AgentToolTime,
-};
+use crate::config::{LLMConfig, LLMProvider};
+use crate::llm::tools::AgentTool;
 
+use super::chat_types::*;
 use super::codex_provider::CodexRsClient;
 use super::ollama_extractor::OllamaExtractorWrapper;
 
-/// Unified Provider client enum
+// ── ProviderClient ─────────────────────────────────────────────────────────
+
+/// Unified provider client backed by `reqwest`.
 #[derive(Clone)]
-pub enum ProviderClient {
-    OpenAI(rig::providers::openai::Client),
-    Moonshot(rig::providers::moonshot::Client),
-    DeepSeek(rig::providers::deepseek::Client),
-    Mistral(rig::providers::mistral::Client),
-    OpenRouter(rig::providers::openrouter::Client),
-    Anthropic(rig::providers::anthropic::Client),
-    Gemini(rig::providers::gemini::Client),
-    Ollama(rig::providers::ollama::Client),
-    /// Emergency fallback: local codex-rs subprocess.
-    CodexRs(CodexRsClient),
+pub struct ProviderClient {
+    http: reqwest::Client,
+    base_url: String,
+    api_key: String,
+    provider: LLMProvider,
+    /// Only populated for `LLMProvider::CodexRs`.
+    codex_client: Option<CodexRsClient>,
 }
 
 impl ProviderClient {
-    /// Create corresponding provider client based on configuration
+    /// Create a provider client based on configuration.
     pub fn new(config: &LLMConfig) -> Result<Self> {
-        match config.provider {
-            LLMProvider::OpenAI => {
-                let client = rig::providers::openai::Client::builder(&config.api_key)
-                    .base_url(&config.api_base_url)
-                    .build();
-                Ok(ProviderClient::OpenAI(client))
-            }
-            LLMProvider::Moonshot => {
-                let client = rig::providers::moonshot::Client::builder(&config.api_key)
-                    .base_url(&config.api_base_url)
-                    .build();
-                Ok(ProviderClient::Moonshot(client))
-            }
-            LLMProvider::DeepSeek => {
-                let client = rig::providers::deepseek::Client::builder(&config.api_key)
-                    .base_url(&config.api_base_url)
-                    .build();
-                Ok(ProviderClient::DeepSeek(client))
-            }
-            LLMProvider::Mistral => {
-                let client = rig::providers::mistral::Client::builder(&config.api_key).build();
-                Ok(ProviderClient::Mistral(client))
-            }
-            LLMProvider::OpenRouter => {
-                // reference： https://docs.rig.rs/docs/integrations/model_providers/anthropic#basic-usage
-                let client = rig::providers::openrouter::Client::builder(&config.api_key).build();
-                Ok(ProviderClient::OpenRouter(client))
-            }
-            LLMProvider::Anthropic => {
-                let client =
-                    rig::providers::anthropic::ClientBuilder::new(&config.api_key).build()?;
-                Ok(ProviderClient::Anthropic(client))
-            }
-            LLMProvider::Gemini => {
-                let client = rig::providers::gemini::Client::builder(&config.api_key).build()?;
-                Ok(ProviderClient::Gemini(client))
-            }
-            LLMProvider::Ollama => {
-                let client = rig::providers::ollama::Client::builder()
-                    .base_url(&config.api_base_url)
-                    .build();
-                Ok(ProviderClient::Ollama(client))
-            }
-            LLMProvider::CodexRs => {
-                let client = CodexRsClient::new(
-                    config.codex_binary_path.as_deref(),
-                    Some(config.timeout_seconds),
-                )?;
-                Ok(ProviderClient::CodexRs(client))
-            }
-        }
+        let http = reqwest::Client::builder()
+            .timeout(Duration::from_secs(config.timeout_seconds))
+            .build()
+            .context("Failed to build HTTP client")?;
+
+        let codex_client = if config.provider == LLMProvider::CodexRs {
+            Some(CodexRsClient::new(
+                config.codex_binary_path.as_deref(),
+                Some(config.timeout_seconds),
+            )?)
+        } else {
+            None
+        };
+
+        Ok(Self {
+            http,
+            base_url: config.api_base_url.clone(),
+            api_key: config.api_key.clone(),
+            provider: config.provider.clone(),
+            codex_client,
+        })
     }
 
-    /// Create Agent
+    /// Create an agent (no tools).
     pub fn create_agent(
         &self,
         model: &str,
         system_prompt: &str,
         config: &LLMConfig,
     ) -> ProviderAgent {
-        match self {
-            ProviderClient::OpenAI(client) => {
-                let mut builder = client
-                    .completion_model(model)
-                    .completions_api()
-                    .into_agent_builder()
-                    .preamble(system_prompt)
-                    .max_tokens(config.max_tokens.into());
-
-                if let Some(temp) = config.temperature {
-                    builder = builder.temperature(temp);
-                }
-
-                let agent = builder.build();
-                ProviderAgent::OpenAI(agent)
-            }
-            ProviderClient::Moonshot(client) => {
-                let mut builder = client.agent(model).preamble(system_prompt);
-
-                if let Some(temp) = config.temperature {
-                    builder = builder.temperature(temp);
-                }
-
-                let agent = builder.build();
-                ProviderAgent::Moonshot(agent)
-            }
-            ProviderClient::DeepSeek(client) => {
-                let mut builder = client.agent(model).preamble(system_prompt);
-
-                if let Some(temp) = config.temperature {
-                    builder = builder.temperature(temp);
-                }
-
-                let agent = builder.build();
-                ProviderAgent::DeepSeek(agent)
-            }
-            ProviderClient::Mistral(client) => {
-                let mut builder = client.agent(model).preamble(system_prompt);
-
-                if let Some(temp) = config.temperature {
-                    builder = builder.temperature(temp);
-                }
-
-                let agent = builder.build();
-                ProviderAgent::Mistral(agent)
-            }
-            ProviderClient::OpenRouter(client) => {
-                let mut builder = client.agent(model).preamble(system_prompt);
-
-                if let Some(temp) = config.temperature {
-                    builder = builder.temperature(temp);
-                }
-
-                let agent = builder.build();
-                ProviderAgent::OpenRouter(agent)
-            }
-            ProviderClient::Anthropic(client) => {
-                let mut builder = client
-                    .agent(model)
-                    .preamble(system_prompt)
-                    .max_tokens(config.max_tokens.into());
-
-                if let Some(temp) = config.temperature {
-                    builder = builder.temperature(temp);
-                }
-
-                let agent = builder.build();
-                ProviderAgent::Anthropic(agent)
-            }
-            ProviderClient::Gemini(client) => {
-                let gen_cfg = GenerationConfig::default();
-                let cfg = AdditionalParameters::default().with_config(gen_cfg);
-
-                let mut builder = client
-                    .agent(model)
-                    .preamble(system_prompt)
-                    .max_tokens(config.max_tokens.into());
-
-                if let Some(temp) = config.temperature {
-                    builder = builder.temperature(temp);
-                }
-
-                let agent = builder
-                    .additional_params(serde_json::to_value(cfg).unwrap())
-                    .build();
-                ProviderAgent::Gemini(agent)
-            }
-            ProviderClient::Ollama(client) => {
-                let mut builder = client
-                    .agent(model)
-                    .preamble(system_prompt)
-                    .max_tokens(config.max_tokens.into());
-
-                if let Some(temp) = config.temperature {
-                    builder = builder.temperature(temp);
-                }
-
-                let agent = builder.build();
-                ProviderAgent::Ollama(agent)
-            }
-            ProviderClient::CodexRs(client) => {
-                // CodexRs does not use rig agents; wrap the client directly.
-                ProviderAgent::CodexRs {
-                    client: client.clone(),
-                    system_prompt: system_prompt.to_string(),
-                }
-            }
+        ProviderAgent {
+            client: self.clone(),
+            model: model.to_string(),
+            system_prompt: system_prompt.to_string(),
+            max_tokens: config.max_tokens,
+            temperature: config.temperature,
+            tools: Vec::new(),
+            tool_choice: None,
         }
     }
 
-    /// Create Agent with tools
+    /// Create an agent with tools for multi-turn dialogue.
     pub fn create_agent_with_tools(
         &self,
         model: &str,
         system_prompt: &str,
         config: &LLMConfig,
-        file_explorer: &crate::llm::tools::file_explorer::AgentToolFileExplorer,
-        file_reader: &crate::llm::tools::file_reader::AgentToolFileReader,
+        tools: Vec<Arc<dyn AgentTool>>,
     ) -> ProviderAgent {
-        let tool_time = AgentToolTime::new();
-
-        match self {
-            ProviderClient::OpenAI(client) => {
-                let mut builder = client
-                    .completion_model(model)
-                    .completions_api()
-                    .into_agent_builder()
-                    .preamble(system_prompt)
-                    .max_tokens(config.max_tokens.into());
-
-                if let Some(temp) = config.temperature {
-                    builder = builder.temperature(temp);
-                }
-
-                let agent = builder
-                    .tool(file_explorer.clone())
-                    .tool(file_reader.clone())
-                    .tool(tool_time)
-                    .tool_choice(ToolChoice::Required)
-                    .build();
-                ProviderAgent::OpenAI(agent)
-            }
-            ProviderClient::Moonshot(client) => {
-                let mut builder = client
-                    .agent(model)
-                    .preamble(system_prompt)
-                    .max_tokens(config.max_tokens.into());
-
-                if let Some(temp) = config.temperature {
-                    builder = builder.temperature(temp);
-                }
-
-                let agent = builder
-                    .tool(file_explorer.clone())
-                    .tool(file_reader.clone())
-                    .tool(tool_time)
-                    .tool_choice(ToolChoice::Required)
-                    .build();
-                ProviderAgent::Moonshot(agent)
-            }
-            ProviderClient::DeepSeek(client) => {
-                let mut builder = client
-                    .agent(model)
-                    .preamble(system_prompt)
-                    .max_tokens(config.max_tokens.into());
-
-                if let Some(temp) = config.temperature {
-                    builder = builder.temperature(temp);
-                }
-
-                let agent = builder
-                    .tool(file_explorer.clone())
-                    .tool(file_reader.clone())
-                    .tool(tool_time)
-                    .tool_choice(ToolChoice::Required)
-                    .build();
-                ProviderAgent::DeepSeek(agent)
-            }
-            ProviderClient::Mistral(client) => {
-                let mut builder = client.agent(model).preamble(system_prompt);
-
-                if let Some(temp) = config.temperature {
-                    builder = builder.temperature(temp);
-                }
-
-                let agent = builder
-                    .tool(file_explorer.clone())
-                    .tool(file_reader.clone())
-                    .tool(tool_time)
-                    .tool_choice(ToolChoice::Required)
-                    .build();
-                ProviderAgent::Mistral(agent)
-            }
-            ProviderClient::OpenRouter(client) => {
-                let mut builder = client.agent(model).preamble(system_prompt);
-
-                if let Some(temp) = config.temperature {
-                    builder = builder.temperature(temp);
-                }
-
-                let agent = builder
-                    .tool(file_explorer.clone())
-                    .tool(file_reader.clone())
-                    .tool(tool_time)
-                    .tool_choice(ToolChoice::Required)
-                    .build();
-                ProviderAgent::OpenRouter(agent)
-            }
-            ProviderClient::Anthropic(client) => {
-                let mut builder = client
-                    .agent(model)
-                    .preamble(system_prompt)
-                    .max_tokens(config.max_tokens.into());
-
-                if let Some(temp) = config.temperature {
-                    builder = builder.temperature(temp);
-                }
-
-                let agent = builder
-                    .tool(file_explorer.clone())
-                    .tool(file_reader.clone())
-                    .tool(tool_time)
-                    .tool_choice(ToolChoice::Required)
-                    .build();
-                ProviderAgent::Anthropic(agent)
-            }
-            ProviderClient::Gemini(client) => {
-                let gen_cfg = GenerationConfig::default();
-                let cfg = AdditionalParameters::default().with_config(gen_cfg);
-
-                let mut builder = client
-                    .agent(model)
-                    .preamble(system_prompt)
-                    .max_tokens(config.max_tokens.into());
-
-                if let Some(temp) = config.temperature {
-                    builder = builder.temperature(temp);
-                }
-
-                let agent = builder
-                    .tool(file_explorer.clone())
-                    .tool(file_reader.clone())
-                    .tool(tool_time)
-                    .tool_choice(ToolChoice::Required)
-                    .additional_params(serde_json::to_value(cfg).unwrap())
-                    .build();
-                ProviderAgent::Gemini(agent)
-            }
-            ProviderClient::Ollama(client) => {
-                let mut builder = client
-                    .agent(model)
-                    .preamble(system_prompt)
-                    .max_tokens(config.max_tokens.into());
-
-                if let Some(temp) = config.temperature {
-                    builder = builder.temperature(temp);
-                }
-
-                let agent = builder
-                    .tool(file_explorer.clone())
-                    .tool(file_reader.clone())
-                    .tool(tool_time)
-                    .tool_choice(ToolChoice::Required)
-                    .build();
-                ProviderAgent::Ollama(agent)
-            }
-            ProviderClient::CodexRs(client) => {
-                // The codex binary has no tool-calling interface; use plain prompt mode.
-                ProviderAgent::CodexRs {
-                    client: client.clone(),
-                    system_prompt: system_prompt.to_string(),
-                }
-            }
+        ProviderAgent {
+            client: self.clone(),
+            model: model.to_string(),
+            system_prompt: system_prompt.to_string(),
+            max_tokens: config.max_tokens,
+            temperature: config.temperature,
+            tools,
+            tool_choice: Some(ToolChoice::Required),
         }
     }
 
-    /// Create Extractor
+    /// Create an extractor for structured output.
     pub fn create_extractor<T>(
         &self,
         model: &str,
@@ -384,178 +103,570 @@ impl ProviderClient {
     where
         T: JsonSchema + for<'a> Deserialize<'a> + Serialize + Send + Sync + 'static,
     {
-        match self {
-            ProviderClient::OpenAI(client) => {
-                let extractor = client
-                    .extractor_completions_api::<T>(model)
-                    .preamble(system_prompt)
-                    .max_tokens(config.max_tokens.into())
-                    .build();
-                ProviderExtractor::OpenAI(extractor)
-            }
-            ProviderClient::Moonshot(client) => {
-                let extractor = client
-                    .extractor::<T>(model)
-                    .preamble(system_prompt)
-                    .max_tokens(config.max_tokens.into())
-                    .build();
-                ProviderExtractor::Moonshot(extractor)
-            }
-            ProviderClient::DeepSeek(client) => {
-                let extractor = client
-                    .extractor::<T>(model)
-                    .preamble(system_prompt)
-                    .max_tokens(config.max_tokens.into())
-                    .build();
-                ProviderExtractor::DeepSeek(extractor)
-            }
-            ProviderClient::Mistral(client) => {
-                let extractor = client
-                    .extractor::<T>(model)
-                    .preamble(system_prompt)
-                    .max_tokens(config.max_tokens.into())
-                    .build();
-                ProviderExtractor::Mistral(extractor)
-            }
-            ProviderClient::OpenRouter(client) => {
-                let extractor = client
-                    .extractor::<T>(model)
-                    .preamble(system_prompt)
-                    .max_tokens(config.max_tokens.into())
-                    .build();
-                ProviderExtractor::OpenRouter(extractor)
-            }
-            ProviderClient::Anthropic(client) => {
-                let extractor = client
-                    .extractor::<T>(model)
-                    .preamble(system_prompt)
-                    .max_tokens(config.max_tokens.into())
-                    .build();
-                ProviderExtractor::Anthropic(extractor)
-            }
-            ProviderClient::Gemini(client) => {
-                let gen_cfg = GenerationConfig::default();
-                let cfg = AdditionalParameters::default().with_config(gen_cfg);
-
-                let extractor = client
-                    .extractor::<T>(model)
-                    .preamble(system_prompt)
-                    .max_tokens(config.max_tokens.into())
-                    .additional_params(serde_json::to_value(cfg).unwrap())
-                    .build();
-                ProviderExtractor::Gemini(extractor)
-            }
-            ProviderClient::Ollama(client) => {
-                // Create standard agent for Ollama
-                let mut builder = client
-                    .agent(model)
-                    .preamble(system_prompt)
-                    .max_tokens(config.max_tokens.into());
-
-                if let Some(temp) = config.temperature {
-                    builder = builder.temperature(temp);
-                }
-
-                let agent = builder.build();
-
-                // Wrap with OllamaExtractorWrapper to handle structured output
+        match self.provider {
+            LLMProvider::Ollama => {
+                // Ollama: use prompt-based extraction with JSON parsing cascade
+                let agent = self.create_agent(model, system_prompt, config);
                 let wrapper = OllamaExtractorWrapper::new(agent, config.retry_attempts);
-
                 ProviderExtractor::Ollama(wrapper)
             }
-            ProviderClient::CodexRs(client) => ProviderExtractor::CodexRs {
-                client: client.clone(),
-                system_prompt: system_prompt.to_string(),
-                _phantom: std::marker::PhantomData,
-            },
+            LLMProvider::CodexRs => {
+                let client = self.codex_client.clone().expect("CodexRs client not set");
+                ProviderExtractor::CodexRs {
+                    client,
+                    system_prompt: system_prompt.to_string(),
+                    _phantom: std::marker::PhantomData,
+                }
+            }
+            _ => {
+                // All other providers: use function-calling extraction
+                ProviderExtractor::FunctionCalling {
+                    client: self.clone(),
+                    model: model.to_string(),
+                    system_prompt: system_prompt.to_string(),
+                    max_tokens: config.max_tokens,
+                    _phantom: std::marker::PhantomData,
+                }
+            }
         }
+    }
+
+    // ── HTTP dispatch ──────────────────────────────────────────────────
+
+    /// Send a chat completion request and return the parsed response.
+    async fn send_completion(
+        &self,
+        model: &str,
+        messages: &[ChatMessage],
+        max_tokens: u32,
+        temperature: Option<f64>,
+        tools: Option<&[ToolDefinition]>,
+        tool_choice: Option<&ToolChoice>,
+    ) -> Result<CompletionResponse> {
+        match self.provider {
+            LLMProvider::OpenAI
+            | LLMProvider::DeepSeek
+            | LLMProvider::Moonshot
+            | LLMProvider::Mistral
+            | LLMProvider::OpenRouter
+            | LLMProvider::Ollama => {
+                self.send_openai_compatible(model, messages, max_tokens, temperature, tools, tool_choice)
+                    .await
+            }
+            LLMProvider::Anthropic => {
+                self.send_anthropic(model, messages, max_tokens, temperature, tools, tool_choice)
+                    .await
+            }
+            LLMProvider::Gemini => {
+                self.send_gemini(model, messages, max_tokens, temperature, tools, tool_choice)
+                    .await
+            }
+            LLMProvider::CodexRs => {
+                anyhow::bail!("CodexRs uses subprocess, not HTTP completion API")
+            }
+        }
+    }
+
+    // ── OpenAI-compatible path ─────────────────────────────────────────
+
+    async fn send_openai_compatible(
+        &self,
+        model: &str,
+        messages: &[ChatMessage],
+        max_tokens: u32,
+        temperature: Option<f64>,
+        tools: Option<&[ToolDefinition]>,
+        tool_choice: Option<&ToolChoice>,
+    ) -> Result<CompletionResponse> {
+        let api_messages = messages.iter().map(|m| chat_to_openai(m)).collect();
+
+        let api_tools = tools.map(|ts| {
+            ts.iter()
+                .map(|t| OpenAITool {
+                    tool_type: "function".to_string(),
+                    function: OpenAIToolFunction {
+                        name: t.name.clone(),
+                        description: t.description.clone(),
+                        parameters: t.parameters.clone(),
+                    },
+                })
+                .collect()
+        });
+
+        let api_tool_choice = tool_choice.map(|tc| match tc {
+            ToolChoice::Auto => serde_json::json!("auto"),
+            ToolChoice::Required => serde_json::json!("required"),
+            ToolChoice::None => serde_json::json!("none"),
+        });
+
+        let request = OpenAIRequest {
+            model: model.to_string(),
+            messages: api_messages,
+            max_tokens: Some(max_tokens as u64),
+            temperature,
+            tools: api_tools,
+            tool_choice: api_tool_choice,
+        };
+
+        let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
+
+        let resp = self
+            .http
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Content-Type", "application/json")
+            .json(&request)
+            .send()
+            .await
+            .context("Failed to send OpenAI-compatible request")?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!(
+                "OpenAI-compatible API error ({}): {}",
+                status,
+                body.chars().take(500).collect::<String>()
+            );
+        }
+
+        let api_resp: OpenAIResponse = resp
+            .json()
+            .await
+            .context("Failed to parse OpenAI-compatible response")?;
+
+        let choice = api_resp
+            .choices
+            .into_iter()
+            .next()
+            .context("Empty choices in response")?;
+
+        Ok(openai_to_completion(choice.message))
+    }
+
+    // ── Anthropic path ─────────────────────────────────────────────────
+
+    async fn send_anthropic(
+        &self,
+        model: &str,
+        messages: &[ChatMessage],
+        max_tokens: u32,
+        temperature: Option<f64>,
+        tools: Option<&[ToolDefinition]>,
+        tool_choice: Option<&ToolChoice>,
+    ) -> Result<CompletionResponse> {
+        // Extract system message, convert rest to Anthropic format
+        let mut system_text = String::new();
+        let mut api_messages = Vec::new();
+
+        for msg in messages {
+            match msg {
+                ChatMessage::System { content } => {
+                    system_text = content.clone();
+                }
+                ChatMessage::User { content } => {
+                    api_messages.push(AnthropicMessage {
+                        role: "user".to_string(),
+                        content: serde_json::Value::String(content.clone()),
+                    });
+                }
+                ChatMessage::Assistant { content } => {
+                    let blocks: Vec<serde_json::Value> = content
+                        .iter()
+                        .filter_map(|c| match c {
+                            AssistantContent::Text(t) => Some(serde_json::json!({
+                                "type": "text",
+                                "text": t.text
+                            })),
+                            AssistantContent::ToolCall(tc) => Some(serde_json::json!({
+                                "type": "tool_use",
+                                "id": tc.id,
+                                "name": tc.function.name,
+                                "input": serde_json::from_str::<serde_json::Value>(&tc.function.arguments).unwrap_or_default()
+                            })),
+                            AssistantContent::Reasoning(_) => None,
+                        })
+                        .collect();
+                    api_messages.push(AnthropicMessage {
+                        role: "assistant".to_string(),
+                        content: serde_json::Value::Array(blocks),
+                    });
+                }
+                ChatMessage::Tool {
+                    tool_call_id,
+                    content,
+                } => {
+                    api_messages.push(AnthropicMessage {
+                        role: "user".to_string(),
+                        content: serde_json::json!([{
+                            "type": "tool_result",
+                            "tool_use_id": tool_call_id,
+                            "content": content
+                        }]),
+                    });
+                }
+            }
+        }
+
+        let api_tools = tools.map(|ts| {
+            ts.iter()
+                .map(|t| AnthropicTool {
+                    name: t.name.clone(),
+                    description: t.description.clone(),
+                    input_schema: t.parameters.clone(),
+                })
+                .collect()
+        });
+
+        let api_tool_choice = tool_choice.map(|tc| match tc {
+            ToolChoice::Auto => AnthropicToolChoice {
+                choice_type: "auto".to_string(),
+                name: None,
+            },
+            ToolChoice::Required => AnthropicToolChoice {
+                choice_type: "any".to_string(),
+                name: None,
+            },
+            ToolChoice::None => AnthropicToolChoice {
+                choice_type: "none".to_string(),
+                name: None,
+            },
+        });
+
+        let request = AnthropicRequest {
+            model: model.to_string(),
+            system: system_text,
+            messages: api_messages,
+            max_tokens: max_tokens as u64,
+            temperature,
+            tools: api_tools,
+            tool_choice: api_tool_choice,
+        };
+
+        let url = format!("{}/v1/messages", self.base_url.trim_end_matches('/'));
+
+        let resp = self
+            .http
+            .post(&url)
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-version", "2023-06-01")
+            .header("Content-Type", "application/json")
+            .json(&request)
+            .send()
+            .await
+            .context("Failed to send Anthropic request")?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!(
+                "Anthropic API error ({}): {}",
+                status,
+                body.chars().take(500).collect::<String>()
+            );
+        }
+
+        let api_resp: AnthropicResponse = resp
+            .json()
+            .await
+            .context("Failed to parse Anthropic response")?;
+
+        Ok(anthropic_to_completion(api_resp))
+    }
+
+    // ── Gemini path ────────────────────────────────────────────────────
+
+    async fn send_gemini(
+        &self,
+        model: &str,
+        messages: &[ChatMessage],
+        max_tokens: u32,
+        temperature: Option<f64>,
+        tools: Option<&[ToolDefinition]>,
+        _tool_choice: Option<&ToolChoice>,
+    ) -> Result<CompletionResponse> {
+        let mut system_instruction = None;
+        let mut contents = Vec::new();
+
+        for msg in messages {
+            match msg {
+                ChatMessage::System { content } => {
+                    system_instruction = Some(GeminiContent {
+                        role: None,
+                        parts: vec![GeminiPart::Text {
+                            text: content.clone(),
+                        }],
+                    });
+                }
+                ChatMessage::User { content } => {
+                    contents.push(GeminiContent {
+                        role: Some("user".to_string()),
+                        parts: vec![GeminiPart::Text {
+                            text: content.clone(),
+                        }],
+                    });
+                }
+                ChatMessage::Assistant { content } => {
+                    let parts: Vec<GeminiPart> = content
+                        .iter()
+                        .filter_map(|c| match c {
+                            AssistantContent::Text(t) => {
+                                Some(GeminiPart::Text { text: t.text.clone() })
+                            }
+                            AssistantContent::ToolCall(tc) => {
+                                let args = serde_json::from_str(&tc.function.arguments)
+                                    .unwrap_or_default();
+                                Some(GeminiPart::FunctionCall {
+                                    function_call: GeminiFunctionCall {
+                                        name: tc.function.name.clone(),
+                                        args,
+                                    },
+                                })
+                            }
+                            AssistantContent::Reasoning(_) => None,
+                        })
+                        .collect();
+                    contents.push(GeminiContent {
+                        role: Some("model".to_string()),
+                        parts,
+                    });
+                }
+                ChatMessage::Tool {
+                    tool_call_id: _,
+                    content,
+                } => {
+                    // Gemini uses functionResponse in model turn
+                    let response_value =
+                        serde_json::from_str(content).unwrap_or(serde_json::json!({"result": content}));
+                    contents.push(GeminiContent {
+                        role: Some("function".to_string()),
+                        parts: vec![GeminiPart::FunctionResponse {
+                            function_response: GeminiFunctionResponse {
+                                name: "tool_result".to_string(),
+                                response: response_value,
+                            },
+                        }],
+                    });
+                }
+            }
+        }
+
+        let api_tools = tools.map(|ts| {
+            vec![GeminiToolDeclaration {
+                function_declarations: ts
+                    .iter()
+                    .map(|t| GeminiFunctionDecl {
+                        name: t.name.clone(),
+                        description: t.description.clone(),
+                        parameters: t.parameters.clone(),
+                    })
+                    .collect(),
+            }]
+        });
+
+        let request = GeminiRequest {
+            contents,
+            system_instruction,
+            generation_config: Some(GeminiGenerationConfig {
+                max_output_tokens: Some(max_tokens as u64),
+                temperature,
+            }),
+            tools: api_tools,
+        };
+
+        let url = format!(
+            "{}/v1beta/models/{}:generateContent?key={}",
+            self.base_url.trim_end_matches('/'),
+            model,
+            self.api_key
+        );
+
+        let resp = self
+            .http
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .json(&request)
+            .send()
+            .await
+            .context("Failed to send Gemini request")?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!(
+                "Gemini API error ({}): {}",
+                status,
+                body.chars().take(500).collect::<String>()
+            );
+        }
+
+        let api_resp: GeminiResponse = resp
+            .json()
+            .await
+            .context("Failed to parse Gemini response")?;
+
+        let candidate = api_resp
+            .candidates
+            .into_iter()
+            .next()
+            .context("Empty candidates in Gemini response")?;
+
+        Ok(gemini_to_completion(candidate.content))
     }
 }
 
-/// Unified Agent enum
-pub enum ProviderAgent {
-    OpenAI(Agent<rig::providers::openai::CompletionModel>),
-    Mistral(Agent<rig::providers::mistral::CompletionModel>),
-    OpenRouter(Agent<rig::providers::openrouter::CompletionModel>),
-    Anthropic(Agent<rig::providers::anthropic::completion::CompletionModel>),
-    Gemini(Agent<rig::providers::gemini::completion::CompletionModel>),
-    Moonshot(Agent<rig::providers::moonshot::CompletionModel>),
-    DeepSeek(Agent<rig::providers::deepseek::CompletionModel>),
-    Ollama(Agent<rig::providers::ollama::CompletionModel<reqwest::Client>>),
-    /// Emergency fallback — delegates to the codex-rs subprocess.
-    CodexRs {
-        client: CodexRsClient,
-        system_prompt: String,
-    },
+// ── ProviderAgent ──────────────────────────────────────────────────────────
+
+/// Unified LLM agent that supports single-turn and multi-turn dialogue.
+pub struct ProviderAgent {
+    client: ProviderClient,
+    model: String,
+    system_prompt: String,
+    max_tokens: u32,
+    temperature: Option<f64>,
+    tools: Vec<Arc<dyn AgentTool>>,
+    tool_choice: Option<ToolChoice>,
 }
 
 impl ProviderAgent {
-    /// Execute prompt
-    pub async fn prompt(&self, prompt: &str) -> Result<String> {
-        match self {
-            ProviderAgent::OpenAI(agent) => agent.prompt(prompt).await.map_err(|e| e.into()),
-            ProviderAgent::Moonshot(agent) => agent.prompt(prompt).await.map_err(|e| e.into()),
-            ProviderAgent::DeepSeek(agent) => agent.prompt(prompt).await.map_err(|e| e.into()),
-            ProviderAgent::Mistral(agent) => agent.prompt(prompt).await.map_err(|e| e.into()),
-            ProviderAgent::OpenRouter(agent) => agent.prompt(prompt).await.map_err(|e| e.into()),
-            ProviderAgent::Anthropic(agent) => agent.prompt(prompt).await.map_err(|e| e.into()),
-            ProviderAgent::Gemini(agent) => agent.prompt(prompt).await.map_err(|e| e.into()),
-            ProviderAgent::Ollama(agent) => agent.prompt(prompt).await.map_err(|e| e.into()),
-            ProviderAgent::CodexRs {
-                client,
-                system_prompt,
-            } => client.prompt(system_prompt, prompt).await,
+    /// Execute a single-turn prompt and return the text response.
+    pub async fn prompt(&self, user_prompt: &str) -> Result<String> {
+        // CodexRs uses subprocess
+        if let Some(ref codex) = self.client.codex_client {
+            if self.client.provider == LLMProvider::CodexRs {
+                return codex.prompt(&self.system_prompt, user_prompt).await;
+            }
         }
+
+        let messages = vec![
+            ChatMessage::system(&self.system_prompt),
+            ChatMessage::user(user_prompt),
+        ];
+
+        let resp = self
+            .client
+            .send_completion(
+                &self.model,
+                &messages,
+                self.max_tokens,
+                self.temperature,
+                None,
+                None,
+            )
+            .await?;
+
+        Ok(resp.text_content())
     }
 
-    /// Execute multi-turn dialogue
+    /// Execute multi-turn dialogue with tool calling.
     pub async fn multi_turn(
         &self,
-        prompt: &str,
+        user_prompt: &str,
         max_iterations: usize,
     ) -> Result<String, PromptError> {
-        match self {
-            ProviderAgent::OpenAI(agent) => agent.prompt(prompt).multi_turn(max_iterations).await,
-            ProviderAgent::Moonshot(agent) => agent.prompt(prompt).multi_turn(max_iterations).await,
-            ProviderAgent::DeepSeek(agent) => agent.prompt(prompt).multi_turn(max_iterations).await,
-            ProviderAgent::Mistral(agent) => agent.prompt(prompt).multi_turn(max_iterations).await,
-            ProviderAgent::OpenRouter(agent) => {
-                agent.prompt(prompt).multi_turn(max_iterations).await
-            }
-            ProviderAgent::Anthropic(agent) => {
-                agent.prompt(prompt).multi_turn(max_iterations).await
-            }
-            ProviderAgent::Gemini(agent) => agent.prompt(prompt).multi_turn(max_iterations).await,
-            ProviderAgent::Ollama(agent) => agent.prompt(prompt).multi_turn(max_iterations).await,
-            ProviderAgent::CodexRs {
-                client,
-                system_prompt,
-            } => {
-                // codex-rs has no native multi-turn; delegate to a single prompt call.
-                use rig::completion::CompletionError;
-                client.prompt(system_prompt, prompt).await.map_err(|e| {
-                    let boxed: Box<dyn std::error::Error + Send + Sync> = e.into();
-                    PromptError::CompletionError(CompletionError::RequestError(boxed))
-                })
+        // CodexRs fallback — no multi-turn, delegate to single prompt
+        if let Some(ref codex) = self.client.codex_client {
+            if self.client.provider == LLMProvider::CodexRs {
+                return codex.prompt(&self.system_prompt, user_prompt).await.map_err(|e| {
+                    PromptError::CompletionError(e)
+                });
             }
         }
+
+        let tool_defs: Vec<ToolDefinition> =
+            self.tools.iter().map(|t| t.definition()).collect();
+        let has_tools = !tool_defs.is_empty();
+
+        let mut messages = vec![
+            ChatMessage::system(&self.system_prompt),
+            ChatMessage::user(user_prompt),
+        ];
+
+        for _iteration in 0..max_iterations {
+            let resp = self
+                .client
+                .send_completion(
+                    &self.model,
+                    &messages,
+                    self.max_tokens,
+                    self.temperature,
+                    if has_tools { Some(&tool_defs) } else { None },
+                    self.tool_choice.as_ref(),
+                )
+                .await
+                .map_err(PromptError::CompletionError)?;
+
+            if resp.tool_calls.is_empty() {
+                // No tool calls — return text response
+                return Ok(resp.text_content());
+            }
+
+            // Build assistant message with tool calls
+            let mut assistant_content = Vec::new();
+            if !resp.text.is_empty() {
+                assistant_content.push(AssistantContent::Text(TextContent {
+                    text: resp.text.clone(),
+                }));
+            }
+            for tc in &resp.tool_calls {
+                assistant_content.push(AssistantContent::ToolCall(tc.clone()));
+            }
+            messages.push(ChatMessage::Assistant {
+                content: assistant_content,
+            });
+
+            // Execute tool calls
+            for tc in &resp.tool_calls {
+                let result = self.execute_tool_call(tc).await;
+                messages.push(ChatMessage::tool_result(&tc.id, &result));
+            }
+        }
+
+        // Max iterations reached
+        Err(PromptError::MaxDepthError {
+            max_depth: max_iterations,
+            chat_history: messages,
+            prompt: user_prompt.to_string(),
+        })
+    }
+
+    /// Execute a single tool call by dispatching to the matching registered tool.
+    async fn execute_tool_call(&self, tool_call: &ToolCallInfo) -> String {
+        for tool in &self.tools {
+            if tool.name() == tool_call.function.name {
+                match tool.call_json(&tool_call.function.arguments).await {
+                    Ok(result) => return result,
+                    Err(e) => {
+                        return format!("{{\"error\": \"{}\"}}", e);
+                    }
+                }
+            }
+        }
+        format!(
+            "{{\"error\": \"Unknown tool: {}\"}}",
+            tool_call.function.name
+        )
     }
 }
 
-/// Unified Extractor enum
+// ── ProviderExtractor ──────────────────────────────────────────────────────
+
+/// Unified extractor for structured output from LLMs.
 pub enum ProviderExtractor<T>
 where
     T: JsonSchema + for<'a> Deserialize<'a> + Serialize + Send + Sync + 'static,
 {
-    OpenAI(Extractor<rig::providers::openai::CompletionModel, T>),
-    Mistral(Extractor<rig::providers::mistral::CompletionModel, T>),
-    OpenRouter(Extractor<rig::providers::openrouter::CompletionModel, T>),
-    Anthropic(Extractor<rig::providers::anthropic::completion::CompletionModel, T>),
-    Gemini(Extractor<rig::providers::gemini::completion::CompletionModel, T>),
-    Moonshot(Extractor<rig::providers::moonshot::CompletionModel, T>),
-    DeepSeek(Extractor<rig::providers::deepseek::CompletionModel, T>),
+    /// Function-calling extraction (OpenAI, Anthropic, Gemini, etc.)
+    FunctionCalling {
+        client: ProviderClient,
+        model: String,
+        system_prompt: String,
+        max_tokens: u32,
+        _phantom: std::marker::PhantomData<T>,
+    },
+    /// Ollama prompt-based extraction with JSON parsing cascade.
     Ollama(OllamaExtractorWrapper<T>),
-    /// Emergency fallback — delegates JSON extraction to the codex-rs subprocess.
+    /// CodexRs subprocess extraction.
     CodexRs {
         client: CodexRsClient,
         system_prompt: String,
@@ -567,32 +678,21 @@ impl<T> ProviderExtractor<T>
 where
     T: JsonSchema + for<'a> Deserialize<'a> + Serialize + Send + Sync + 'static,
 {
-    /// Execute extraction
+    /// Execute extraction.
     pub async fn extract(&self, prompt: &str) -> Result<T> {
         match self {
-            ProviderExtractor::OpenAI(extractor) => {
-                extractor.extract(prompt).await.map_err(|e| e.into())
+            ProviderExtractor::FunctionCalling {
+                client,
+                model,
+                system_prompt,
+                max_tokens,
+                ..
+            } => {
+                Self::extract_via_function_calling(client, model, system_prompt, *max_tokens, prompt)
+                    .await
             }
-            ProviderExtractor::Moonshot(extractor) => {
-                extractor.extract(prompt).await.map_err(|e| e.into())
-            }
-            ProviderExtractor::DeepSeek(extractor) => {
-                extractor.extract(prompt).await.map_err(|e| e.into())
-            }
-            ProviderExtractor::Mistral(extractor) => {
-                extractor.extract(prompt).await.map_err(|e| e.into())
-            }
-            ProviderExtractor::OpenRouter(extractor) => {
-                extractor.extract(prompt).await.map_err(|e| e.into())
-            }
-            ProviderExtractor::Anthropic(extractor) => {
-                extractor.extract(prompt).await.map_err(|e| e.into())
-            }
-            ProviderExtractor::Gemini(extractor) => {
-                extractor.extract(prompt).await.map_err(|e| e.into())
-            }
-            ProviderExtractor::Ollama(extractor) => {
-                extractor.extract(prompt).await.map_err(|e| e.into())
+            ProviderExtractor::Ollama(wrapper) => {
+                wrapper.extract(prompt).await.map_err(|e| e.into())
             }
             ProviderExtractor::CodexRs {
                 client,
@@ -600,5 +700,214 @@ where
                 ..
             } => client.extract::<T>(system_prompt, prompt).await,
         }
+    }
+
+    /// Extract structured data using function calling.
+    ///
+    /// Sends a request with a single tool whose parameters match the JSON Schema
+    /// of `T`, forces the model to call that tool, and parses the arguments as `T`.
+    async fn extract_via_function_calling(
+        client: &ProviderClient,
+        model: &str,
+        system_prompt: &str,
+        max_tokens: u32,
+        user_prompt: &str,
+    ) -> Result<T> {
+        let schema = schemars::schema_for!(T);
+        let schema_json = serde_json::to_value(&schema)?;
+
+        let extract_tool = ToolDefinition {
+            name: "extract_data".to_string(),
+            description: "Extract structured data from the provided text.".to_string(),
+            parameters: schema_json,
+        };
+
+        let messages = vec![
+            ChatMessage::system(system_prompt),
+            ChatMessage::user(user_prompt),
+        ];
+
+        // Force the model to call our extraction tool
+        let forced_choice = ToolChoice::Required;
+        let resp = client
+            .send_completion(
+                model,
+                &messages,
+                max_tokens,
+                None,
+                Some(&[extract_tool]),
+                Some(&forced_choice),
+            )
+            .await?;
+
+        // Find the tool call with our extraction function
+        for tc in &resp.tool_calls {
+            if tc.function.name == "extract_data" {
+                let result: T = serde_json::from_str(&tc.function.arguments).with_context(|| {
+                    format!(
+                        "Failed to deserialize extracted data: {}",
+                        tc.function.arguments.chars().take(200).collect::<String>()
+                    )
+                })?;
+                return Ok(result);
+            }
+        }
+
+        // If no tool call was found, try parsing the text response as JSON
+        if !resp.text.is_empty() {
+            if let Ok(result) = serde_json::from_str::<T>(&resp.text) {
+                return Ok(result);
+            }
+        }
+
+        anyhow::bail!("Model did not produce structured extraction output")
+    }
+}
+
+// ── Internal completion response ───────────────────────────────────────────
+
+/// Normalized completion response (provider-agnostic).
+struct CompletionResponse {
+    text: String,
+    tool_calls: Vec<ToolCallInfo>,
+}
+
+impl CompletionResponse {
+    fn text_content(&self) -> String {
+        self.text.clone()
+    }
+}
+
+// ── Conversion helpers ─────────────────────────────────────────────────────
+
+fn chat_to_openai(msg: &ChatMessage) -> OpenAIMessage {
+    match msg {
+        ChatMessage::System { content } => OpenAIMessage {
+            role: "system".to_string(),
+            content: Some(content.clone()),
+            tool_calls: None,
+            tool_call_id: None,
+        },
+        ChatMessage::User { content } => OpenAIMessage {
+            role: "user".to_string(),
+            content: Some(content.clone()),
+            tool_calls: None,
+            tool_call_id: None,
+        },
+        ChatMessage::Assistant { content } => {
+            let mut text_parts = Vec::new();
+            let mut tool_calls = Vec::new();
+
+            for c in content {
+                match c {
+                    AssistantContent::Text(t) => text_parts.push(t.text.clone()),
+                    AssistantContent::ToolCall(tc) => {
+                        tool_calls.push(OpenAIToolCall {
+                            id: tc.id.clone(),
+                            call_type: "function".to_string(),
+                            function: OpenAIFunctionCall {
+                                name: tc.function.name.clone(),
+                                arguments: tc.function.arguments.clone(),
+                            },
+                        });
+                    }
+                    AssistantContent::Reasoning(_) => {}
+                }
+            }
+
+            OpenAIMessage {
+                role: "assistant".to_string(),
+                content: if text_parts.is_empty() {
+                    None
+                } else {
+                    Some(text_parts.join("\n"))
+                },
+                tool_calls: if tool_calls.is_empty() {
+                    None
+                } else {
+                    Some(tool_calls)
+                },
+                tool_call_id: None,
+            }
+        }
+        ChatMessage::Tool {
+            tool_call_id,
+            content,
+        } => OpenAIMessage {
+            role: "tool".to_string(),
+            content: Some(content.clone()),
+            tool_calls: None,
+            tool_call_id: Some(tool_call_id.clone()),
+        },
+    }
+}
+
+fn openai_to_completion(msg: OpenAIMessage) -> CompletionResponse {
+    let text = msg.content.unwrap_or_default();
+    let tool_calls = msg
+        .tool_calls
+        .unwrap_or_default()
+        .into_iter()
+        .map(|tc| ToolCallInfo {
+            id: tc.id,
+            function: FunctionCall {
+                name: tc.function.name,
+                arguments: tc.function.arguments,
+            },
+        })
+        .collect();
+
+    CompletionResponse { text, tool_calls }
+}
+
+fn anthropic_to_completion(resp: AnthropicResponse) -> CompletionResponse {
+    let mut text_parts = Vec::new();
+    let mut tool_calls = Vec::new();
+
+    for block in resp.content {
+        match block {
+            AnthropicContentBlock::Text { text } => text_parts.push(text),
+            AnthropicContentBlock::ToolUse { id, name, input } => {
+                tool_calls.push(ToolCallInfo {
+                    id,
+                    function: FunctionCall {
+                        name,
+                        arguments: serde_json::to_string(&input).unwrap_or_default(),
+                    },
+                });
+            }
+        }
+    }
+
+    CompletionResponse {
+        text: text_parts.join("\n"),
+        tool_calls,
+    }
+}
+
+fn gemini_to_completion(content: GeminiContent) -> CompletionResponse {
+    let mut text_parts = Vec::new();
+    let mut tool_calls = Vec::new();
+
+    for part in content.parts {
+        match part {
+            GeminiPart::Text { text } => text_parts.push(text),
+            GeminiPart::FunctionCall { function_call } => {
+                tool_calls.push(ToolCallInfo {
+                    id: format!("gemini_{}", uuid::Uuid::new_v4()),
+                    function: FunctionCall {
+                        name: function_call.name,
+                        arguments: serde_json::to_string(&function_call.args)
+                            .unwrap_or_default(),
+                    },
+                });
+            }
+            GeminiPart::FunctionResponse { .. } => {}
+        }
+    }
+
+    CompletionResponse {
+        text: text_parts.join("\n"),
+        tool_calls,
     }
 }

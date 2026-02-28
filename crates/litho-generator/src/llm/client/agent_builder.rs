@@ -1,9 +1,14 @@
 //! Agent builder - Responsible for building and configuring LLM Agent
 
+use std::sync::Arc;
+
 use crate::{
     config::Config,
     llm::client::providers::{ProviderAgent, ProviderClient},
-    llm::tools::{file_explorer::AgentToolFileExplorer, file_reader::AgentToolFileReader},
+    llm::tools::{
+        file_explorer::AgentToolFileExplorer, file_reader::AgentToolFileReader, time::AgentToolTime,
+        AgentTool,
+    },
 };
 
 /// Agent builder
@@ -25,18 +30,24 @@ impl<'a> AgentBuilder<'a> {
         if !llm_config.disable_preset_tools {
             let file_explorer = AgentToolFileExplorer::new(self.config.clone());
             let file_reader = AgentToolFileReader::new(self.config.clone());
+            let tool_time = AgentToolTime::new();
 
             let system_prompt_with_tools = format!(
                 "{}\nDo not fabricate non-existent code. If you need to learn more about the project structure and source code content, actively call tools to obtain more contextual information",
                 system_prompt
             );
 
+            let tools: Vec<Arc<dyn AgentTool>> = vec![
+                Arc::new(file_explorer),
+                Arc::new(file_reader),
+                Arc::new(tool_time),
+            ];
+
             self.client.create_agent_with_tools(
                 &llm_config.model_efficient,
                 &system_prompt_with_tools,
                 llm_config,
-                &file_explorer,
-                &file_reader,
+                tools,
             )
         } else {
             self.client

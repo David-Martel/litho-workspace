@@ -1,10 +1,13 @@
 //! Time query tool
 
 use anyhow::Result;
-use rig::tool::Tool;
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use crate::llm::client::chat_types::ToolDefinition;
+use crate::llm::tools::AgentTool;
 
 /// Time tool
 #[derive(Debug, Clone)]
@@ -24,18 +27,6 @@ pub struct TimeResult {
     pub timestamp: u64,
     pub utc_time: String,
 }
-
-/// Time tool error
-#[derive(Debug)]
-pub struct TimeToolError;
-
-impl std::fmt::Display for TimeToolError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Time tool error")
-    }
-}
-
-impl std::error::Error for TimeToolError {}
 
 impl AgentToolTime {
     pub fn new() -> Self {
@@ -66,16 +57,15 @@ impl AgentToolTime {
     }
 }
 
-impl Tool for AgentToolTime {
-    const NAME: &'static str = "time";
+#[async_trait]
+impl AgentTool for AgentToolTime {
+    fn name(&self) -> &str {
+        "time"
+    }
 
-    type Error = TimeToolError;
-    type Args = TimeArgs;
-    type Output = TimeResult;
-
-    async fn definition(&self, _prompt: String) -> rig::completion::ToolDefinition {
-        rig::completion::ToolDefinition {
-            name: Self::NAME.to_string(),
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition {
+            name: "time".to_string(),
             description: "Get current date and time information, including local time, UTC time, and timestamp.".to_string(),
             parameters: serde_json::json!({
                 "type": "object",
@@ -90,13 +80,13 @@ impl Tool for AgentToolTime {
         }
     }
 
-    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+    async fn call_json(&self, arguments: &str) -> Result<String> {
+        let args: TimeArgs = serde_json::from_str(arguments)?;
         println!("   🔧 tool called...time@{:?}", args);
 
         tokio::time::sleep(Duration::from_secs(1)).await;
 
-        self.get_current_time(&args)
-            .await
-            .map_err(|_e| TimeToolError)
+        let result = self.get_current_time(&args).await?;
+        Ok(serde_json::to_string(&result)?)
     }
 }

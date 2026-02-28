@@ -3,9 +3,11 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use rig::tool::Tool;
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+use crate::llm::client::chat_types::ToolDefinition;
+use crate::llm::tools::AgentTool;
 use crate::{config::Config, utils::file_utils::is_binary_file_path};
 
 /// File reading tool
@@ -107,20 +109,15 @@ impl AgentToolFileReader {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-#[error("file reader tool error")]
-pub struct FileReaderToolError;
+#[async_trait]
+impl AgentTool for AgentToolFileReader {
+    fn name(&self) -> &str {
+        "file_reader"
+    }
 
-impl Tool for AgentToolFileReader {
-    const NAME: &'static str = "file_reader";
-
-    type Error = FileReaderToolError;
-    type Args = FileReaderArgs;
-    type Output = FileReaderResult;
-
-    async fn definition(&self, _prompt: String) -> rig::completion::ToolDefinition {
-        rig::completion::ToolDefinition {
-            name: Self::NAME.to_string(),
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition {
+            name: "file_reader".to_string(),
             description: "Read source code or text-based content from the project, with support for specifying line ranges and maximum line limits. Automatically handles large files and binary files."
                 .to_string(),
             parameters: serde_json::json!({
@@ -148,13 +145,13 @@ impl Tool for AgentToolFileReader {
         }
     }
 
-    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+    async fn call_json(&self, arguments: &str) -> Result<String> {
+        let args: FileReaderArgs = serde_json::from_str(arguments)?;
         println!("   🔧 tool called...file_reader@{:?}", args);
 
         tokio::time::sleep(Duration::from_secs(1)).await;
 
-        self.read_file_content(&args)
-            .await
-            .map_err(|_e| FileReaderToolError)
+        let result = self.read_file_content(&args).await?;
+        Ok(serde_json::to_string(&result)?)
     }
 }

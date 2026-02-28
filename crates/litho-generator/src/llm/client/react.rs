@@ -1,6 +1,6 @@
 //! ReAct (Reasoning and Acting) pattern related types and configuration
 
-use rig::completion::Message;
+use super::chat_types::ChatMessage;
 
 /// ReAct mode configuration
 #[derive(Debug, Clone)]
@@ -38,7 +38,7 @@ pub struct ReActResponse {
     /// Tool call history
     pub tool_calls_history: Vec<String>,
     /// Chat history (only included when max depth reached)
-    pub chat_history: Option<Vec<Message>>,
+    pub chat_history: Option<Vec<ChatMessage>>,
 }
 
 impl ReActResponse {
@@ -48,7 +48,7 @@ impl ReActResponse {
         iterations_used: usize,
         stopped_by_max_depth: bool,
         tool_calls_history: Vec<String>,
-        chat_history: Option<Vec<Message>>,
+        chat_history: Option<Vec<ChatMessage>>,
     ) -> Self {
         Self {
             content,
@@ -69,7 +69,7 @@ impl ReActResponse {
         content: String,
         max_depth: usize,
         tool_calls_history: Vec<String>,
-        chat_history: Vec<Message>,
+        chat_history: Vec<ChatMessage>,
     ) -> Self {
         Self::new(
             content,
@@ -85,7 +85,7 @@ impl ReActResponse {
         content: String,
         max_depth: usize,
         tool_calls_history: Vec<String>,
-        chat_history: Vec<Message>,
+        chat_history: Vec<ChatMessage>,
     ) -> Self {
         Self::new(
             content,

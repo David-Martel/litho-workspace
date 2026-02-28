@@ -21,12 +21,12 @@
 
 use anyhow::{Context, Result};
 use regex::Regex;
-use rig::{agent::Agent, completion::Prompt};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::LazyLock;
 
+use super::providers::ProviderAgent;
 use crate::llm::serde_helpers::unwrap_envelope;
 
 /// JSON code block regex pattern
@@ -35,7 +35,7 @@ static JSON_CODE_BLOCK_REGEX: LazyLock<Regex> =
 
 /// Ollama structured output extractor
 pub struct OllamaExtractorWrapper<T> {
-    agent: Agent<rig::providers::ollama::CompletionModel<reqwest::Client>>,
+    agent: ProviderAgent,
     max_retries: u32,
     _phantom: std::marker::PhantomData<T>,
 }
@@ -45,10 +45,7 @@ where
     T: JsonSchema + Serialize + for<'de> Deserialize<'de>,
 {
     /// Create a new Ollama extractor
-    pub fn new(
-        agent: Agent<rig::providers::ollama::CompletionModel<reqwest::Client>>,
-        max_retries: u32,
-    ) -> Self {
+    pub fn new(agent: ProviderAgent, max_retries: u32) -> Self {
         Self {
             agent,
             max_retries,

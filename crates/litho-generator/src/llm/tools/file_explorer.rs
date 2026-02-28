@@ -1,7 +1,7 @@
 //! File system exploration tool
 
 use anyhow::Result;
-use rig::tool::Tool;
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -9,6 +9,8 @@ use std::time::Duration;
 use walkdir::WalkDir;
 
 use crate::config::Config;
+use crate::llm::client::chat_types::ToolDefinition;
+use crate::llm::tools::AgentTool;
 use crate::types::FileInfo;
 use crate::utils::file_utils::is_test_file;
 
@@ -478,20 +480,15 @@ impl AgentToolFileExplorer {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-#[error("file explorer tool error")]
-pub struct FileExplorerToolError;
+#[async_trait]
+impl AgentTool for AgentToolFileExplorer {
+    fn name(&self) -> &str {
+        "file_explorer"
+    }
 
-impl Tool for AgentToolFileExplorer {
-    const NAME: &'static str = "file_explorer";
-
-    type Error = FileExplorerToolError;
-    type Args = FileExplorerArgs;
-    type Output = FileExplorerResult;
-
-    async fn definition(&self, _prompt: String) -> rig::completion::ToolDefinition {
-        rig::completion::ToolDefinition {
-            name: Self::NAME.to_string(),
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition {
+            name: "file_explorer".to_string(),
             description:
                 "Explore project file structure, list directory contents, find specific file patterns. Supports recursive search and file filtering."
                     .to_string(),
@@ -525,25 +522,19 @@ impl Tool for AgentToolFileExplorer {
         }
     }
 
-    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        println!("   🔧 tool called...file_reader@{:?}", args);
+    async fn call_json(&self, arguments: &str) -> Result<String> {
+        let args: FileExplorerArgs = serde_json::from_str(arguments)?;
+        println!("   🔧 tool called...file_explorer@{:?}", args);
 
         tokio::time::sleep(Duration::from_secs(1)).await;
 
-        match args.action.as_str() {
-            "list_directory" => self
-                .list_directory(&args)
-                .await
-                .map_err(|_e| FileExplorerToolError),
-            "find_files" => self
-                .find_files(&args)
-                .await
-                .map_err(|_e| FileExplorerToolError),
-            "get_file_info" => self
-                .get_file_info(&args)
-                .await
-                .map_err(|_e| FileExplorerToolError),
-            _ => Err(FileExplorerToolError),
-        }
+        let result = match args.action.as_str() {
+            "list_directory" => self.list_directory(&args).await?,
+            "find_files" => self.find_files(&args).await?,
+            "get_file_info" => self.get_file_info(&args).await?,
+            other => anyhow::bail!("Unknown action: {}", other),
+        };
+
+        Ok(serde_json::to_string(&result)?)
     }
 }

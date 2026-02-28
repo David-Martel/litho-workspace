@@ -1,8 +1,8 @@
 //! Summary reasoning module - Fallover mechanism when ReAct mode reaches max iterations
 
 use anyhow::Result;
-use rig::completion::Message;
 
+use super::chat_types::{AssistantContent, ChatMessage};
 use super::providers::ProviderAgent;
 
 /// Summary reasoner
@@ -14,7 +14,7 @@ impl SummaryReasoner {
         agent_without_tools: &ProviderAgent,
         original_system_prompt: &str,
         original_user_prompt: &str,
-        chat_history: &[Message],
+        chat_history: &[ChatMessage],
         tool_calls_history: &[String],
     ) -> Result<String> {
         // Build summary reasoning prompt
@@ -35,7 +35,7 @@ impl SummaryReasoner {
     fn build_summary_prompt(
         original_system_prompt: &str,
         original_user_prompt: &str,
-        chat_history: &[Message],
+        chat_history: &[ChatMessage],
         tool_calls_history: &[String],
     ) -> String {
         let mut prompt = String::new();
@@ -82,42 +82,41 @@ impl SummaryReasoner {
     }
 
     /// Extract more detailed conversation information, including tool calls and related context
-    fn extract_detailed_conversation_info(chat_history: &[Message]) -> String {
+    fn extract_detailed_conversation_info(chat_history: &[ChatMessage]) -> String {
         let mut details = String::new();
 
         for (index, message) in chat_history.iter().enumerate() {
             if index == 0 {
-                // Skip the first user input (original user prompt), as it's already included above
+                // Skip the first system message (original system prompt)
                 continue;
             }
             match message {
-                Message::User { content } => {
-                    // Handle user messages in more detail
+                ChatMessage::System { .. } => {}
+                ChatMessage::User { content } => {
                     details.push_str(&format!("## User Input [Round {}]\n", index + 1));
-                    details.push_str(&format!("{:#?}\n\n", content));
+                    details.push_str(&format!("{}\n\n", content));
                 }
-                Message::Assistant { content, .. } => {
+                ChatMessage::Assistant { content, .. } => {
                     details.push_str(&format!("## Assistant Response [Round {}]\n", index + 1));
 
-                    // Handle text content and tool calls separately
                     let mut has_content = false;
 
                     for item in content.iter() {
                         match item {
-                            rig::completion::AssistantContent::Text(text) => {
+                            AssistantContent::Text(text) => {
                                 if !text.text.is_empty() {
                                     details.push_str(&format!("**Text Reply:** {}\n\n", text.text));
                                     has_content = true;
                                 }
                             }
-                            rig::completion::AssistantContent::ToolCall(tool_call) => {
+                            AssistantContent::ToolCall(tool_call) => {
                                 details.push_str(&format!(
                                     "**Tool Call:** `{}` \nArguments: `{}`\n\n",
                                     tool_call.function.name, tool_call.function.arguments
                                 ));
                                 has_content = true;
                             }
-                            rig::completion::AssistantContent::Reasoning(reasoning) => {
+                            AssistantContent::Reasoning(reasoning) => {
                                 if !reasoning.reasoning.is_empty() {
                                     let reasoning_text = reasoning.reasoning.join("\n");
                                     details.push_str(&format!(
@@ -133,6 +132,10 @@ impl SummaryReasoner {
                     if !has_content {
                         details.push_str("No specific content\n\n");
                     }
+                }
+                ChatMessage::Tool { content, .. } => {
+                    details.push_str(&format!("## Tool Result [Round {}]\n", index + 1));
+                    details.push_str(&format!("{}\n\n", content));
                 }
             }
         }
