@@ -117,7 +117,7 @@ The `.cargo/config.toml` enforces `target-dir = "target"`.
 
 - **Agent trait**: `StepForwardAgent` — declarative data_config() + prompt_template()
 - **Memory DAG**: Shared `Arc<RwLock<Memory>>` for inter-agent data flow
-- **Provider abstraction**: 8 LLM providers via `ProviderClient` enum
+- **Provider abstraction**: Direct reqwest HTTP client supporting OpenAI-compatible, Anthropic, Gemini, CodexRs
 - **Fallback chain**: Primary model → fallover_model → codex-rs (Phase 1)
 - **Cache**: `CacheManager` with MD5 prompt keying, ~55% hit rate on 2nd run
 
@@ -149,6 +149,6 @@ cargo nextest run --workspace --no-capture
   with custom modifications
 - sccache may conflict with parallel builds — use `RUSTC_WRAPPER=""` to bypass
 - Tree-sitter C compilation requires MSVC clang-cl on Windows
-- rig-core 0.23 is legacy — do not add new provider integrations through rig
+- rig-core removed in Session 49 — all LLM calls go through direct reqwest HTTP in providers.rs
 - PostgreSQL 18 required for qmd-storage (bootstrap: `scripts/postgres18-bootstrap.ps1`)
 - `.rgignore` excludes `external/codex-rs/` from ripgrep searches for speed

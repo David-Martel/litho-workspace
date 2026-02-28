@@ -1,6 +1,6 @@
 # Litho Workspace TODOs
 
-Last updated: 2026-02-27 (post-Session 48 compilation fixes + feature work)
+Last updated: 2026-02-27 (post-Session 49: rig-core removal + LTO re-enabled)
 
 ## P0: Testing — Expanded (489 tests passing)
 
@@ -40,7 +40,6 @@ Pipeline evaluation on david-t-martel (253 files, 44 source, 12 markdown):
 - [x] **Token-aware preprocessing** — `token_compress.rs` strips comments + collapses whitespace (~30-40% reduction, 22 tests)
 - [x] **max_parallels raised 3→8** — immediate ~65% preprocessing speedup potential
 - [ ] **Smart file batching** — group small files into single LLM calls (currently 1 call per file regardless of size)
-- [ ] **Smart file batching** — group small files into single LLM calls (currently 1 call per file regardless of size)
 - [ ] **Pre-computation cache warming** — hash source files before LLM calls, skip identical files from previous runs
 - [ ] **Streaming preprocessing** — start research phase as soon as first files complete (don't wait for all)
 
@@ -63,12 +62,15 @@ improved output, but there's no automated way to detect quality regressions.
 
 ## P2: Provider Improvements
 
-### rig-core Migration (DEFERRED — cost > benefit for now)
-rig-core 0.23 is used in 8 files (~1,850 LOC, 6% of litho-generator). Already bypassed
-for Ollama via `ollama_native.rs`. Removal would require 600-800 LOC replacement, 3-5 days.
-LTO is disabled due to rustc stack overflow in rig-core.
-- [ ] Replace rig-core 0.23 with direct `reqwest` + `serde` API clients (when capacity allows)
-- [ ] Re-enable LTO in `.cargo/config.toml` after rig-core removal
+### rig-core Removal — COMPLETE (Session 49)
+rig-core 0.23 has been fully replaced with direct `reqwest` HTTP clients.
+- [x] Replace rig-core 0.23 with direct `reqwest` + `serde` API clients
+- [x] Re-enable thin LTO in `.cargo/config.toml`
+- [x] Custom `AgentTool` trait replaces `rig::tool::Tool`
+- [x] Custom `ChatMessage`/`AssistantContent` types replace `rig::completion::Message`
+- [x] Multi-turn tool calling loop implemented directly in `ProviderAgent::multi_turn()`
+- [x] OpenAI-compatible, Anthropic, and Gemini API formats all supported
+- [x] All 489 tests pass, 0 regressions
 
 ### Codex-RS as Primary Provider
 - [ ] Wire codex-rs as selectable primary provider (not just fallback)
@@ -132,6 +134,20 @@ but needs real-world hardening.
 ---
 
 ## Completed
+
+### Session 49 — rig-core removal + LTO (2026-02-27)
+- [x] **rig-core 0.23 fully removed** — replaced with direct reqwest HTTP clients
+- [x] New `chat_types.rs` (148 LOC): ChatMessage, AssistantContent, ToolCallInfo, ToolDefinition, ToolChoice, PromptError
+- [x] New `AgentTool` trait (tools/mod.rs): async call_json() replacing rig::tool::Tool
+- [x] Rewritten `providers.rs` (~500 LOC): ProviderClient (reqwest), ProviderAgent (prompt + multi_turn), ProviderExtractor
+- [x] Supports OpenAI-compatible (6 providers), Anthropic, Gemini, CodexRs API formats
+- [x] Manual multi-turn tool calling loop in ProviderAgent::multi_turn()
+- [x] Function-calling extraction for non-Ollama providers
+- [x] Updated: react.rs, react_executor.rs, summary_reasoner.rs, ollama_extractor.rs, agent_builder.rs
+- [x] Updated tools: file_explorer.rs, file_reader.rs, time.rs (implement AgentTool)
+- [x] **Thin LTO re-enabled** in .cargo/config.toml (no more rustc stack overflow)
+- [x] codegen-units = 256 for dev profile (prevents rust-lld OOM on codex-tui)
+- [x] Full workspace compiles, 489 tests pass, 0 regressions
 
 ### Session 48 — Compilation fixes + Feature work (2026-02-27)
 - [x] tree-sitter 0.25 u32/usize type compatibility (4 extractor files)
