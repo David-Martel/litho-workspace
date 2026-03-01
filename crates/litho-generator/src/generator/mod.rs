@@ -3,6 +3,7 @@ pub mod compose;
 pub mod context;
 pub mod outlet;
 pub mod preprocess;
+pub mod quality_gate;
 pub mod research;
 pub mod step_forward_agent;
 pub mod types;

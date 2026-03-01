@@ -29,6 +29,15 @@ pub struct Finding {
     pub section: Option<String>,
 }
 
+/// Per-section quality score derived from attributed findings.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SectionScore {
+    pub section: String,
+    pub finding_count: usize,
+    /// Score: 1.0 - (errors * 0.15 + warnings * 0.05), clamped to [0.0, 1.0].
+    pub score: f64,
+}
+
 /// Aggregated validation report.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValidationReport {
@@ -44,6 +53,12 @@ pub struct ValidationReport {
     /// LLM-as-judge helpfulness score (0.0 - 1.0).
     /// Defaults to 1.0 when Ollama is unavailable.
     pub helpfulness_score: f64,
+    /// Per-section scores computed from attributed findings.
+    #[serde(default)]
+    pub section_scores: Vec<SectionScore>,
+    /// RFC 3339 timestamp of when this report was generated.
+    #[serde(default)]
+    pub generated_at: String,
 }
 
 impl ValidationReport {
@@ -59,6 +74,47 @@ impl ValidationReport {
             .iter()
             .filter(|f| f.severity == Severity::Warning)
             .count()
+    }
+
+    /// Compute per-section scores from attributed findings.
+    ///
+    /// For each unique section name in findings, tallies error and warning counts
+    /// and computes a penalty score: `1.0 - (errors * 0.15 + warnings * 0.05)`,
+    /// clamped to `[0.0, 1.0]`.
+    pub fn compute_section_scores(&mut self) {
+        use std::collections::HashMap;
+
+        let mut section_errors: HashMap<String, (usize, usize)> = HashMap::new();
+
+        for finding in &self.findings {
+            if let Some(ref section) = finding.section {
+                match finding.severity {
+                    Severity::Error => {
+                        section_errors.entry(section.clone()).or_insert((0, 0)).0 += 1;
+                    }
+                    Severity::Warning => {
+                        section_errors.entry(section.clone()).or_insert((0, 0)).1 += 1;
+                    }
+                    Severity::Info => {} // Info findings don't create section entries
+                }
+            }
+        }
+
+        self.section_scores = section_errors
+            .into_iter()
+            .map(|(section, (errors, warnings))| {
+                let penalty = errors as f64 * 0.15 + warnings as f64 * 0.05;
+                SectionScore {
+                    section,
+                    finding_count: errors + warnings,
+                    score: (1.0 - penalty).clamp(0.0, 1.0),
+                }
+            })
+            .collect();
+
+        // Sort by section name for deterministic output
+        self.section_scores
+            .sort_by(|a, b| a.section.cmp(&b.section));
     }
 }
 
@@ -135,7 +191,7 @@ impl ContentValidator {
             + coherence_score * qc.coherence_weight
             + helpfulness_score * qc.helpfulness_weight;
 
-        Ok(ValidationReport {
+        let mut report = ValidationReport {
             findings,
             quality_score,
             completeness_score,
@@ -144,7 +200,12 @@ impl ContentValidator {
             grounding_score,
             coherence_score,
             helpfulness_score,
-        })
+            section_scores: Vec::new(),
+            generated_at: chrono::Utc::now().to_rfc3339(),
+        };
+        report.compute_section_scores();
+
+        Ok(report)
     }
 
     /// Load all generated document sections from memory.
@@ -1132,6 +1193,8 @@ tempfile = "3"
             grounding_score: 0.5,
             coherence_score: 0.9,
             helpfulness_score: 0.8,
+            section_scores: Vec::new(),
+            generated_at: String::new(),
         };
         assert_eq!(report.errors(), 1);
         assert_eq!(report.warnings(), 2);
@@ -1543,5 +1606,173 @@ reqwest = { version = "0.12" }
             "Score should be ~1.0 but got {}",
             score
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // SectionScore / compute_section_scores tests
+    // -----------------------------------------------------------------------
+
+    fn make_report_with_findings(findings: Vec<Finding>) -> ValidationReport {
+        ValidationReport {
+            findings,
+            quality_score: 0.8,
+            completeness_score: 1.0,
+            accuracy_score: 1.0,
+            freshness_score: 1.0,
+            grounding_score: 1.0,
+            coherence_score: 1.0,
+            helpfulness_score: 1.0,
+            section_scores: Vec::new(),
+            generated_at: String::new(),
+        }
+    }
+
+    #[test]
+    fn test_section_scores_empty_findings() {
+        let mut report = make_report_with_findings(Vec::new());
+        report.compute_section_scores();
+        assert!(report.section_scores.is_empty());
+    }
+
+    #[test]
+    fn test_section_scores_errors_and_warnings() {
+        let findings = vec![
+            Finding {
+                severity: Severity::Error,
+                category: "completeness".into(),
+                message: "missing".into(),
+                section: Some("Overview".into()),
+            },
+            Finding {
+                severity: Severity::Warning,
+                category: "accuracy".into(),
+                message: "ref not found".into(),
+                section: Some("Overview".into()),
+            },
+            Finding {
+                severity: Severity::Warning,
+                category: "accuracy".into(),
+                message: "another".into(),
+                section: Some("Architecture".into()),
+            },
+        ];
+        let mut report = make_report_with_findings(findings);
+        report.compute_section_scores();
+        assert_eq!(report.section_scores.len(), 2);
+
+        let overview = report
+            .section_scores
+            .iter()
+            .find(|s| s.section == "Overview")
+            .unwrap();
+        // 1 error * 0.15 + 1 warning * 0.05 = 0.20 penalty -> score = 0.80
+        assert!((overview.score - 0.80).abs() < 0.001);
+        assert_eq!(overview.finding_count, 2);
+
+        let arch = report
+            .section_scores
+            .iter()
+            .find(|s| s.section == "Architecture")
+            .unwrap();
+        // 0 errors + 1 warning * 0.05 = 0.05 penalty -> score = 0.95
+        assert!((arch.score - 0.95).abs() < 0.001);
+        assert_eq!(arch.finding_count, 1);
+    }
+
+    #[test]
+    fn test_section_scores_clamped_to_zero() {
+        // 10 errors -> penalty = 1.50, clamped to 0.0
+        let findings: Vec<Finding> = (0..10)
+            .map(|i| Finding {
+                severity: Severity::Error,
+                category: "test".into(),
+                message: format!("err {}", i),
+                section: Some("BadSection".into()),
+            })
+            .collect();
+        let mut report = make_report_with_findings(findings);
+        report.compute_section_scores();
+        assert_eq!(report.section_scores.len(), 1);
+        assert!((report.section_scores[0].score - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_section_scores_info_ignored() {
+        let findings = vec![Finding {
+            severity: Severity::Info,
+            category: "test".into(),
+            message: "info only".into(),
+            section: Some("Overview".into()),
+        }];
+        let mut report = make_report_with_findings(findings);
+        report.compute_section_scores();
+        // Info findings don't produce section scores (0 errors + 0 warnings)
+        // The section is tracked but with zero penalty
+        assert!(report.section_scores.is_empty());
+    }
+
+    #[test]
+    fn test_section_scores_sorted_alphabetically() {
+        let findings = vec![
+            Finding {
+                severity: Severity::Error,
+                category: "test".into(),
+                message: "z".into(),
+                section: Some("Zebra".into()),
+            },
+            Finding {
+                severity: Severity::Error,
+                category: "test".into(),
+                message: "a".into(),
+                section: Some("Alpha".into()),
+            },
+        ];
+        let mut report = make_report_with_findings(findings);
+        report.compute_section_scores();
+        assert_eq!(report.section_scores[0].section, "Alpha");
+        assert_eq!(report.section_scores[1].section, "Zebra");
+    }
+
+    #[test]
+    fn test_section_score_serde_roundtrip() {
+        let score = SectionScore {
+            section: "Overview".to_string(),
+            finding_count: 3,
+            score: 0.85,
+        };
+        let json = serde_json::to_string(&score).unwrap();
+        let parsed: SectionScore = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.section, "Overview");
+        assert_eq!(parsed.finding_count, 3);
+        assert!((parsed.score - 0.85).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_validation_report_generated_at_present() {
+        // The generated_at field should be set by validate(); here we check
+        // that a manually constructed report can round-trip with it.
+        let mut report = make_report_with_findings(Vec::new());
+        report.generated_at = "2026-02-28T12:00:00+00:00".to_string();
+        let json = serde_json::to_string(&report).unwrap();
+        let parsed: ValidationReport = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.generated_at, "2026-02-28T12:00:00+00:00");
+    }
+
+    #[test]
+    fn test_validation_report_section_scores_serde_default() {
+        // Deserializing a report without section_scores/generated_at should use defaults
+        let json = r#"{
+            "findings": [],
+            "quality_score": 0.9,
+            "completeness_score": 1.0,
+            "accuracy_score": 1.0,
+            "freshness_score": 1.0,
+            "grounding_score": 1.0,
+            "coherence_score": 1.0,
+            "helpfulness_score": 1.0
+        }"#;
+        let report: ValidationReport = serde_json::from_str(json).unwrap();
+        assert!(report.section_scores.is_empty());
+        assert!(report.generated_at.is_empty());
     }
 }

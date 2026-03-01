@@ -3,6 +3,7 @@ use std::time::Instant;
 
 use crate::generator::compose::DocumentationComposer;
 use crate::generator::outlet::{DocTree, Outlet, OutletKind, SummaryOutlet};
+use crate::generator::quality_gate;
 use crate::generator::validator::ContentValidator;
 use crate::integrations::change_detector;
 use crate::integrations::manifest::DocumentationManifest;
@@ -147,6 +148,9 @@ pub async fn launch(c: &Config) -> Result<()> {
             }
         }
     }
+
+    // Persist report, check regression, enforce quality gate
+    quality_gate::process_validation_report(&context, &validation_report).await?;
 
     // Execute document storage (format-aware outlet selection)
     let output_start = Instant::now();
@@ -315,6 +319,9 @@ pub async fn launch_incremental(c: &Config) -> Result<()> {
         validation_report.errors(),
         validation_report.warnings(),
     );
+
+    // Persist report, check regression, enforce quality gate
+    quality_gate::process_validation_report(&context, &validation_report).await?;
 
     // Output stage always runs — it writes whatever the agents produced (or re-produced).
     let output_start = Instant::now();

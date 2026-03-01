@@ -326,6 +326,22 @@ pub struct QualityConfig {
     /// helpfulness score defaults to 1.0 and this weight still participates
     /// in the weighted average.
     pub helpfulness_weight: f64,
+
+    /// When true, pipeline errors if quality_score < min_score. Default: false.
+    #[serde(default)]
+    pub enforce_gate: bool,
+
+    /// Path to baseline validation-report.json for regression detection.
+    #[serde(default)]
+    pub baseline_report_path: Option<std::path::PathBuf>,
+
+    /// Max allowed regression delta before failing. Default: 0.05.
+    #[serde(default = "default_regression_threshold")]
+    pub regression_threshold: f64,
+}
+
+fn default_regression_threshold() -> f64 {
+    0.05
 }
 
 impl Default for QualityConfig {
@@ -338,6 +354,9 @@ impl Default for QualityConfig {
             grounding_weight: 0.20,
             coherence_weight: 0.15,
             helpfulness_weight: 0.15,
+            enforce_gate: false,
+            baseline_report_path: None,
+            regression_threshold: default_regression_threshold(),
         }
     }
 }
@@ -376,6 +395,13 @@ impl QualityConfig {
             ));
         }
 
+        if self.regression_threshold < 0.0 || self.regression_threshold > 1.0 {
+            return Err(format!(
+                "regression_threshold must be in [0.0, 1.0], got {}",
+                self.regression_threshold
+            ));
+        }
+
         Ok(())
     }
 }
@@ -401,7 +427,7 @@ pub struct ReviewConfig {
     pub enabled: bool,
     /// Minimum review score (0.0-1.0) to accept without flagging.
     pub min_review_score: f64,
-    /// Maximum re-generation attempts per section (reserved for future use).
+    /// Maximum re-generation attempts per failing section.
     pub max_retries: u32,
 }
 
@@ -1360,6 +1386,51 @@ mod tests {
             (parsed.min_score - qc.min_score).abs() < f64::EPSILON,
             "min_score round-trip failed"
         );
+    }
+
+    #[test]
+    fn quality_config_new_fields_defaults() {
+        let qc = QualityConfig::default();
+        assert!(!qc.enforce_gate);
+        assert!(qc.baseline_report_path.is_none());
+        assert!((qc.regression_threshold - 0.05).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn quality_config_new_fields_serde_round_trip() {
+        let qc = QualityConfig {
+            enforce_gate: true,
+            baseline_report_path: Some(PathBuf::from("/tmp/baseline.json")),
+            regression_threshold: 0.10,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&qc).unwrap();
+        let parsed: QualityConfig = serde_json::from_str(&json).unwrap();
+        assert!(parsed.enforce_gate);
+        assert_eq!(
+            parsed.baseline_report_path,
+            Some(PathBuf::from("/tmp/baseline.json"))
+        );
+        assert!((parsed.regression_threshold - 0.10).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn quality_config_regression_threshold_out_of_range_fails() {
+        let qc = QualityConfig {
+            regression_threshold: 1.5,
+            ..Default::default()
+        };
+        assert!(qc.validate().is_err());
+    }
+
+    #[test]
+    fn quality_config_serde_defaults_missing_new_fields() {
+        // When new fields are missing from JSON, serde(default) should fill them
+        let json = r#"{"min_score":0.5,"completeness_weight":0.20,"accuracy_weight":0.20,"freshness_weight":0.10,"grounding_weight":0.20,"coherence_weight":0.15,"helpfulness_weight":0.15}"#;
+        let qc: QualityConfig = serde_json::from_str(json).unwrap();
+        assert!(!qc.enforce_gate);
+        assert!(qc.baseline_report_path.is_none());
+        assert!((qc.regression_threshold - 0.05).abs() < f64::EPSILON);
     }
 
     // -----------------------------------------------------------------------
