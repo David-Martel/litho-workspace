@@ -34,7 +34,20 @@ codegen-units = 256
 debug = "line-tables-only"
 codegen-units = 256
 
+[profile.dev.build-override]
+codegen-units = 256
+
 [profile.release]
 split-debuginfo = "packed"
 lto = "thin"
 codegen-units = 16
+
+# Memory-safe workspace build: compile libs in parallel, serialize large binaries
+[alias]
+build-safe = """build --workspace \
+  --exclude codex-tui --exclude litho-generator --exclude litho-book \
+  --exclude litho-qmd-cli --exclude litho-qmd-mcp --exclude litho-cli \
+  --exclude codex-exec-server --exclude codex-app-server --jobs 2"""
+build-tui = "build -p codex-tui --jobs 1"
+build-gen = "build -p litho-generator --jobs 1"
+test-safe = """nextest run -p litho-core -p litho-extract -p litho-generator --no-fail-fast"""

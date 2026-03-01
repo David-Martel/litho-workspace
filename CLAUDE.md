@@ -85,17 +85,29 @@ pwsh -NoProfile -File scripts/litho-doc-bootstrap.ps1 \
 
 | Tool | Purpose | Config |
 |------|---------|--------|
-| sccache | Compilation cache | `.cargo/config.toml` |
-| rust-lld | Fast linker | `.cargo/config.toml` |
+| sccache | Compilation cache | `.cargo/config.toml` (port 5000) |
+| MSVC link.exe | Default linker (lower memory than rust-lld) | `.cargo/config.toml` |
 | cargo-nextest | Parallel test runner | `cargo nextest run` |
 | thin LTO | Optimized release | `.cargo/config.toml` |
 | native CPU flags | Architecture-specific | `.cargo/config.toml` |
+| Cranelift | Low-memory codegen (nightly, optional) | `scripts/build-tiered.ps1 -Cranelift` |
 
 ### Commands
 
 ```bash
-# Build
+# Build (standard)
 cargo build --workspace --release
+
+# Memory-safe tiered build (serializes large binary links)
+pwsh scripts/build-tiered.ps1              # dev build, OOM-safe
+pwsh scripts/build-tiered.ps1 -Release     # release build, OOM-safe
+pwsh scripts/build-tiered.ps1 -Cranelift   # nightly + Cranelift backend
+
+# Cargo aliases (defined in .cargo/config.toml)
+cargo build-safe   # parallel libs, excludes large binaries
+cargo build-tui    # codex-tui only, jobs=1
+cargo build-gen    # litho-generator only, jobs=1
+cargo test-safe    # litho-core + litho-extract + litho-generator
 
 # Test (use nextest for speed)
 cargo nextest run --workspace --no-fail-fast
@@ -111,6 +123,29 @@ cargo deny check && cargo audit
 
 # Quality pipeline (PowerShell)
 pwsh scripts/qmd-quality.ps1
+
+# Pagefile check (OOM prevention)
+pwsh scripts/check-pagefile.ps1            # report only
+pwsh scripts/check-pagefile.ps1 -Fix       # apply (requires admin + reboot)
+```
+
+### OOM Mitigation
+
+Large binaries (codex-tui, litho-generator) can OOM during linking. Mitigations:
+
+1. **Tiered build** (`scripts/build-tiered.ps1`) — serializes binary links
+2. **MSVC link.exe** (default) — uses less memory than rust-lld for large binaries
+3. **codegen-units=256** — smaller compilation units reduce per-unit memory
+4. **line-tables-only** debug info for deps — cuts ~40% of debug section size
+5. **Fixed pagefile** (`scripts/check-pagefile.ps1 -Fix`) — prevents expansion lag
+6. **Cranelift** (`-Cranelift` flag) — 30-60% less rustc memory (nightly only)
+7. **`-C prefer-dynamic`** (`-PreferDynamic` flag) — reduces linker RSS per binary
+8. **sccache on port 5000** — default 4226 blocked by Windows port exclusion
+
+For extreme cases, use env var override:
+```bash
+CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS="-C target-cpu=native -C debuginfo=0 -C prefer-dynamic" \
+  cargo build -p codex-tui --jobs 1
 ```
 
 ### Unified Target Directory
@@ -156,7 +191,8 @@ cargo nextest run --workspace --no-capture
 
 - `external/codex-rs/` is NOT a git submodule — it's tracked as regular files
   with custom modifications
-- sccache may conflict with parallel builds — use `RUSTC_WRAPPER=""` to bypass
+- sccache default port 4226 is blocked by Windows port exclusion — use `SCCACHE_SERVER_PORT=5000`
+- If sccache still fails, bypass with `RUSTC_WRAPPER=""` (loses cache)
 - Tree-sitter C compilation requires MSVC clang-cl on Windows
 - rig-core removed in Session 49 — all LLM calls go through direct reqwest HTTP in providers.rs
 - PostgreSQL 18 required for qmd-storage (bootstrap: `scripts/postgres18-bootstrap.ps1`)
