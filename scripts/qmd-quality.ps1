@@ -8,21 +8,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-function Resolve-RealCargoExe {
-  $rustup = Join-Path $env:USERPROFILE ".cargo\bin\rustup.exe"
-  if (Test-Path $rustup) {
-    $resolved = & $rustup which cargo 2>$null
-    if ($LASTEXITCODE -eq 0 -and $resolved) {
-      return ($resolved | Select-Object -First 1).Trim()
-    }
-  }
-
-  $cargo = (Get-Command cargo.exe -ErrorAction SilentlyContinue).Source
-  if ($cargo) { return $cargo }
-  return "cargo"
-}
-
-$script:CargoExe = Resolve-RealCargoExe
+$repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+. (Join-Path $repoRoot "scripts\litho-build-helpers.ps1")
 
 function Invoke-Step {
   param(
@@ -33,39 +20,36 @@ function Invoke-Step {
   & $Action
 }
 
-$repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $coverageScript = Join-Path $PSScriptRoot "qmd-coverage.ps1"
 $benchScript = Join-Path $PSScriptRoot "qmd-bench.ps1"
 
 Push-Location $repoRoot
 try {
+  $stamp = Set-LithoBuildStamp
+  Write-Host "[qmd-quality] Build token: $($stamp.BuildToken)" -ForegroundColor DarkGray
+  Enable-LithoSccache -AllowFallback
+
   $env:CARGO_TARGET_DIR = Join-Path $repoRoot $TargetDir
 
   Invoke-Step "Running qmd crate tests" {
-    & $script:CargoExe test -p litho-qmd-core -p litho-qmd-storage -p litho-qmd-cli -p litho-qmd-mcp
-    if ($LASTEXITCODE -ne 0) {
-      throw "qmd crate tests failed"
-    }
+    Invoke-LithoCargo -Arguments @(
+      "test",
+      "-p", "litho-qmd-core",
+      "-p", "litho-qmd-storage",
+      "-p", "litho-qmd-cli",
+      "-p", "litho-qmd-mcp"
+    )
   }
 
   if (-not $SkipIntegration) {
     Invoke-Step "Running qmd integration tests in litho-book and litho-codex" {
-      & $script:CargoExe test -p litho-book qmd_backend
-      if ($LASTEXITCODE -ne 0) {
-        throw "litho-book qmd integration tests failed"
-      }
-      & $script:CargoExe test -p litho-codex --test prompt_test
-      if ($LASTEXITCODE -ne 0) {
-        throw "litho-codex prompt_test failed"
-      }
+      Invoke-LithoCargo -Arguments @("test", "-p", "litho-book", "qmd_backend")
+      Invoke-LithoCargo -Arguments @("test", "-p", "litho-codex", "--test", "prompt_test")
     }
   }
 
   Invoke-Step "Running MCP runtime healthcheck" {
-    & $script:CargoExe run -p litho-qmd-mcp -- --healthcheck
-    if ($LASTEXITCODE -ne 0) {
-      throw "litho-qmd-mcp healthcheck failed"
-    }
+    Invoke-LithoCargo -Arguments @("run", "-p", "litho-qmd-mcp", "--", "--healthcheck")
   }
 
   if (-not $SkipCoverage) {

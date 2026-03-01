@@ -33,6 +33,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Initialize build stamp/token
+        shell: pwsh
+        run: |
+          . ./scripts/litho-build-helpers.ps1
+          $stamp = Set-LithoBuildStamp -ExportToGitHubEnv
+          Write-Host "Build token: $($stamp.BuildToken)"
+
       # Install the stable Rust toolchain. dtolnay's action caches the
       # toolchain by default and correctly handles the MSVC target on Windows.
       - name: Install Rust stable
@@ -59,6 +66,10 @@ jobs:
       - name: Build workspace (debug)
         run: cargo build --workspace
 
+      - name: Verify build token across binaries
+        shell: pwsh
+        run: pwsh -NoProfile -File scripts/verify-build-tokens.ps1
+
       - name: Run workspace tests
         run: cargo test --workspace
 
@@ -81,6 +92,13 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Initialize build stamp/token
+        shell: pwsh
+        run: |
+          . ./scripts/litho-build-helpers.ps1
+          $stamp = Set-LithoBuildStamp -ExportToGitHubEnv
+          Write-Host "Build token: $($stamp.BuildToken)"
 
       - name: Install Rust stable + llvm-tools
         uses: dtolnay/rust-toolchain@stable
@@ -133,6 +151,13 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Initialize build stamp/token
+        shell: pwsh
+        run: |
+          . ./scripts/litho-build-helpers.ps1
+          $stamp = Set-LithoBuildStamp -ExportToGitHubEnv
+          Write-Host "Build token: $($stamp.BuildToken)"
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable

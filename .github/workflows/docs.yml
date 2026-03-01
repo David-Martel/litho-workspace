@@ -24,6 +24,13 @@ jobs:
         with:
           fetch-depth: 0  # Full history needed for incremental mode
 
+      - name: Initialize build stamp/token
+        shell: pwsh
+        run: |
+          . ./scripts/litho-build-helpers.ps1
+          $stamp = Set-LithoBuildStamp -ExportToGitHubEnv
+          Write-Host "Build token: $($stamp.BuildToken)"
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
@@ -40,6 +47,10 @@ jobs:
 
       - name: Build litho-generator
         run: cargo build --release -p litho-generator
+
+      - name: Verify generator build token
+        shell: pwsh
+        run: pwsh -NoProfile -File scripts/verify-build-tokens.ps1 -BinaryPaths @("target/release/litho-generator.exe")
 
       - name: Generate documentation (full on push, incremental on PR)
         run: |
