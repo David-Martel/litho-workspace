@@ -5359,6 +5359,7 @@ dependencies = [
  "futures",
  "http 1.4.0",
  "libc",
+ "litho-core",
  "pulldown-cmark",
  "reqwest",
  "serde",
@@ -5473,7 +5474,9 @@ name = "litho-qmd-cli"
 version = "2.0.0-alpha.1"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
+ "litho-core",
  "litho-qmd-core",
  "litho-qmd-llm",
  "litho-qmd-storage",
@@ -5506,7 +5509,9 @@ name = "litho-qmd-mcp"
 version = "2.0.0-alpha.1"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
+ "litho-core",
  "litho-qmd-core",
  "litho-qmd-llm",
  "litho-qmd-storage",

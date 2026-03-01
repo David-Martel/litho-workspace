@@ -11,7 +11,11 @@ use std::io::{self, BufReader};
 type AppService = QmdService<PostgresQmdStore, AdaptiveLlmEngine>;
 
 #[derive(Debug, Parser)]
-#[command(name = "litho-qmd-mcp", version, about = "Rust-native QMD MCP server")]
+#[command(
+    name = "litho-qmd-mcp",
+    version = env!("LITHO_BUILD_VERSION"),
+    about = "Rust-native QMD MCP server"
+)]
 struct Cli {
     #[arg(
         long,
@@ -65,6 +69,10 @@ enum DispatchOutcome {
 }
 
 fn main() -> anyhow::Result<()> {
+    if let Err(msg) = litho_core::build_info::assert_expected_token_sync() {
+        anyhow::bail!("Build token sync check failed: {msg}");
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter("warn")
         .without_time()
@@ -778,5 +786,18 @@ mod tests {
         let err_wrong_type =
             parse_string(&json!({ "file": 123 }), "file").expect_err("non-string should fail");
         assert_eq!(err_wrong_type.code, -32602);
+    }
+
+    #[test]
+    fn build_token_matches_pipeline_when_expected_is_set() {
+        if let Ok(expected) = std::env::var("LITHO_EXPECT_BUILD_TOKEN")
+            && !expected.trim().is_empty()
+        {
+            let actual = option_env!("LITHO_BUILD_TOKEN").unwrap_or("unknown-token");
+            assert_eq!(
+                actual, expected,
+                "compiled build token differs from LITHO_EXPECT_BUILD_TOKEN"
+            );
+        }
     }
 }

@@ -4,12 +4,14 @@ version.workspace = true
 edition.workspace = true
 description = "Web documentation reader for Litho-generated architecture docs"
 license = "MIT"
+build = "build.rs"
 
 [[bin]]
 name = "litho-book"
 path = "src/main.rs"
 
 [dependencies]
+litho-core = { workspace = true }
 clap = { workspace = true }
 axum = "0.8.4"
 tokio = { workspace = true }
@@ -33,3 +35,6 @@ libc = "0.2"
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
 http = "1"
+
+[build-dependencies]
+chrono = { workspace = true }

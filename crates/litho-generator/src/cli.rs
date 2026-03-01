@@ -10,7 +10,7 @@ use std::path::PathBuf;
     about = "AI-based high-performance generation engine for documentation, It can intelligently analyze project structures, identify core modules, and generate professional architecture documentation."
 )]
 #[command(author = "Sopaco")]
-#[command(version)]
+#[command(version = env!("LITHO_BUILD_VERSION"))]
 pub struct Args {
     #[command(subcommand)]
     pub command: Option<Commands>,

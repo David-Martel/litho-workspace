@@ -27,7 +27,7 @@ use std::path::PathBuf;
 #[derive(Debug, Parser)]
 #[command(
     name = "litho",
-    version,
+    version = env!("LITHO_BUILD_VERSION"),
     about = "Extract and document code with litho",
     long_about = None
 )]
@@ -164,6 +164,9 @@ struct ValidateArgs {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     litho_core::env::LithoEnv::load();
+    if let Err(msg) = litho_core::build_info::assert_expected_token_sync() {
+        anyhow::bail!("Build token sync check failed: {msg}");
+    }
     let cli = Cli::parse();
 
     match cli.command {
@@ -593,4 +596,20 @@ fn find_backtick_paths(line: &str) -> Vec<String> {
     }
 
     paths
+}
+
+#[cfg(test)]
+mod build_token_tests {
+    #[test]
+    fn token_matches_pipeline_when_expected_is_set() {
+        if let Ok(expected) = std::env::var("LITHO_EXPECT_BUILD_TOKEN")
+            && !expected.trim().is_empty()
+        {
+            let actual = option_env!("LITHO_BUILD_TOKEN").unwrap_or("unknown-token");
+            assert_eq!(
+                actual, expected,
+                "compiled build token differs from LITHO_EXPECT_BUILD_TOKEN"
+            );
+        }
+    }
 }

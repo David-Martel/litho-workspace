@@ -2,6 +2,7 @@
 name = "litho-cli"
 version.workspace = true
 edition.workspace = true
+build = "build.rs"
 
 [[bin]]
 name = "litho"
@@ -17,3 +18,6 @@ serde_json = { workspace = true }
 serde = { workspace = true }
 anyhow = { workspace = true }
 chrono = { version = "0.4", features = ["serde"] }
+
+[build-dependencies]
+chrono = { workspace = true }

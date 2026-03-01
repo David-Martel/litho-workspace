@@ -14,7 +14,11 @@ use std::process::Command;
 type AppService = QmdService<PostgresQmdStore, AdaptiveLlmEngine>;
 
 #[derive(Debug, Parser)]
-#[command(name = "qmd", version, about = "Pure Rust QMD CLI")]
+#[command(
+    name = "qmd",
+    version = env!("LITHO_BUILD_VERSION"),
+    about = "Pure Rust QMD CLI"
+)]
 struct Cli {
     #[arg(
         long,
@@ -168,6 +172,10 @@ enum CollectionSubcommand {
 }
 
 fn main() -> anyhow::Result<()> {
+    if let Err(msg) = litho_core::build_info::assert_expected_token_sync() {
+        bail!("Build token sync check failed: {msg}");
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter("warn")
         .without_time()
@@ -928,5 +936,18 @@ mod tests {
             report.missing_top_paths.get("docs"),
             Some(&vec!["guides".to_string()])
         );
+    }
+
+    #[test]
+    fn build_token_matches_pipeline_when_expected_is_set() {
+        if let Ok(expected) = std::env::var("LITHO_EXPECT_BUILD_TOKEN")
+            && !expected.trim().is_empty()
+        {
+            let actual = option_env!("LITHO_BUILD_TOKEN").unwrap_or("unknown-token");
+            assert_eq!(
+                actual, expected,
+                "compiled build token differs from LITHO_EXPECT_BUILD_TOKEN"
+            );
+        }
     }
 }

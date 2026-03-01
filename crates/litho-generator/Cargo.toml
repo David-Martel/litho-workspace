@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 description = "Legacy rig-based documentation generation pipeline (deepwiki-rs)"
 license = "MIT"
+build = "build.rs"
 
 [[bin]]
 name = "litho-generator"
@@ -16,6 +17,9 @@ path = "src/lib.rs"
 [dev-dependencies]
 tempfile = { workspace = true }
 criterion = { workspace = true }
+
+[build-dependencies]
+chrono = { workspace = true }
 
 [[bench]]
 name = "quality_benchmarks"

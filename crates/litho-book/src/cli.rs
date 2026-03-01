@@ -4,7 +4,7 @@ use std::path::PathBuf;
 #[derive(Parser, Debug)]
 #[command(name = "litho-book")]
 #[command(about = "A web-based reader for litho-generated documentation")]
-#[command(version)]
+#[command(version = env!("LITHO_BUILD_VERSION"))]
 pub struct Args {
     /// Path to the markdown documentation directory
     #[arg(short, long, value_name = "DIR")]

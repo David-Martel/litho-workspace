@@ -15,6 +15,10 @@ mod utils;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    if let Err(msg) = litho_core::build_info::assert_expected_token_sync() {
+        anyhow::bail!("Build token sync check failed: {msg}");
+    }
+
     let args = cli::Args::parse();
 
     // Handle subcommands
@@ -75,4 +79,20 @@ async fn sync_knowledge(config_path: Option<std::path::PathBuf>, force: bool) ->
     syncer.sync_all().await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod build_token_tests {
+    #[test]
+    fn token_matches_pipeline_when_expected_is_set() {
+        if let Ok(expected) = std::env::var("LITHO_EXPECT_BUILD_TOKEN")
+            && !expected.trim().is_empty()
+        {
+            let actual = option_env!("LITHO_BUILD_TOKEN").unwrap_or("unknown-token");
+            assert_eq!(
+                actual, expected,
+                "compiled build token differs from LITHO_EXPECT_BUILD_TOKEN"
+            );
+        }
+    }
 }

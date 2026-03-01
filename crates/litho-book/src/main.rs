@@ -10,6 +10,10 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    if let Err(msg) = litho_core::build_info::assert_expected_token_sync() {
+        anyhow::bail!("Build token sync check failed: {msg}");
+    }
+
     // Parse command line arguments
     let args = cli::Args::parse();
 
@@ -117,7 +121,7 @@ fn init_logging(verbose: bool) {
 fn print_banner() {
     println!();
     println!("📚 Litho Book - Documentation Reader");
-    println!("   Version: {}", env!("CARGO_PKG_VERSION"));
+    println!("   Version: {}", env!("LITHO_BUILD_VERSION"));
     println!("   A web-based reader for litho-generated documentation");
     println!();
 }
@@ -156,4 +160,20 @@ fn open_browser(url: &str) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod build_token_tests {
+    #[test]
+    fn token_matches_pipeline_when_expected_is_set() {
+        if let Ok(expected) = std::env::var("LITHO_EXPECT_BUILD_TOKEN")
+            && !expected.trim().is_empty()
+        {
+            let actual = option_env!("LITHO_BUILD_TOKEN").unwrap_or("unknown-token");
+            assert_eq!(
+                actual, expected,
+                "compiled build token differs from LITHO_EXPECT_BUILD_TOKEN"
+            );
+        }
+    }
 }
