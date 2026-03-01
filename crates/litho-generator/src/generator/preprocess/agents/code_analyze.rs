@@ -48,7 +48,7 @@ impl CodeAnalyze {
     pub async fn execute(
         &self,
         context: &GeneratorContext,
-        codes: &Vec<CodeDossier>,
+        codes: &[CodeDossier],
         project_structure: &ProjectStructure,
     ) -> Result<Vec<CodeInsight>> {
         let max_parallels = context.config.llm.max_parallels;
@@ -57,21 +57,36 @@ impl CodeAnalyze {
         let min_batch_files = context.config.preprocessing.min_batch_files;
 
         // Phase 0: Content-hash cache warming — skip files whose source hasn't changed
+        let cache_probe_futures: Vec<_> = codes
+            .iter()
+            .map(|code| {
+                let code = code.clone();
+                let context_clone = context.clone();
+                async move {
+                    let content_hash = CacheManager::content_hash(&code.source_summary);
+                    let cached = context_clone
+                        .cache_manager
+                        .read()
+                        .await
+                        .get_by_content_hash::<CodeInsight>(
+                            CONTENT_HASH_CACHE_CATEGORY,
+                            &content_hash,
+                        )
+                        .await?;
+                    Result::<(CodeDossier, Option<CodeInsight>)>::Ok((code, cached))
+                }
+            })
+            .collect();
+        let cache_probe_results = do_parallel_with_limit(cache_probe_futures, max_parallels).await;
+
         let mut cached_insights: Vec<CodeInsight> = Vec::new();
         let mut uncached_codes: Vec<CodeDossier> = Vec::new();
-
-        for code in codes {
-            let content_hash = CacheManager::content_hash(&code.source_summary);
-            if let Some(cached) = context
-                .cache_manager
-                .read()
-                .await
-                .get_by_content_hash::<CodeInsight>(CONTENT_HASH_CACHE_CATEGORY, &content_hash)
-                .await?
-            {
+        for probe_result in cache_probe_results {
+            let (code, cached) = probe_result?;
+            if let Some(cached) = cached {
                 cached_insights.push(cached);
             } else {
-                uncached_codes.push(code.clone());
+                uncached_codes.push(code);
             }
         }
 
@@ -93,11 +108,27 @@ impl CodeAnalyze {
         }
 
         // Phase 1: Run static analysis for uncached files (no LLM calls, fast)
+        let static_analysis_futures: Vec<_> = uncached_codes
+            .iter()
+            .map(|code| {
+                let code = code.clone();
+                let language_processor = self.language_processor.clone();
+                let project_structure_clone = project_structure.clone();
+                async move {
+                    let code_analyze = CodeAnalyze { language_processor };
+                    let analysis = code_analyze
+                        .analyze_code_by_rules(&code, &project_structure_clone)
+                        .await?;
+                    Result::<(CodeDossier, CodeInsight)>::Ok((code, analysis))
+                }
+            })
+            .collect();
+        let static_analysis_results =
+            do_parallel_with_limit(static_analysis_futures, max_parallels).await;
         let mut static_analyses: Vec<(CodeDossier, CodeInsight)> =
             Vec::with_capacity(uncached_codes.len());
-        for code in &uncached_codes {
-            let analysis = self.analyze_code_by_rules(code, project_structure).await?;
-            static_analyses.push((code.clone(), analysis));
+        for analysis_result in static_analysis_results {
+            static_analyses.push(analysis_result?);
         }
 
         // Phase 2: Partition into batchable (small) and individual (large) files
@@ -204,26 +235,11 @@ impl CodeAnalyze {
         let results = do_parallel_with_limit(all_futures, max_parallels).await;
 
         // Phase 6: Flatten results and store in content-hash cache
-        let mut code_insights = Vec::new();
+        let mut fresh_insights = Vec::new();
         for result in results {
             match result {
                 Ok(insights) => {
-                    for insight in insights {
-                        // Store each insight in the content-hash cache for future runs
-                        let content_hash =
-                            CacheManager::content_hash(&insight.code_dossier.source_summary);
-                        let _ = context
-                            .cache_manager
-                            .write()
-                            .await
-                            .set_by_content_hash(
-                                CONTENT_HASH_CACHE_CATEGORY,
-                                &content_hash,
-                                &insight,
-                            )
-                            .await;
-                        code_insights.push(insight);
-                    }
+                    fresh_insights.extend(insights);
                 }
                 Err(e) => {
                     eprintln!("\u{274c} Code analysis failed: {}", e);
@@ -231,6 +247,26 @@ impl CodeAnalyze {
                 }
             }
         }
+
+        // Store fresh insights in content-hash cache using bounded parallel writes.
+        let cache_store_futures: Vec<_> = fresh_insights
+            .into_iter()
+            .map(|insight| {
+                let context_clone = context.clone();
+                async move {
+                    let content_hash =
+                        CacheManager::content_hash(&insight.code_dossier.source_summary);
+                    let _ = context_clone
+                        .cache_manager
+                        .read()
+                        .await
+                        .set_by_content_hash(CONTENT_HASH_CACHE_CATEGORY, &content_hash, &insight)
+                        .await;
+                    insight
+                }
+            })
+            .collect();
+        let mut code_insights = do_parallel_with_limit(cache_store_futures, max_parallels).await;
 
         // Combine cached + freshly analyzed insights
         code_insights.extend(cached_insights);

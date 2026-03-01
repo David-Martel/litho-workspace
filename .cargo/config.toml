@@ -2,15 +2,21 @@
 #
 # Inherits from ~/.cargo/config.toml (global) which provides:
 #   - sccache wrapper, T:\RustCache target-dir, CARGO_INCREMENTAL=0
-#   - jobs=2, sparse registry, net retry, profile overrides
+#   - sparse registry, net retry
 #
 # This file provides workspace-specific overrides only.
+#
+# MEMORY NOTE: rust-lld is removed from dev builds to prevent linker OOM on
+# large test binaries (litho-extract, codex-tui). Default MSVC link.exe
+# handles memory pressure much better. For release builds, set:
+#   CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=rust-lld.exe cargo build --release
 
 [build]
 rustc-wrapper = "sccache"
+jobs = 2  # Cap parallel compile jobs to reduce peak memory
 
 [target.x86_64-pc-windows-msvc]
-linker = "rust-lld.exe"
+# No linker override — uses default MSVC link.exe (lower memory than rust-lld)
 rustflags = [
     "-C", "target-cpu=native",
 ]
@@ -20,6 +26,13 @@ split-debuginfo = "packed"
 codegen-units = 256
 # codex-tui OOM prevention: many small compilation units
 # CARGO_INCREMENTAL must stay 0 (global config) for sccache compatibility
+
+# Reduce memory pressure from dependencies in dev/test builds:
+# - line-tables-only debug info cuts ~40% of debug section size
+# - High codegen-units = smaller per-unit memory during compilation
+[profile.dev.package."*"]
+debug = "line-tables-only"
+codegen-units = 256
 
 [profile.release]
 split-debuginfo = "packed"
