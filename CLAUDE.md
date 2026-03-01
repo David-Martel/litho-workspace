@@ -25,6 +25,11 @@ cargo nextest run --workspace --no-fail-fast
   --llm-api-base-url http://localhost:11434/v1 --llm-api-key ollama \
   --model-efficient qwen2.5-coder:7b --model-powerful qwen2.5-coder:7b
 
+# Iterative bootstrap loop (full + incremental reruns + captured artifacts)
+pwsh -NoProfile -File scripts/litho-doc-bootstrap.ps1 \
+  -ProjectPath . -OutputPath .\litho.docs -ConfigPath .\litho.toml \
+  -Iterations 3 -IncrementalAfterFirst
+
 # Serve generated docs
 ./target/release/litho-book.exe --docs-dir ./litho.docs --port 3333
 
@@ -124,6 +129,10 @@ The `.cargo/config.toml` enforces `target-dir = "target"`.
 ## Development Plans
 
 Active plan: `docs/plans/2026-02-27-litho-v2-development-plan.md`
+
+Readiness and iterative bootstrap references:
+- `docs/plans/2026-02-28-litho-readiness-matrix.md`
+- `docs/plans/2026-02-28-litho-generator-iterative-bootstrap.md`
 
 Phase 1: Foundation & Robustness (codex-rs fallback, failure recovery, tests)
 Phase 2: AST-Driven Intelligence (pattern detection, language expansion)
