@@ -1,0 +1,29 @@
+project_name = "litho-workspace"
+root = "C:/codedev/litho-workspace"
+language_stack = ["Rust", "PowerShell", "TypeScript", "Python"]
+source_root = "crates"
+tests_root = "tests"
+last_audited = "2026-03-03"
+
+[commands]
+build = "cargo build --workspace"
+build_release = "cargo build --workspace --release"
+test = "cargo nextest run --workspace --no-fail-fast"
+lint = "cargo clippy --workspace --all-targets -- -D warnings"
+security = "cargo deny check && cargo audit"
+
+[defaults]
+use_powershell = true
+prefer_nextest = true
+strict_format = true
+
+[skills]
+primary = ["rust-async-tokio", "git-cluster-analyzer"]
+optional = ["rust-wasm-ui", "security-best-practices", "rust-serial-networking"]
+notes = "Enable only skills relevant to current workstream."
+
+[tools]
+commit_cluster_skill = ".codex/skills/git-cluster-analyzer.md"
+commit_cluster_tools = ".codex/tools/git-commit-cluster.md"
+commit_cluster_propose_script = ".codex/tools/git-commit-cluster.ps1"
+commit_cluster_doctor_script = ".codex/tools/git-cluster-doctor.ps1"
