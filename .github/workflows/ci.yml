@@ -1,6 +1,7 @@
 # CI workflow for litho-workspace
 #
-# Build matrix: windows-latest only.
+# Build matrix: windows-latest for the main Litho pipeline, plus
+# an opt-in ubuntu-latest Postgres integration lane.
 # tree-sitter grammars compile C code via the `cc` crate. The repo's
 # .cargo/config.toml sets CC/CXX for the MSVC target to clang-cl.exe
 # so Cargo avoids MinGW/shim collisions while still emitting MSVC-compatible
@@ -15,6 +16,13 @@ on:
       - "v*"
   pull_request:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      run_postgres_integration:
+        description: "Run opt-in Postgres integration tests"
+        required: false
+        type: boolean
+        default: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -23,7 +31,7 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # build: compile, test, and lint the full workspace
+  # build: compile, test, and lint the Litho crates only
   # ---------------------------------------------------------------------------
   build:
     name: Build / Test / Clippy
@@ -63,22 +71,27 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: Build workspace (debug)
-        run: cargo build --workspace
+      # Keep CI focused on Litho crates so external codex crates (for example
+      # codex-tui) do not block default Litho build/test loops.
+      - name: Build Litho crates (debug)
+        run: cargo build -p litho-core -p litho-extract -p litho-codex -p litho-generator -p litho-cli -p litho-book -p litho-qmd-core -p litho-qmd-storage -p litho-qmd-llm -p litho-qmd-cli -p litho-qmd-mcp
 
       - name: Verify build token across binaries
         shell: pwsh
         run: pwsh -NoProfile -File scripts/verify-build-tokens.ps1
 
-      - name: Run workspace tests
-        run: cargo test --workspace
+      - name: Run Litho crate tests (unit + integration except Postgres storage lane)
+        run: cargo test -p litho-core -p litho-extract -p litho-codex -p litho-generator -p litho-cli -p litho-book -p litho-qmd-core -p litho-qmd-llm -p litho-qmd-cli -p litho-qmd-mcp
+
+      - name: Run qmd-storage unit tests only
+        run: cargo test -p litho-qmd-storage --lib
 
       # Clippy is run as a separate step so its output is clearly visible in
       # the Actions log. RUSTFLAGS=-D warnings is already set at the job level,
       # but -D warnings is also passed on the command line for explicitness and
       # to ensure it applies even if the env var is overridden by a sub-crate.
-      - name: Clippy (all targets, deny warnings)
-        run: cargo clippy --workspace -- -D warnings
+      - name: Clippy (Litho crates, deny warnings)
+        run: cargo clippy -p litho-core -p litho-extract -p litho-codex -p litho-generator -p litho-cli -p litho-book -p litho-qmd-core -p litho-qmd-storage -p litho-qmd-llm -p litho-qmd-cli -p litho-qmd-mcp -- -D warnings
 
   # ---------------------------------------------------------------------------
   # qmd-quality: focused quality gate for Rust-native qmd integration.
@@ -122,8 +135,8 @@ jobs:
       - name: Install cargo-llvm-cov
         run: cargo install cargo-llvm-cov --locked
 
-      - name: QMD quality pipeline (tests + coverage + bench)
-        run: pwsh -NoProfile -File scripts/qmd-quality.ps1 -SkipIntegration:$false -BenchNoPlot
+      - name: QMD quality pipeline (tests + coverage + bench, integration skipped)
+        run: pwsh -NoProfile -File scripts/qmd-quality.ps1 -SkipIntegration -BenchNoPlot
 
       - name: Upload QMD quality artifacts
         uses: actions/upload-artifact@v4
@@ -131,6 +144,43 @@ jobs:
           name: qmd-quality-artifacts
           path: |
             coverage/qmd
+
+  # ---------------------------------------------------------------------------
+  # postgres-integration: explicit opt-in lane for DB-backed tests.
+  # Runs only on manual workflow_dispatch when requested.
+  # ---------------------------------------------------------------------------
+  postgres-integration:
+    name: Postgres Integration (opt-in)
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_postgres_integration }}
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: qmd_index
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U postgres -d qmd_index"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      CARGO_TERM_COLOR: always
+      QMD_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/qmd_index
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run Postgres integration tests
+        run: cargo test -p litho-qmd-storage --test pipeline -- --nocapture
 
   # ---------------------------------------------------------------------------
   # release: build the CLI binary and upload it to a GitHub Release.

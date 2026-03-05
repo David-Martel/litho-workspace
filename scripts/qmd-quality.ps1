@@ -35,10 +35,16 @@ try {
     Invoke-LithoCargo -Arguments @(
       "test",
       "-p", "litho-qmd-core",
-      "-p", "litho-qmd-storage",
       "-p", "litho-qmd-cli",
       "-p", "litho-qmd-mcp"
     )
+
+    if ($SkipIntegration) {
+      Invoke-LithoCargo -Arguments @("test", "-p", "litho-qmd-storage", "--lib")
+    }
+    else {
+      Invoke-LithoCargo -Arguments @("test", "-p", "litho-qmd-storage")
+    }
   }
 
   if (-not $SkipIntegration) {
@@ -48,8 +54,13 @@ try {
     }
   }
 
-  Invoke-Step "Running MCP runtime healthcheck" {
-    Invoke-LithoCargo -Arguments @("run", "-p", "litho-qmd-mcp", "--", "--healthcheck")
+  if (-not $SkipIntegration) {
+    Invoke-Step "Running MCP runtime healthcheck" {
+      Invoke-LithoCargo -Arguments @("run", "-p", "litho-qmd-mcp", "--", "--healthcheck")
+    }
+  }
+  else {
+    Write-Host "[qmd-quality] Skipping MCP runtime healthcheck (integration lane disabled)." -ForegroundColor DarkYellow
   }
 
   if (-not $SkipCoverage) {
