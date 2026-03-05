@@ -18,6 +18,10 @@
     Use Cranelift codegen backend (nightly toolchain required).
     Produces slower code but uses 30-60% less memory during compilation.
 
+.PARAMETER IncludeCodexTui
+    Include codex-tui in the serialized binary tier.
+    By default codex-tui is excluded from the Litho development build loop.
+
 .PARAMETER LibJobs
     Parallelism for library tier (default: 2).
 
@@ -34,6 +38,7 @@
 param(
     [switch]$Release,
     [switch]$Cranelift,
+    [switch]$IncludeCodexTui,
     [switch]$SkipBinaries,
     [switch]$PreferDynamic,
     [int]$LibJobs = 2,
@@ -82,29 +87,28 @@ try {
         }
     }
 
-    # Phase 1: All libraries in parallel — safe, low memory
+    # Phase 1: Litho libraries in parallel — safe, low memory
     Invoke-CargoTier "Libraries" @(
-        "--workspace",
-        "--exclude", "codex-tui",
-        "--exclude", "litho-generator",
-        "--exclude", "litho-book",
-        "--exclude", "litho-cli",
-        "--exclude", "litho-qmd-cli",
-        "--exclude", "litho-qmd-mcp",
-        "--exclude", "codex-exec-server",
-        "--exclude", "codex-app-server"
+        "-p", "litho-core",
+        "-p", "litho-extract",
+        "-p", "litho-codex",
+        "-p", "litho-qmd-core",
+        "-p", "litho-qmd-storage",
+        "-p", "litho-qmd-llm"
     ) -Jobs $LibJobs
 
     if (-not $SkipBinaries) {
         # Phase 2: Large binaries one at a time — prevents linker OOM
         $binaries = @(
-            "codex-tui",
             "litho-generator",
             "litho-book",
             "litho-cli",
             "litho-qmd-cli",
             "litho-qmd-mcp"
         )
+        if ($IncludeCodexTui) {
+            $binaries = @("codex-tui") + $binaries
+        }
         foreach ($crate in $binaries) {
             Invoke-CargoTier "Binary: $crate" @("-p", $crate) -Jobs $BinJobs
         }

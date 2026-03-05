@@ -6,10 +6,10 @@ tests_root = "tests"
 last_audited = "2026-03-03"
 
 [commands]
-build = "cargo build --workspace"
-build_release = "cargo build --workspace --release"
-test = "cargo nextest run --workspace --no-fail-fast"
-lint = "cargo clippy --workspace --all-targets -- -D warnings"
+build = "cargo build"
+build_release = "cargo build --release"
+test = "cargo nextest run --no-fail-fast"
+lint = "cargo clippy --all-targets -- -D warnings"
 security = "cargo deny check && cargo audit"
 
 [defaults]

@@ -61,6 +61,19 @@ members = [
     "external/codex-rs/codex-rs/utils/string",
     "external/codex-rs/codex-rs/windows-sandbox-rs",
 ]
+default-members = [
+    "crates/litho-core",
+    "crates/litho-extract",
+    "crates/litho-codex",
+    "crates/litho-generator",
+    "crates/litho-cli",
+    "crates/litho-book",
+    "crates/litho-qmd-core",
+    "crates/litho-qmd-storage",
+    "crates/litho-qmd-llm",
+    "crates/litho-qmd-cli",
+    "crates/litho-qmd-mcp",
+]
 exclude = [
     "deepwiki-rs",
 ]

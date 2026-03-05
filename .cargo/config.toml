@@ -44,10 +44,10 @@ codegen-units = 16
 
 # Memory-safe workspace build: compile libs in parallel, serialize large binaries
 [alias]
-build-safe = """build --workspace \
-  --exclude codex-tui --exclude litho-generator --exclude litho-book \
-  --exclude litho-qmd-cli --exclude litho-qmd-mcp --exclude litho-cli \
-  --exclude codex-exec-server --exclude codex-app-server --jobs 2"""
+build-safe = """build \
+  -p litho-core -p litho-extract -p litho-codex \
+  -p litho-qmd-core -p litho-qmd-storage -p litho-qmd-llm \
+  --jobs 2"""
 build-tui = "build -p codex-tui --jobs 1"
 build-gen = "build -p litho-generator --jobs 1"
 test-safe = """nextest run -p litho-core -p litho-extract -p litho-generator --no-fail-fast"""
