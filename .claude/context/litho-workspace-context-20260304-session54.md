@@ -96,10 +96,16 @@ compatibility in codex-rs TUI, and a new QMD repo-local SQLite proposal doc.
 | (session work) | codex-rs pulldown-cmark compat | markdown_render.rs | Complete |
 | (session work) | qmd-storage test cleanup | pipeline.rs | Complete |
 
+## Post-Push Diagnostics Fixed
+
+- `tests/common/mod.rs`: Added 4 missing `LLMConfig` fields (ollama_auto_detect_models,
+  ollama_required_models, ollama_auto_pull_missing_models, ollama_warm_models_on_start)
+- `config.rs:308`: `resolve_context_window()` dead_code warning — method exists but
+  `ollama_native.rs` duplicates the logic inline. Low priority to wire up.
+- `codex-rs core/tests`: `unused_unsafe` — vendored code, tracked by vendor-codex-verify CI
+
 ## Recommended Next Actions
 
-1. **Commit & push** — 14 modified + 2 new files ready for semantic clustering
-2. **Run tests** — Verify 786 tests still pass after changes
-3. **Build release** — Confirm tiered build works with new scope
-4. **SQLite backend** — Begin implementing `SqliteQmdStore` per proposal doc
-5. **Incremental hardening** — Wire manifest population during normal runs
+1. **SQLite backend** — Begin implementing `SqliteQmdStore` per proposal doc
+2. **Incremental hardening** — Wire manifest population during normal runs
+3. **Wire `resolve_context_window()`** — Replace inline logic in ollama_native.rs

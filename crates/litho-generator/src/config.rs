@@ -212,6 +212,24 @@ pub struct LLMConfig {
     /// Gemma3 12B-IT-QAT supports up to 131072.
     #[serde(default = "default_context_window")]
     pub context_window: u32,
+
+    /// Enable local model auto-detection for Ollama (`/api/tags`).
+    /// When true, missing configured models are mapped to the nearest local match.
+    #[serde(default = "default_true")]
+    pub ollama_auto_detect_models: bool,
+
+    /// Additional Ollama models that should be present locally for quality gates
+    /// or provider fallbacks.
+    #[serde(default)]
+    pub ollama_required_models: Vec<String>,
+
+    /// If true, missing models are pulled via `POST /api/pull` before execution.
+    #[serde(default)]
+    pub ollama_auto_pull_missing_models: bool,
+
+    /// If true, run a lightweight warmup request per active model at startup.
+    #[serde(default)]
+    pub ollama_warm_models_on_start: bool,
 }
 
 fn default_context_window() -> u32 {
@@ -1044,7 +1062,36 @@ impl Default for LLMConfig {
                 .ok()
                 .and_then(|s| s.parse::<u32>().ok())
                 .unwrap_or_else(default_context_window),
+            ollama_auto_detect_models: std::env::var("LITHO_OLLAMA_AUTO_DETECT_MODELS")
+                .ok()
+                .and_then(|s| parse_bool_str(&s))
+                .unwrap_or(true),
+            ollama_required_models: std::env::var("LITHO_OLLAMA_REQUIRED_MODELS")
+                .ok()
+                .map(|s| {
+                    s.split(',')
+                        .map(|v| v.trim().to_string())
+                        .filter(|v| !v.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default(),
+            ollama_auto_pull_missing_models: std::env::var("LITHO_OLLAMA_AUTO_PULL_MISSING")
+                .ok()
+                .and_then(|s| parse_bool_str(&s))
+                .unwrap_or(false),
+            ollama_warm_models_on_start: std::env::var("LITHO_OLLAMA_WARM_MODELS")
+                .ok()
+                .and_then(|s| parse_bool_str(&s))
+                .unwrap_or(false),
         }
+    }
+}
+
+fn parse_bool_str(value: &str) -> Option<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
     }
 }
 
@@ -1564,5 +1611,44 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(config.resolve_context_window(), 131_072);
+    }
+
+    #[test]
+    fn parse_bool_str_accepts_common_values() {
+        assert_eq!(parse_bool_str("true"), Some(true));
+        assert_eq!(parse_bool_str("1"), Some(true));
+        assert_eq!(parse_bool_str("yes"), Some(true));
+        assert_eq!(parse_bool_str("on"), Some(true));
+        assert_eq!(parse_bool_str("false"), Some(false));
+        assert_eq!(parse_bool_str("0"), Some(false));
+        assert_eq!(parse_bool_str("no"), Some(false));
+        assert_eq!(parse_bool_str("off"), Some(false));
+    }
+
+    #[test]
+    fn parse_bool_str_rejects_unknown_values() {
+        assert_eq!(parse_bool_str(""), None);
+        assert_eq!(parse_bool_str("maybe"), None);
+        assert_eq!(parse_bool_str("truthy"), None);
+    }
+
+    #[test]
+    fn llm_config_ollama_runtime_fields_deserialize() {
+        let text = r#"
+provider = "ollama"
+ollama_auto_detect_models = false
+ollama_required_models = ["gemma3:12b", "qwen2.5-coder:7b"]
+ollama_auto_pull_missing_models = true
+ollama_warm_models_on_start = true
+"#;
+
+        let parsed: LLMConfig = toml::from_str(text).expect("llm config TOML should parse");
+        assert!(!parsed.ollama_auto_detect_models);
+        assert_eq!(
+            parsed.ollama_required_models,
+            vec!["gemma3:12b".to_string(), "qwen2.5-coder:7b".to_string()]
+        );
+        assert!(parsed.ollama_auto_pull_missing_models);
+        assert!(parsed.ollama_warm_models_on_start);
     }
 }

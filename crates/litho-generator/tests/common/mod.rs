@@ -29,6 +29,10 @@ pub fn test_llm_config() -> LLMConfig {
         codex_binary_path: None,
         codex_as_fallback: false,
         context_window: 32768,
+        ollama_auto_detect_models: false,
+        ollama_required_models: vec![],
+        ollama_auto_pull_missing_models: false,
+        ollama_warm_models_on_start: false,
     }
 }
 

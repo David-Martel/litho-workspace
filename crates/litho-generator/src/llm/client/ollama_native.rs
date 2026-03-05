@@ -18,7 +18,10 @@ use regex::Regex;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::sync::LazyLock;
+use std::collections::HashSet;
+use std::sync::{Arc, LazyLock};
+use std::time::Duration;
+use tokio::sync::RwLock;
 
 use crate::{config::LLMConfig, llm::serde_helpers::unwrap_envelope};
 
@@ -35,6 +38,9 @@ static JSON_CODE_BLOCK_RE: LazyLock<Regex> =
 #[derive(Clone)]
 pub struct OllamaNativeClient {
     inner: Ollama,
+    base_url: String,
+    http: reqwest::Client,
+    local_models_cache: Arc<RwLock<Vec<String>>>,
 }
 
 impl OllamaNativeClient {
@@ -52,9 +58,20 @@ impl OllamaNativeClient {
             url.host_str().unwrap_or("localhost")
         );
         let port = url.port().unwrap_or(11434);
+        let base_url = format!("{}:{}", host, port);
 
         let ollama = Ollama::new(host, port);
-        Ok(Self { inner: ollama })
+        let http = reqwest::Client::builder()
+            .timeout(Duration::from_secs(config.timeout_seconds.clamp(5, 900)))
+            .build()
+            .context("Failed to build Ollama metadata HTTP client")?;
+
+        Ok(Self {
+            inner: ollama,
+            base_url,
+            http,
+            local_models_cache: Arc::new(RwLock::new(Vec::new())),
+        })
     }
 
     // -- simple chat (no tools) ---------------------------------------------
@@ -67,13 +84,15 @@ impl OllamaNativeClient {
         user_prompt: &str,
         config: &LLMConfig,
     ) -> Result<String> {
+        let resolved_model = self.ensure_model_available(model, config).await?;
+
         let mut messages = Vec::with_capacity(2);
         if !system_prompt.is_empty() {
             messages.push(ChatMessage::system(system_prompt.to_string()));
         }
         messages.push(ChatMessage::user(user_prompt.to_string()));
 
-        let mut request = ChatMessageRequest::new(model.to_string(), messages);
+        let mut request = ChatMessageRequest::new(resolved_model.clone(), messages);
 
         // Inject Ollama-native options via ModelOptions.
         let options = self.build_options(config);
@@ -102,6 +121,7 @@ impl OllamaNativeClient {
     where
         T: JsonSchema + Serialize + for<'de> Deserialize<'de>,
     {
+        let resolved_model = self.ensure_model_available(model, config).await?;
         let max_retries = config.retry_attempts.max(1);
         let mut last_error: Option<String> = None;
 
@@ -109,7 +129,13 @@ impl OllamaNativeClient {
             let enhanced = Self::build_extraction_prompt::<T>(user_prompt, last_error.as_deref());
 
             match self
-                .try_extract::<T>(model, system_prompt, &enhanced, config, attempt as usize)
+                .try_extract::<T>(
+                    &resolved_model,
+                    system_prompt,
+                    &enhanced,
+                    config,
+                    attempt as usize,
+                )
                 .await
             {
                 Ok(val) => return Ok(val),
@@ -129,17 +155,57 @@ impl OllamaNativeClient {
         ))
     }
 
+    /// Prepare runtime capabilities for Ollama before the main pipeline starts.
+    ///
+    /// - resolves configured models against local `/api/tags` inventory
+    /// - optionally pulls missing models
+    /// - optionally sends one-shot warmup calls
+    pub async fn prepare_runtime(&self, config: &LLMConfig) -> Result<()> {
+        let mut requested = vec![
+            config.model_efficient.clone(),
+            config.model_powerful.clone(),
+        ];
+        requested.extend(config.ollama_required_models.clone());
+        requested.retain(|v| !v.trim().is_empty());
+        requested = dedup_preserve_order(requested);
+
+        if requested.is_empty() {
+            let local = self.get_local_models().await.unwrap_or_default();
+            if local.is_empty() {
+                anyhow::bail!(
+                    "No Ollama models configured and no local models available via /api/tags"
+                );
+            }
+            return Ok(());
+        }
+
+        let mut resolved_models = Vec::new();
+        for model in requested {
+            let resolved = self.ensure_model_available(&model, config).await?;
+            resolved_models.push(resolved);
+        }
+        resolved_models = dedup_preserve_order(resolved_models);
+
+        if config.ollama_warm_models_on_start {
+            for model in resolved_models {
+                if let Err(err) = self.warm_model(&model, config).await {
+                    eprintln!(
+                        "⚠️  Ollama warmup failed for '{}': {} (continuing)",
+                        model, err
+                    );
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     // -- internals ----------------------------------------------------------
 
     fn build_options(&self, config: &LLMConfig) -> ollama_rs::models::ModelOptions {
         let mut opts = ollama_rs::models::ModelOptions::default();
 
-        // Context window – auto-detected from the model name when the user has
-        // not explicitly overridden `context_window` in litho.toml.
-        // Known large-context models (Gemma 3, Qwen 2.5, Llama 3, …) default to
-        // 131 072; unknown models fall back to 32 768.
-        let resolved_ctx = config.resolve_context_window();
-        opts = opts.num_ctx(resolved_ctx as u64);
+        opts = opts.num_ctx(config.resolve_context_window() as u64);
 
         // Generation limit.
         opts = opts.num_predict(config.max_tokens as i32);
@@ -208,11 +274,169 @@ impl OllamaNativeClient {
             format!("Deserialization failed (attempt {attempt}): {s}")
         })
     }
+
+    async fn ensure_model_available(&self, requested: &str, config: &LLMConfig) -> Result<String> {
+        let requested = requested.trim();
+        let local_models = self.get_local_models().await.unwrap_or_default();
+
+        if requested.is_empty() {
+            if let Some(best) = choose_best_local_model(&local_models, &[]) {
+                return Ok(best);
+            }
+            anyhow::bail!("No Ollama model provided and no local models available");
+        }
+
+        if let Some(found) = find_matching_local_model(&local_models, requested) {
+            return Ok(found.to_string());
+        }
+
+        if config.ollama_auto_pull_missing_models {
+            eprintln!("📥 Pulling missing Ollama model '{}'", requested);
+            self.pull_model(requested).await?;
+            let refreshed = self.refresh_local_models().await.unwrap_or_default();
+            if let Some(found) = find_matching_local_model(&refreshed, requested) {
+                return Ok(found.to_string());
+            }
+        }
+
+        if config.ollama_auto_detect_models {
+            let mut preferred = vec![
+                requested.to_string(),
+                config.model_efficient.clone(),
+                config.model_powerful.clone(),
+            ];
+            preferred.extend(config.ollama_required_models.clone());
+            preferred.retain(|m| !m.trim().is_empty());
+
+            if let Some(fallback) = choose_best_local_model(&local_models, &preferred) {
+                eprintln!(
+                    "ℹ️  Ollama model '{}' not found locally, using '{}' instead",
+                    requested, fallback
+                );
+                return Ok(fallback);
+            }
+        }
+
+        Ok(requested.to_string())
+    }
+
+    async fn warm_model(&self, model: &str, config: &LLMConfig) -> Result<()> {
+        let mut request = ChatMessageRequest::new(
+            model.to_string(),
+            vec![ChatMessage::user("ping".to_string())],
+        );
+        let options = ollama_rs::models::ModelOptions::default()
+            .num_ctx(2_048)
+            .num_predict(1)
+            .temperature(0.0);
+        request = request.options(options);
+
+        let timeout_secs = config.timeout_seconds.clamp(5, 120);
+        tokio::time::timeout(
+            Duration::from_secs(timeout_secs),
+            self.inner.send_chat_messages(request),
+        )
+        .await
+        .context("warmup timed out")?
+        .context("warmup request failed")?;
+        Ok(())
+    }
+
+    async fn pull_model(&self, model: &str) -> Result<()> {
+        let payload = serde_json::json!({
+            "name": model,
+            "stream": false
+        });
+        let endpoint = format!("{}/api/pull", self.base_url.trim_end_matches('/'));
+
+        let resp = self
+            .http
+            .post(&endpoint)
+            .json(&payload)
+            .send()
+            .await
+            .context("Failed to call Ollama /api/pull")?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("Ollama /api/pull failed ({}): {}", status, body);
+        }
+
+        Ok(())
+    }
+
+    async fn get_local_models(&self) -> Result<Vec<String>> {
+        {
+            let cache = self.local_models_cache.read().await;
+            if !cache.is_empty() {
+                return Ok(cache.clone());
+            }
+        }
+        self.refresh_local_models().await
+    }
+
+    async fn refresh_local_models(&self) -> Result<Vec<String>> {
+        let models = self.fetch_local_models().await?;
+        let mut cache = self.local_models_cache.write().await;
+        *cache = models.clone();
+        Ok(models)
+    }
+
+    async fn fetch_local_models(&self) -> Result<Vec<String>> {
+        let endpoint = format!("{}/api/tags", self.base_url.trim_end_matches('/'));
+        let resp = self
+            .http
+            .get(&endpoint)
+            .send()
+            .await
+            .context("Failed to call Ollama /api/tags")?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("Ollama /api/tags failed ({}): {}", status, body);
+        }
+
+        let tags: OllamaTagsResponse = resp
+            .json()
+            .await
+            .context("Failed to decode Ollama /api/tags response")?;
+
+        let mut names = Vec::new();
+        for model in tags.models {
+            if let Some(name) = model.name
+                && !name.trim().is_empty()
+            {
+                names.push(name);
+            }
+            if let Some(name) = model.model
+                && !name.trim().is_empty()
+            {
+                names.push(name);
+            }
+        }
+        Ok(dedup_preserve_order(names))
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Standalone JSON parsing helpers (shared with OllamaExtractorWrapper)
 // ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct OllamaTagsResponse {
+    #[serde(default)]
+    models: Vec<OllamaTagModel>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OllamaTagModel {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
+}
 
 /// 5-strategy JSON parse cascade.
 pub fn parse_json_response(response: &str, _attempt: usize) -> Result<Value> {
@@ -299,6 +523,76 @@ fn unwrap_schema_wrapper(json: Value) -> Value {
     json
 }
 
+fn dedup_preserve_order(items: Vec<String>) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    for item in items {
+        let key = item.trim().to_ascii_lowercase();
+        if key.is_empty() {
+            continue;
+        }
+        if seen.insert(key) {
+            out.push(item.trim().to_string());
+        }
+    }
+    out
+}
+
+fn choose_best_local_model(local_models: &[String], preferred: &[String]) -> Option<String> {
+    for candidate in preferred {
+        if let Some(found) = find_matching_local_model(local_models, candidate) {
+            return Some(found.to_string());
+        }
+    }
+
+    let ranked_keywords = [
+        "qwen2.5",
+        "qwen3",
+        "gemma3",
+        "gemma2",
+        "deepseek",
+        "llama3",
+        "llama",
+        "mistral",
+        "phi",
+        "codellama",
+    ];
+    for keyword in ranked_keywords {
+        if let Some(found) = local_models
+            .iter()
+            .find(|m| m.to_ascii_lowercase().contains(keyword))
+        {
+            return Some(found.to_string());
+        }
+    }
+
+    local_models.first().cloned()
+}
+
+fn find_matching_local_model<'a>(local_models: &'a [String], requested: &str) -> Option<&'a str> {
+    let requested = requested.trim();
+    if requested.is_empty() {
+        return None;
+    }
+
+    if let Some(found) = local_models
+        .iter()
+        .find(|m| m.eq_ignore_ascii_case(requested))
+    {
+        return Some(found.as_str());
+    }
+
+    let requested_base = requested.split(':').next().unwrap_or(requested);
+    if let Some(found) = local_models.iter().find(|m| {
+        let base = m.split(':').next().unwrap_or(m.as_str());
+        base.eq_ignore_ascii_case(requested_base)
+    }) {
+        return Some(found.as_str());
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -334,5 +628,52 @@ mod tests {
         });
         let unwrapped = unwrap_schema_wrapper(input);
         assert_eq!(unwrapped["name"], "David");
+    }
+
+    #[test]
+    fn match_local_model_exact_and_family() {
+        let local = vec![
+            "qwen2.5-coder:7b".to_string(),
+            "gemma3:12b".to_string(),
+            "llama3.1:8b".to_string(),
+        ];
+        assert_eq!(
+            find_matching_local_model(&local, "gemma3:12b"),
+            Some("gemma3:12b")
+        );
+        assert_eq!(
+            find_matching_local_model(&local, "gemma3"),
+            Some("gemma3:12b")
+        );
+        assert_eq!(
+            find_matching_local_model(&local, "qwen2.5-coder:14b"),
+            Some("qwen2.5-coder:7b")
+        );
+    }
+
+    #[test]
+    fn best_local_model_prefers_requested_then_ranked() {
+        let local = vec![
+            "mistral:7b".to_string(),
+            "qwen2.5-coder:7b".to_string(),
+            "llama3.1:8b".to_string(),
+        ];
+        let preferred = vec!["gemma3".to_string(), "qwen2.5-coder".to_string()];
+        let selected = choose_best_local_model(&local, &preferred);
+        assert_eq!(selected.as_deref(), Some("qwen2.5-coder:7b"));
+
+        let selected2 = choose_best_local_model(&local, &["nonexistent".to_string()]);
+        assert_eq!(selected2.as_deref(), Some("qwen2.5-coder:7b"));
+    }
+
+    #[test]
+    fn dedup_preserves_order_case_insensitive() {
+        let input = vec![
+            "qwen2.5-coder:7b".to_string(),
+            "QWEN2.5-CODER:7B".to_string(),
+            "gemma3:12b".to_string(),
+        ];
+        let out = dedup_preserve_order(input);
+        assert_eq!(out, vec!["qwen2.5-coder:7b", "gemma3:12b"]);
     }
 }

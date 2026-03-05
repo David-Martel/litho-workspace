@@ -4,7 +4,7 @@
 //! commit. Maps changed files to affected documentation agents using path-based heuristics.
 
 use anyhow::{Context, Result};
-use std::collections::HashSet;
+use std::collections::{HashSet, hash_map::Values};
 use std::path::{Path, PathBuf};
 
 use super::manifest::DocumentationManifest;
@@ -116,11 +116,15 @@ pub async fn detect_changes(
     }
 
     // Determine affected agents
-    let total_tracked = manifest.file_hashes.len().max(1);
+    let total_tracked = tracked_file_count(manifest);
     let total_changes = changed_files.len() + added_files.len() + removed_files.len();
-    let change_ratio = total_changes as f64 / total_tracked as f64;
+    let change_ratio = if total_tracked == 0 {
+        0.0
+    } else {
+        total_changes as f64 / total_tracked as f64
+    };
 
-    let full_rebuild_needed = change_ratio > 0.3;
+    let full_rebuild_needed = total_tracked > 0 && change_ratio > 0.3;
 
     let affected_agents = if full_rebuild_needed {
         // More than 30% changed — re-run everything
@@ -190,13 +194,13 @@ fn map_files_to_agents(
     for file in changed_files {
         let mut mapped = false;
 
-        for (agent_key, module) in &manifest.modules {
+        for module in manifest.modules.values() {
             if module.input_files.iter().any(|input| {
                 let file_str = file.to_string_lossy();
                 let input_str = input.to_string_lossy();
                 file_str.contains(input_str.as_ref()) || input_str.contains(file_str.as_ref())
             }) {
-                affected.insert(agent_key.clone());
+                affected.insert(normalize_agent_name(&module.agent_type));
                 mapped = true;
             }
         }
@@ -231,6 +235,46 @@ fn map_files_to_agents(
     }
 
     affected
+}
+
+fn tracked_file_count(manifest: &DocumentationManifest) -> usize {
+    if !manifest.file_hashes.is_empty() {
+        return manifest.file_hashes.len();
+    }
+
+    unique_module_input_file_count(manifest.modules.values())
+}
+
+fn unique_module_input_file_count<'a>(
+    modules: Values<'a, String, super::manifest::ModuleManifest>,
+) -> usize {
+    let mut seen = HashSet::new();
+    for module in modules {
+        for path in &module.input_files {
+            seen.insert(path.clone());
+        }
+    }
+    seen.len()
+}
+
+fn normalize_agent_name(agent: &str) -> String {
+    if agent.starts_with("KeyModulesInsight_") || agent.contains("KeyModulesInsight") {
+        return "KeyModulesInsight".to_string();
+    }
+
+    match agent {
+        "Project Overview" => "Overview".to_string(),
+        "OverviewEditor" => "Overview".to_string(),
+        "Architecture Description" => "Architecture".to_string(),
+        "ArchitectureEditor" => "Architecture".to_string(),
+        "Core Workflows" => "Workflow".to_string(),
+        "WorkflowEditor" => "Workflow".to_string(),
+        "Boundary Interfaces" => "Boundary".to_string(),
+        "BoundaryEditor" => "Boundary".to_string(),
+        "Database Overview" => "Database".to_string(),
+        "DatabaseEditor" => "Database".to_string(),
+        other => other.to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -449,5 +493,45 @@ mod tests {
         assert!(!cs.is_empty());
         // But affected_agents is empty — the caller runs everything
         assert!(cs.affected_agents.is_empty());
+    }
+
+    #[test]
+    fn test_tracked_file_count_falls_back_to_module_inputs() {
+        let mut manifest = DocumentationManifest::new(PathBuf::from("/test"));
+        manifest.modules.insert(
+            "Overview".to_string(),
+            ModuleManifest {
+                agent_type: "Overview".to_string(),
+                output_file: "overview.md".to_string(),
+                input_files: vec![PathBuf::from("src/main.rs"), PathBuf::from("src/lib.rs")],
+                generated_at: Utc::now(),
+                content_hash: "abc".to_string(),
+            },
+        );
+        manifest.modules.insert(
+            "Architecture".to_string(),
+            ModuleManifest {
+                agent_type: "Architecture".to_string(),
+                output_file: "architecture.md".to_string(),
+                input_files: vec![PathBuf::from("src/lib.rs")],
+                generated_at: Utc::now(),
+                content_hash: "def".to_string(),
+            },
+        );
+
+        assert_eq!(tracked_file_count(&manifest), 2);
+    }
+
+    #[test]
+    fn test_normalize_agent_name_maps_display_names() {
+        assert_eq!(normalize_agent_name("Project Overview"), "Overview");
+        assert_eq!(
+            normalize_agent_name("Architecture Description"),
+            "Architecture"
+        );
+        assert_eq!(
+            normalize_agent_name("KeyModulesInsight_ordering"),
+            "KeyModulesInsight"
+        );
     }
 }
