@@ -1,6 +1,19 @@
 # Litho Workspace TODOs
 
-Last updated: 2026-02-28 (post-Session 51: content validator + markdown fixer)
+Last updated: 2026-03-05 (codex-tui compatibility fix + CLI contract cleanup + CI db-lane split)
+
+## P0: Build Scope & CI Reliability (Quick Wins, 2026-03-04)
+
+- [x] **Remove codex-tui from default Litho build surfaces**
+  - [x] Keep `codex-exec`/`codex-core` paths for `litho-codex`, but stop treating full vendored codex-rs workspace as part of `cargo * --workspace` quality gates (`default-members`, `build-tiered.ps1`, `.cargo/.codex` command presets)
+  - [x] Update CI build/test/clippy steps to target Litho crates directly (or use `default-members`) instead of full workspace
+  - [x] Update `check-workspace.ps1` to validate Litho crates only
+- [x] **Track vendored codex-rs compatibility separately**
+  - [x] Fix `external/codex-rs/codex-rs/tui/src/markdown_render.rs` for pulldown-cmark 0.13 enum variants (`Tag::BlockQuote(_)`, `TagEnd::BlockQuote(_)`)
+  - [x] Add optional vendor-sync/vendor-verify job for codex-rs fork instead of blocking Litho release readiness (`.github/workflows/vendor-codex-verify.yml`)
+- [x] **Stabilize CI expectations for database-dependent tests**
+  - [x] Ensure `litho-qmd-storage` integration tests only use explicit `QMD_*` envs and fail fast when integration is explicitly requested but DB setup fails
+  - [x] Split CI into always-on unit tests and opt-in Postgres integration tests (`workflow_dispatch` input + `postgres-integration` job)
 
 ## P0: Testing — Expanded (500 tests passing)
 
@@ -28,7 +41,17 @@ Remaining gaps:
   - [ ] Incremental mode: full run → small change → verify only affected agents re-run
 - [ ] Target: 600+ tests, 60% coverage (up from 500 tests)
 - [ ] Test fixture: `tests/fixtures/david-t-martel-litho.toml` (Gemma3 128K config) available
-- [ ] litho-cli and litho-codex test binaries fail to link (codex-rs rlib format issue)
+- [x] Fix `litho-generator` doctest failure in `review_agent.rs` (private module path in example import)
+
+## P0: CLI Contract Correctness (Quick Wins, 2026-03-04)
+
+- [x] **Fix `litho serve` -> `litho-book` invocation mismatch**
+  - [x] `litho-cli` now invokes `litho-book` using `--docs-dir <path> --port`
+- [x] **Resolve skip-flag contract gap in `litho-generator`**
+  - [x] Prevent silent no-op behavior: fail fast when `--skip-*` flags are passed until stage wiring is implemented
+  - [x] Remove deprecated `--skip-preprocessing`, `--skip-research`, `--skip-documentation` flags from CLI surface to avoid unsupported/no-op stage contracts
+- [x] **Validate quality config at startup**
+  - [x] `QualityConfig::validate()` exists; call it in runtime config load path and fail fast on invalid thresholds/weights
 
 ## P1: Performance — Preprocessing Bottleneck
 
@@ -82,6 +105,15 @@ rig-core 0.23 has been fully replaced with direct `reqwest` HTTP clients.
 - [ ] Model auto-detection (query /api/tags, pick best available)
 - [ ] Warm model loading (pre-pull before pipeline start)
 
+## P2: QMD Backend Strategy (Repo-Local vs Shared Service)
+
+- [ ] Add real `SqliteQmdStore` backend (current `SqliteQmdStore` is alias-only)
+- [ ] Add backend selection in qmd CLI/MCP (`--backend`, env, config)
+- [ ] Default repo-local mode to `.litho/qmd/<index>.sqlite3`
+- [ ] Preserve PostgreSQL as optional shared/service backend
+- [ ] Add cross-backend parity tests for ingest/search/query/get/context/cleanup
+- [ ] Document rollout and migration path (`docs/qmd-repo-local-sqlite-proposal-2026-03-05.md`)
+
 ## P2: Incremental Mode — Hardening
 
 Scaffolding exists (`--incremental`, `launch_incremental()`, `ChangeDetector`, `DocumentationManifest`)
@@ -92,6 +124,8 @@ but needs real-world hardening.
 - [ ] **Doc merging** — merge incrementally generated sections with existing output (currently overwrites)
 - [ ] **Performance target** — verify <60s for <10% file changes on david-t-martel
 - [ ] **Manifest integrity** — handle corrupt/missing manifest gracefully (fall back to full run)
+- [ ] **Manifest population** — record `file_hashes` and per-agent `modules` during normal runs (currently manifest save path captures git metadata + timing only)
+- [ ] **Change-ratio robustness** — avoid `full_rebuild_needed` inflation when `manifest.file_hashes` is empty/stale
 
 ## P3: AST-Driven Intelligence (Phase 2 Original Plan)
 
