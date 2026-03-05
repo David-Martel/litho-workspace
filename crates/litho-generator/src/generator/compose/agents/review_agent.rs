@@ -43,8 +43,9 @@ pub struct SectionReview {
 ///
 /// # Examples
 ///
-/// ```no_run
-/// # use litho_generator::generator::compose::agents::review_agent::ReviewAgent;
+/// ```ignore
+/// // Internal compose agent usage example (module path is crate-internal):
+/// // let reviews = ReviewAgent::review_sections(context).await?;
 /// # use litho_generator::generator::context::GeneratorContext;
 /// # async fn run(context: &GeneratorContext) -> anyhow::Result<()> {
 /// let reviews = ReviewAgent::review_sections(context).await?;

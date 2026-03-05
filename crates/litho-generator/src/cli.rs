@@ -31,18 +31,6 @@ pub struct Args {
     #[arg(short, long)]
     pub name: Option<String>,
 
-    /// Skip project preprocessing
-    #[arg(long)]
-    pub skip_preprocessing: bool,
-
-    /// Skip research document generation
-    #[arg(long)]
-    pub skip_research: bool,
-
-    /// Skip final document generation
-    #[arg(long)]
-    pub skip_documentation: bool,
-
     /// Enable verbose logging
     #[arg(short, long)]
     pub verbose: bool,

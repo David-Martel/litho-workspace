@@ -417,7 +417,7 @@ async fn cmd_serve(args: ServeArgs) -> anyhow::Result<()> {
             println!("Serving docs at http://localhost:{}", args.port);
             let status = tokio::process::Command::new(bin)
                 .args([
-                    "serve",
+                    "--docs-dir",
                     &docs_path.to_string_lossy(),
                     "--port",
                     &args.port.to_string(),

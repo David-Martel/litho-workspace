@@ -29,6 +29,11 @@ async fn main() -> Result<()> {
     // Default: run documentation generation
     let incremental = args.incremental;
     let config = args.into_config();
+    config
+        .quality
+        .validate()
+        .map_err(|msg| anyhow::anyhow!("invalid [quality] configuration: {msg}"))?;
+
     if incremental {
         crate::generator::workflow::launch_incremental(&config).await
     } else {
