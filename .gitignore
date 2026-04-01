@@ -44,7 +44,8 @@
 Thumbs.db
 .DS_Store
 
-# Local config overrides
+# Local config (contains DB credentials and personal paths)
+qmd.config.json
 qmd.config.local.json
 build-test.bat
 build-test.ps1

@@ -3,7 +3,7 @@
     "host": "localhost",
     "port": 5300,
     "user": "postgres",
-    "password": "password",
+    "password": "CHANGEME",
     "name": "qmd_index",
     "sslmode": "disable",
     "admin_db": "postgres",
@@ -26,15 +26,12 @@
       "nomic-embed-text:latest",
       "qwen2.5-coder:3b"
     ],
-    "model_dirs": [
-      "C:/codedev/llm/.models",
-      "C:/Users/david/.ollama/models"
-    ],
+    "model_dirs": [],
     "ollama_complexity_threshold": 6,
     "force_ollama": false
   },
   "paths": {
-    "collections_config_path": "C:/Users/david/AppData/Roaming/qmd/index.yml",
-    "search_telemetry_path": "C:/codedev/litho-workspace/.litho/qmd-search-telemetry.jsonl"
+    "collections_config_path": "",
+    "search_telemetry_path": ".litho/qmd-search-telemetry.jsonl"
   }
 }

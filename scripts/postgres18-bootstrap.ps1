@@ -3,7 +3,7 @@ param(
   [string]$PgHost = "127.0.0.1",
   [int]$Port = 5432,
   [string]$User = "postgres",
-  [string]$Password = "password",
+  [string]$Password = $env:PGPASSWORD,
   [string]$Database = "qmd_index",
   [switch]$RestartService
 )
