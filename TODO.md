@@ -75,7 +75,8 @@ Pipeline evaluation on david-t-martel (253 files, 44 source, 12 markdown):
 - [x] **Token-aware preprocessing** — `token_compress.rs` strips comments + collapses whitespace (~30-40% reduction, 22 tests)
 - [x] **max_parallels raised 3→8** — immediate ~65% preprocessing speedup potential
 - [x] **Smart file batching** — `code_analyze.rs` groups small files (<3KB source) into batched LLM calls (10 new tests, ~60-80% fewer LLM calls for small files)
-- [x] **Pre-computation cache warming** — BLAKE3 content hashing in `cache/mod.rs`, skips unchanged files
+- [x] **BLAKE3 content hashing** — `cache/mod.rs` hashes source for cache keys
+- [ ] **Full cache warming pass** — pre-scan all files before LLM calls, skip those with unchanged BLAKE3 hash from prior run
 - [ ] **Streaming preprocessing** — start research phase as soon as first files complete (don't wait for all)
 - [x] **SIMD-backed text scan acceleration** — add `memchr`/`bytecount` fast paths in source compression + token estimation hot loops
 
