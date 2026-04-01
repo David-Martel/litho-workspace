@@ -1,7 +1,7 @@
 # Latest Context Pointer
 
-**Latest:** ctx-litho-workspace-20260304-session54
-**File:** litho-workspace-context-20260304-session54.md
-**Created:** 2026-03-04
-**Branch:** main @ c848680
-**Summary:** Session 54: build scope rationalization, CLI contract fixes, codex-rs pulldown-cmark compat, CI postgres opt-in lane, vendor-codex-verify workflow, Rust 1.93 clippy fixes, QMD SQLite proposal. 7 commits, 828 tests pass.
+**Latest:** ctx-litho-workspace-20260401-session55
+**File:** (inline)
+**Created:** 2026-04-01
+**Branch:** main @ 8382519
+**Summary:** Session 55: repo sync (6 commits pushed), local sccache isolation (port 5100), global cargo config table-format migration, codegen-units=512 build flags, gitignore cleanup, 3 clippy fixes, stash dropped, README.md + ARCHITECTURE.md rewritten with full CLI reference. 540 tests pass. 8 Dependabot vulns in codex-rs vendored deps.
