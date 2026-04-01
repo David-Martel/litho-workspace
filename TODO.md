@@ -1,6 +1,6 @@
 # Litho Workspace TODOs
 
-Last updated: 2026-03-05 (566-test nextest validation + benchmark smoke integration + native qmd wrappers + ollama/cache guardrails)
+Last updated: 2026-04-01 (Session 55: 540 tests, repo public, sccache isolation, security audit, BUILD.md)
 
 ## P0: Build Scope & CI Reliability (Quick Wins, 2026-03-04)
 
@@ -18,52 +18,30 @@ Last updated: 2026-03-05 (566-test nextest validation + benchmark smoke integrat
   - [x] Binary now consumes library modules (`litho_generator::...`) instead of redeclaring full module tree in `main.rs`
   - [x] `cargo clippy -p litho-generator --all-targets -- -D warnings` passes cleanly
 
-## P0: Testing — Expanded (566 tests passing via nextest package set)
+## P0: Testing — 540 tests passing (nextest, pre-push verified)
 
-Validated this session:
-- `cargo nextest run -p litho-generator -p litho-qmd-mcp -p litho-cli -p litho-extract --no-fail-fast`
-- `pwsh -NoProfile -File scripts/benchmark-ollama-optimize.ps1 -ProjectPath . -OutputDir ./.litho/benchmark-smoke -DryRun`
-- Result: 566 passed, 0 failed
-- Test layers now covered:
-  - Unit: parser/query/hint merging + existing extractor/LLM/unit suites
-  - Integration: `litho-extract` backend-mode tests (`TreeSitter`, `AstGrep`, fallback when binary missing)
-  - E2E: `litho-cli extract` command path with real binary invocation
-  - Functional: missing ast-grep binary still yields successful extraction via graceful fallback
+Test layers covered:
+- Unit: parser/query/hint merging, extractor/LLM/config suites, property tests
+- Integration: `litho-extract` backend modes, `litho-qmd-storage` SQLite pipeline
+- E2E: `litho-cli extract/status/serve/validate/generate` command paths
+- Benchmark: dry-run optimization, report schema regression
+
+Completed:
+- [x] **Unit tests for Sprint 1 changes** (all 4 sub-items done)
+- [x] **Unit tests for Sprint 2-4 changes** (all 7 sub-items done)
+- [x] **Unit tests for core crates** (config, env, AST per language)
+- [x] **Benchmark framework test integration**
+- [x] **MCP function schema validation tests**
+- [x] **Test fixture:** `tests/fixtures/david-t-martel-litho.toml` (Gemma3 128K config)
+- [x] Fix `litho-generator` doctest failure in `review_agent.rs`
+
 Remaining gaps:
-
-- [ ] **Unit tests for Sprint 1 changes:**
-  - [x] `original_document_extractor.rs`: CLAUDE.md/CONTRIBUTING.md ingestion, tech stack extraction, trim_markdown heading preservation
-  - [x] `structure_extractor.rs`: `is_core` threshold fix (`>=` vs `>`), `tools/` path bonus
-  - [x] `ollama_native.rs`: 5-strategy JSON parse cascade, context_window propagation
-  - [x] `config.rs`: `context_window` field parsing from litho.toml
-- [ ] **Unit tests for Sprint 2-4 changes:**
-  - [x] `manifest.rs`: DocumentationManifest round-trip serialization, BLAKE3 hashing
-  - [x] `change_detector.rs`: Git diff parsing, affected-agent mapping, >30% threshold
-  - [x] `change_detector.rs`: temp-repo git commit integration tests for `manifest_commit..HEAD` behavior and rebuild thresholding
-  - [x] `html_outlet.rs`: Markdown-to-HTML conversion, template wrapping
-  - [x] `litho-cli`: Subcommand parsing (status, serve, validate, extract, generate)
-  - [x] `litho-cli extract`: e2e/functional coverage
-  - [x] `litho-cli`: add status/serve/validate/generate parsing and behavior tests
-- [ ] **Unit tests for core crates (previously planned):**
-  - [x] litho-core: Config parsing, env loading, TOML validation
-  - [x] litho-extract: AST extraction per language (Rust, TypeScript, Python, C#)
 - [ ] **Integration tests:**
-  - [ ] litho-generator pipeline stages (preprocess → research → compose → output)
-  - [x] litho-qmd-storage SQLite pipeline + auto-backend defaults
+  - [ ] litho-generator pipeline stages (preprocess -> research -> compose -> output)
   - [ ] litho-qmd-storage with PostgreSQL 18
   - [ ] CodexRs fallback: Ollama failure triggers codex-rs generation
-  - [ ] Incremental mode: full run → small change → verify only affected agents re-run
-- [x] **Benchmark framework test integration**
-  - [x] Dry-run benchmark optimization path is test-covered in `litho-generator` nextest suite
-  - [x] Integration target `benchmark_report_regression` validates report schema fields, gate-failure artifact persistence, and deterministic dry-run ordering
-  - [x] CI build lane runs benchmark smoke script to validate CLI optimize/report pipeline wiring
-- [x] **MCP function schema validation tests (`litho-qmd-mcp`)**
-  - [x] Tool/method suggestion paths (`did you mean ...`) covered
-  - [x] Argument type/shape rejection covered
-  - [x] Property-based fuzz tests added for parser/validator robustness
-- [ ] Target: 600+ tests, 60% coverage (up from 500 tests)
-- [ ] Test fixture: `tests/fixtures/david-t-martel-litho.toml` (Gemma3 128K config) available
-- [x] Fix `litho-generator` doctest failure in `review_agent.rs` (private module path in example import)
+  - [ ] Incremental mode: full run -> small change -> verify only affected agents re-run
+- [ ] Target: 600+ tests, 60% coverage (currently 540 tests)
 
 ## P0: CLI Contract Correctness (Quick Wins, 2026-03-04)
 
@@ -97,7 +75,7 @@ Pipeline evaluation on david-t-martel (253 files, 44 source, 12 markdown):
 - [x] **Token-aware preprocessing** — `token_compress.rs` strips comments + collapses whitespace (~30-40% reduction, 22 tests)
 - [x] **max_parallels raised 3→8** — immediate ~65% preprocessing speedup potential
 - [x] **Smart file batching** — `code_analyze.rs` groups small files (<3KB source) into batched LLM calls (10 new tests, ~60-80% fewer LLM calls for small files)
-- [ ] **Pre-computation cache warming** — hash source files before LLM calls, skip identical files from previous runs
+- [x] **Pre-computation cache warming** — BLAKE3 content hashing in `cache/mod.rs`, skips unchanged files
 - [ ] **Streaming preprocessing** — start research phase as soon as first files complete (don't wait for all)
 - [x] **SIMD-backed text scan acceleration** — add `memchr`/`bytecount` fast paths in source compression + token estimation hot loops
 
@@ -111,13 +89,13 @@ improved output, but there's no automated way to detect quality regressions.
   - [x] Accuracy: code references match actual file paths on disk
   - [x] Freshness: flag stale references to renamed/deleted files
   - [x] Anti-hallucination: tech stack mentions must appear in manifest files (Cargo.toml/package.json/requirements.txt)
-- [ ] **Quality scoring** — inspired by david-t-martel's `cv_quality_scorer.py` (47 correction rules):
-  - [ ] Terminology consistency across sections
-  - [ ] Structural completeness (C1-C4 all present, non-empty)
-  - [ ] Evidence grounding score (claims backed by code references)
+- [x] **Quality scoring** — 6-dimension framework (completeness, accuracy, freshness, grounding, coherence, helpfulness)
+  - [x] Weighted quality_score in validator, QualityConfig in litho.toml
+  - [x] Quality gate with regression detection (`quality_gate.rs`, `enforce_gate`, `min_score`)
+  - [ ] Terminology consistency checker (beyond current validator dimensions)
 - [x] **Representation coverage checks** — add file/symbol representation validation (core/source files and extracted symbols referenced in generated docs)
 - [ ] **Regression test fixture** — snapshot david-t-martel output as golden reference, diff against future runs
-- [ ] **`--min-quality` gate** — CLI flag to fail pipeline if quality score below threshold
+- [ ] **`--min-quality` CLI flag** — expose `QualityConfig.min_score` + `enforce_gate` as CLI flags (config-only today)
 
 ## P2: Provider Improvements
 
@@ -450,6 +428,5 @@ but needs real-world hardening.
 | External codex-rs crates | 52 | `external/codex-rs/` |
 | Total litho LOC | 32,425 | Across 127 source files |
 | Shipping binaries | 5 | litho, litho-generator, litho-book, litho-qmd-cli, litho-qmd-mcp |
-| Tests (litho crates) | 500 | litho-core + litho-extract + litho-generator |
-| New Sprint 1-4 code | ~1,900 LOC | 5 new files + 22 modified files |
-| Session 48 new code | ~1,000 LOC | token_compress, outlet factory, selective agents |
+| Tests (litho crates) | 540 | litho-core + litho-extract + litho-generator + litho-cli |
+| Repo visibility | PUBLIC | https://github.com/David-Martel/litho-workspace |
