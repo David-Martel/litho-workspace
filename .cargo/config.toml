@@ -1,46 +1,74 @@
 # Litho workspace Cargo configuration
 #
 # Inherits from ~/.cargo/config.toml (global) which provides:
-#   - sccache wrapper, T:\RustCache target-dir, CARGO_INCREMENTAL=0
-#   - sparse registry, net retry
+#   - sparse registry, net retry, global aliases
 #
-# This file provides workspace-specific overrides only.
-#
-# MEMORY NOTE: rust-lld is removed from dev builds to prevent linker OOM on
-# large test binaries (litho-extract, codex-tui). Default MSVC link.exe
-# handles memory pressure much better. For release builds, set:
-#   CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=rust-lld.exe cargo build --release
+# This file provides workspace-specific overrides:
+#   - Project-local sccache cache (.cache/sccache/) — isolated from global
+#   - MSVC link.exe (not lld-link) — lower memory for large binaries
+#   - High codegen-units — many small compilation units reduce per-unit RSS
+#   - Low job count — caps peak memory from parallel rustc instances
 
 [build]
 rustc-wrapper = "sccache"
 jobs = 2  # Cap parallel compile jobs to reduce peak memory
 
+[env]
+# Project-local sccache on port 5100 — isolated from global (port 4400)
+# Uses force=true on all keys to override global string-format env vars
+SCCACHE_DIR = { value = "C:/codedev/litho-workspace/.cache/sccache", force = true }
+SCCACHE_SERVER_PORT = { value = "5100", force = true }
+SCCACHE_CACHE_SIZE = { value = "5G", force = true }
+SCCACHE_IDLE_TIMEOUT = { value = "300", force = true }
+SCCACHE_STARTUP_TIMEOUT = { value = "30", force = true }
+SCCACHE_REQUEST_TIMEOUT = { value = "120", force = true }
+SCCACHE_CACHE_COMPRESSION = { value = "zstd", force = true }
+SCCACHE_DIRECT = { value = "true", force = true }
+SCCACHE_LOG = { value = "warn", force = true }
+SCCACHE_NO_DAEMON = { value = "0", force = true }
+SCCACHE_MAX_CONNECTIONS = { value = "4", force = true }
+CARGO_INCREMENTAL = { value = "0", force = true }
+RUST_MIN_STACK = { value = "8388608", force = true }
+
 [target.x86_64-pc-windows-msvc]
-# No linker override — uses default MSVC link.exe (lower memory than rust-lld)
+# Explicitly use MSVC link.exe — lower memory than lld-link for large binaries
+# (overrides global config which sets linker = "lld-link")
+linker = "link.exe"
 rustflags = [
     "-C", "target-cpu=native",
+    "-C", "link-arg=/DEBUG:FASTLINK",
 ]
 
 [profile.dev]
 split-debuginfo = "packed"
-codegen-units = 256
-# codex-tui OOM prevention: many small compilation units
-# CARGO_INCREMENTAL must stay 0 (global config) for sccache compatibility
+codegen-units = 512       # Maximum parallelism, minimum per-unit memory
+debug = 1                 # Line numbers only — fastest debug info
+incremental = false       # Required for sccache compatibility
+lto = false
+overflow-checks = true
 
 # Reduce memory pressure from dependencies in dev/test builds:
 # - line-tables-only debug info cuts ~40% of debug section size
 # - High codegen-units = smaller per-unit memory during compilation
 [profile.dev.package."*"]
 debug = "line-tables-only"
-codegen-units = 256
+codegen-units = 512
+opt-level = 2             # Optimize deps for faster runtime (proc-macros, serde)
 
 [profile.dev.build-override]
-codegen-units = 256
+codegen-units = 512
+
+[profile.test]
+codegen-units = 512       # Fast test compilation
+debug = 1
+incremental = false
 
 [profile.release]
 split-debuginfo = "packed"
 lto = "thin"
 codegen-units = 16
+debug = false
+strip = true
 
 # Memory-safe workspace build: compile libs in parallel, serialize large binaries
 [alias]

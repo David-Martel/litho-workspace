@@ -7,8 +7,20 @@
 # Caches & telemetry
 .cache/
 .litho/cache/
+.litho/benchmark-*/
+.litho/*.sqlite3
 .litho/*.jsonl
 *.log
+
+# Temp/scratch config files
+.tmp-*
+
+# SQLite caches (generated at runtime)
+**/cache-index.sqlite3
+.litho/qmd/
+
+# Proptest regression files
+*.proptest-regressions
 
 # Insta test snapshot artifacts (unreviewed)
 *.snap.new

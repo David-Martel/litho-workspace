@@ -23,6 +23,31 @@ on:
         required: false
         type: boolean
         default: false
+      run_live_benchmark:
+        description: "Run opt-in live Ollama benchmark optimization lane"
+        required: false
+        type: boolean
+        default: false
+      benchmark_ollama_base_url:
+        description: "Ollama base URL for live benchmark lane"
+        required: false
+        type: string
+        default: "http://127.0.0.1:11434"
+      benchmark_models:
+        description: "Comma-separated model list for live benchmark lane"
+        required: false
+        type: string
+        default: "qwen2.5-coder:3b,gemma3:12b"
+      benchmark_context_windows:
+        description: "Comma-separated context windows for live benchmark lane"
+        required: false
+        type: string
+        default: "32768,131072"
+      benchmark_num_predict:
+        description: "Comma-separated num_predict values for live benchmark lane"
+        required: false
+        type: string
+        default: "512,1024"
 
 env:
   CARGO_TERM_COLOR: always
@@ -57,6 +82,9 @@ jobs:
           # requesting it explicitly guarantees it is present.
           components: clippy
 
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
       # Cache compiled dependencies so that incremental CI runs are fast.
       # The cache key is keyed on the OS and the workspace Cargo.lock so that
       # adding or updating a dependency invalidates the cache correctly.
@@ -80,11 +108,14 @@ jobs:
         shell: pwsh
         run: pwsh -NoProfile -File scripts/verify-build-tokens.ps1
 
-      - name: Run Litho crate tests (unit + integration except Postgres storage lane)
-        run: cargo test -p litho-core -p litho-extract -p litho-codex -p litho-generator -p litho-cli -p litho-book -p litho-qmd-core -p litho-qmd-llm -p litho-qmd-cli -p litho-qmd-mcp
+      - name: Run Litho crate tests with nextest (unit + integration except Postgres storage lane)
+        run: cargo nextest run --profile ci --no-fail-fast -p litho-core -p litho-extract -p litho-codex -p litho-generator -p litho-cli -p litho-book -p litho-qmd-core -p litho-qmd-llm -p litho-qmd-cli -p litho-qmd-mcp
 
-      - name: Run qmd-storage unit tests only
-        run: cargo test -p litho-qmd-storage --lib
+      - name: Run qmd-storage unit tests only with nextest
+        run: cargo nextest run --profile ci --no-fail-fast -p litho-qmd-storage --lib
+
+      - name: Run benchmark framework smoke test (dry-run optimize path)
+        run: pwsh -NoProfile -File scripts/benchmark-ollama-optimize.ps1 -ProjectPath . -OutputDir ./.litho/benchmark-ci-smoke -Models "qwen2.5-coder:3b,gemma3:12b" -ContextWindows "32768,131072" -NumPredict "512,1024" -RunsPerCandidate 1 -WarmupRuns 0 -MaxCandidates 6 -RunTimeoutSeconds 60 -DryRun
 
       # Clippy is run as a separate step so its output is clearly visible in
       # the Actions log. RUSTFLAGS=-D warnings is already set at the job level,
@@ -117,6 +148,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
 
       - name: Cache Cargo registry and build artifacts
         uses: actions/cache@v4
@@ -181,6 +215,54 @@ jobs:
 
       - name: Run Postgres integration tests
         run: cargo test -p litho-qmd-storage --test pipeline -- --nocapture
+
+  # ---------------------------------------------------------------------------
+  # live-ollama-benchmark: explicit opt-in lane for non-dry-run benchmark-optimize.
+  # Runs only on manual workflow_dispatch when requested.
+  # ---------------------------------------------------------------------------
+  live-ollama-benchmark:
+    name: Live Ollama Benchmark (opt-in)
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_live_benchmark }}
+    runs-on: windows-latest
+
+    env:
+      CARGO_TERM_COLOR: always
+      LITHO_API_BASE_URL: ${{ inputs.benchmark_ollama_base_url }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Initialize build stamp/token
+        shell: pwsh
+        run: |
+          . ./scripts/litho-build-helpers.ps1
+          $stamp = Set-LithoBuildStamp -ExportToGitHubEnv
+          Write-Host "Build token: $($stamp.BuildToken)"
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify Ollama is reachable
+        shell: pwsh
+        run: |
+          $url = "${{ inputs.benchmark_ollama_base_url }}/api/tags"
+          Write-Host "Checking Ollama endpoint: $url"
+          $resp = Invoke-RestMethod -Method Get -Uri $url -TimeoutSec 30
+          if (-not $resp -or -not $resp.models) {
+            throw "Ollama is reachable but returned no models from /api/tags."
+          }
+          Write-Host ("Detected models: " + ($resp.models | ForEach-Object { $_.name } | Join-String -Separator ", "))
+
+      - name: Run live benchmark optimization lane
+        run: pwsh -NoProfile -File scripts/benchmark-ollama-optimize.ps1 -ProjectPath . -OutputDir ./.litho/benchmark-live-ci -Models "${{ inputs.benchmark_models }}" -ContextWindows "${{ inputs.benchmark_context_windows }}" -NumPredict "${{ inputs.benchmark_num_predict }}" -RunsPerCandidate 1 -WarmupRuns 1 -MaxCandidates 6 -RunTimeoutSeconds 180 -GateMinSuccessRate 1.0 -GateMinQuality 0.55 -GateMaxP95Seconds 120 -KeepCache -RetainArtifacts
+
+      - name: Upload live benchmark artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-live-artifacts
+          path: |
+            .litho/benchmark-live-ci
 
   # ---------------------------------------------------------------------------
   # release: build the CLI binary and upload it to a GitHub Release.

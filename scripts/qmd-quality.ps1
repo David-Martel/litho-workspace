@@ -33,24 +33,24 @@ try {
 
   Invoke-Step "Running qmd crate tests" {
     Invoke-LithoCargo -Arguments @(
-      "test",
+      "nextest", "run", "--no-fail-fast",
       "-p", "litho-qmd-core",
       "-p", "litho-qmd-cli",
       "-p", "litho-qmd-mcp"
     )
 
     if ($SkipIntegration) {
-      Invoke-LithoCargo -Arguments @("test", "-p", "litho-qmd-storage", "--lib")
+      Invoke-LithoCargo -Arguments @("nextest", "run", "--no-fail-fast", "-p", "litho-qmd-storage", "--lib")
     }
     else {
-      Invoke-LithoCargo -Arguments @("test", "-p", "litho-qmd-storage")
+      Invoke-LithoCargo -Arguments @("nextest", "run", "--no-fail-fast", "-p", "litho-qmd-storage")
     }
   }
 
   if (-not $SkipIntegration) {
     Invoke-Step "Running qmd integration tests in litho-book and litho-codex" {
-      Invoke-LithoCargo -Arguments @("test", "-p", "litho-book", "qmd_backend")
-      Invoke-LithoCargo -Arguments @("test", "-p", "litho-codex", "--test", "prompt_test")
+      Invoke-LithoCargo -Arguments @("nextest", "run", "--no-fail-fast", "-p", "litho-book", "qmd_backend")
+      Invoke-LithoCargo -Arguments @("nextest", "run", "--no-fail-fast", "-p", "litho-codex", "--test", "prompt_test")
     }
   }
 

@@ -3,8 +3,8 @@ dir = "target/nextest"
 
 [profile.default]
 retries = 1
-slow-warning = "30s"
 fail-fast = false
+slow-timeout = { period = "30s", terminate-after = 2 }
 
 [profile.ci]
 retries = 2
