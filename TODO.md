@@ -1,6 +1,6 @@
 # Litho Workspace TODOs
 
-Last updated: 2026-03-05 (codex-tui compatibility fix + CLI contract cleanup + CI db-lane split)
+Last updated: 2026-03-05 (566-test nextest validation + benchmark smoke integration + native qmd wrappers + ollama/cache guardrails)
 
 ## P0: Build Scope & CI Reliability (Quick Wins, 2026-03-04)
 
@@ -14,31 +14,53 @@ Last updated: 2026-03-05 (codex-tui compatibility fix + CLI contract cleanup + C
 - [x] **Stabilize CI expectations for database-dependent tests**
   - [x] Ensure `litho-qmd-storage` integration tests only use explicit `QMD_*` envs and fail fast when integration is explicitly requested but DB setup fails
   - [x] Split CI into always-on unit tests and opt-in Postgres integration tests (`workflow_dispatch` input + `postgres-integration` job)
+- [x] **Remove remaining `dead_code` warnings from `litho-generator` all-target builds**
+  - [x] Binary now consumes library modules (`litho_generator::...`) instead of redeclaring full module tree in `main.rs`
+  - [x] `cargo clippy -p litho-generator --all-targets -- -D warnings` passes cleanly
 
-## P0: Testing — Expanded (500 tests passing)
+## P0: Testing — Expanded (566 tests passing via nextest package set)
 
-The codebase now has **476 tests across litho-core, litho-extract, litho-generator** (466 litho-generator + litho-core + litho-extract).
-Previous count of "12" was incorrect — litho-generator alone has 456+ inline tests.
+Validated this session:
+- `cargo nextest run -p litho-generator -p litho-qmd-mcp -p litho-cli -p litho-extract --no-fail-fast`
+- `pwsh -NoProfile -File scripts/benchmark-ollama-optimize.ps1 -ProjectPath . -OutputDir ./.litho/benchmark-smoke -DryRun`
+- Result: 566 passed, 0 failed
+- Test layers now covered:
+  - Unit: parser/query/hint merging + existing extractor/LLM/unit suites
+  - Integration: `litho-extract` backend-mode tests (`TreeSitter`, `AstGrep`, fallback when binary missing)
+  - E2E: `litho-cli extract` command path with real binary invocation
+  - Functional: missing ast-grep binary still yields successful extraction via graceful fallback
 Remaining gaps:
 
 - [ ] **Unit tests for Sprint 1 changes:**
-  - [ ] `original_document_extractor.rs`: CLAUDE.md/CONTRIBUTING.md ingestion, tech stack extraction, trim_markdown heading preservation
-  - [ ] `structure_extractor.rs`: `is_core` threshold fix (`>=` vs `>`), `tools/` path bonus
-  - [ ] `ollama_native.rs`: 5-strategy JSON parse cascade, context_window propagation
-  - [ ] `config.rs`: `context_window` field parsing from litho.toml
+  - [x] `original_document_extractor.rs`: CLAUDE.md/CONTRIBUTING.md ingestion, tech stack extraction, trim_markdown heading preservation
+  - [x] `structure_extractor.rs`: `is_core` threshold fix (`>=` vs `>`), `tools/` path bonus
+  - [x] `ollama_native.rs`: 5-strategy JSON parse cascade, context_window propagation
+  - [x] `config.rs`: `context_window` field parsing from litho.toml
 - [ ] **Unit tests for Sprint 2-4 changes:**
-  - [ ] `manifest.rs`: DocumentationManifest round-trip serialization, BLAKE3 hashing
-  - [ ] `change_detector.rs`: Git diff parsing, affected-agent mapping, >30% threshold
-  - [ ] `html_outlet.rs`: Markdown-to-HTML conversion, template wrapping
-  - [ ] `litho-cli`: Subcommand parsing (status, serve, validate, extract, generate)
+  - [x] `manifest.rs`: DocumentationManifest round-trip serialization, BLAKE3 hashing
+  - [x] `change_detector.rs`: Git diff parsing, affected-agent mapping, >30% threshold
+  - [x] `change_detector.rs`: temp-repo git commit integration tests for `manifest_commit..HEAD` behavior and rebuild thresholding
+  - [x] `html_outlet.rs`: Markdown-to-HTML conversion, template wrapping
+  - [x] `litho-cli`: Subcommand parsing (status, serve, validate, extract, generate)
+  - [x] `litho-cli extract`: e2e/functional coverage
+  - [x] `litho-cli`: add status/serve/validate/generate parsing and behavior tests
 - [ ] **Unit tests for core crates (previously planned):**
-  - [ ] litho-core: Config parsing, env loading, TOML validation
-  - [ ] litho-extract: AST extraction per language (Rust, TypeScript, Python, C#)
+  - [x] litho-core: Config parsing, env loading, TOML validation
+  - [x] litho-extract: AST extraction per language (Rust, TypeScript, Python, C#)
 - [ ] **Integration tests:**
   - [ ] litho-generator pipeline stages (preprocess → research → compose → output)
+  - [x] litho-qmd-storage SQLite pipeline + auto-backend defaults
   - [ ] litho-qmd-storage with PostgreSQL 18
   - [ ] CodexRs fallback: Ollama failure triggers codex-rs generation
   - [ ] Incremental mode: full run → small change → verify only affected agents re-run
+- [x] **Benchmark framework test integration**
+  - [x] Dry-run benchmark optimization path is test-covered in `litho-generator` nextest suite
+  - [x] Integration target `benchmark_report_regression` validates report schema fields, gate-failure artifact persistence, and deterministic dry-run ordering
+  - [x] CI build lane runs benchmark smoke script to validate CLI optimize/report pipeline wiring
+- [x] **MCP function schema validation tests (`litho-qmd-mcp`)**
+  - [x] Tool/method suggestion paths (`did you mean ...`) covered
+  - [x] Argument type/shape rejection covered
+  - [x] Property-based fuzz tests added for parser/validator robustness
 - [ ] Target: 600+ tests, 60% coverage (up from 500 tests)
 - [ ] Test fixture: `tests/fixtures/david-t-martel-litho.toml` (Gemma3 128K config) available
 - [x] Fix `litho-generator` doctest failure in `review_agent.rs` (private module path in example import)
@@ -52,6 +74,18 @@ Remaining gaps:
   - [x] Remove deprecated `--skip-preprocessing`, `--skip-research`, `--skip-documentation` flags from CLI surface to avoid unsupported/no-op stage contracts
 - [x] **Validate quality config at startup**
   - [x] `QualityConfig::validate()` exists; call it in runtime config load path and fail fast on invalid thresholds/weights
+- [x] **Add `litho qmd ...` passthrough command**
+  - [x] `litho-cli` forwards trailing args to `litho-qmd-cli` and preserves stdio exit behavior
+  - [x] Added parse coverage for passthrough argument capture
+
+## P0: Simplification & Product Surface
+
+- [ ] Collapse user-facing entrypoint to `litho` while retaining `litho-qmd-*` as internal/service binaries
+- [ ] Add `litho index` thin wrapper that calls qmd functionality without requiring users to know qmd binary names
+- [x] Add `litho search|query|vsearch` thin wrappers for common retrieval flows
+- [ ] Add deprecation path + warning window for direct `litho-qmd-cli` usage (non-breaking transition)
+- [ ] Publish one configuration surface for storage backend selection (`sqlite` repo-local default, optional postgres service mode)
+- [ ] Remove duplicated CLI/docs text between litho and qmd crates after wrapper commands land
 
 ## P1: Performance — Preprocessing Bottleneck
 
@@ -65,6 +99,7 @@ Pipeline evaluation on david-t-martel (253 files, 44 source, 12 markdown):
 - [x] **Smart file batching** — `code_analyze.rs` groups small files (<3KB source) into batched LLM calls (10 new tests, ~60-80% fewer LLM calls for small files)
 - [ ] **Pre-computation cache warming** — hash source files before LLM calls, skip identical files from previous runs
 - [ ] **Streaming preprocessing** — start research phase as soon as first files complete (don't wait for all)
+- [x] **SIMD-backed text scan acceleration** — add `memchr`/`bytecount` fast paths in source compression + token estimation hot loops
 
 ## P1: Quality — Validation & Regression Prevention
 
@@ -80,6 +115,7 @@ improved output, but there's no automated way to detect quality regressions.
   - [ ] Terminology consistency across sections
   - [ ] Structural completeness (C1-C4 all present, non-empty)
   - [ ] Evidence grounding score (claims backed by code references)
+- [x] **Representation coverage checks** — add file/symbol representation validation (core/source files and extracted symbols referenced in generated docs)
 - [ ] **Regression test fixture** — snapshot david-t-martel output as golden reference, diff against future runs
 - [ ] **`--min-quality` gate** — CLI flag to fail pipeline if quality score below threshold
 
@@ -96,23 +132,67 @@ rig-core 0.23 has been fully replaced with direct `reqwest` HTTP clients.
 - [x] All 489 tests pass, 0 regressions
 
 ### Codex-RS as Primary Provider
-- [ ] Wire codex-rs as selectable primary provider (not just fallback)
+- [x] Draft phased codex/ollama/ast optimization plan (`docs/codex-rs-ollama-ast-optimization-plan-2026-03-05.md`)
+- [x] Wire codex-rs as selectable primary provider (not just fallback)
 - [ ] Enable frontier model usage (o3, Claude) for higher-quality generation
-- [ ] Add provider selection to litho.toml: `provider = "codex"` | `"ollama"` | `"openai"`
+- [x] Add provider selection to litho.toml: `provider = "codex"` | `"ollama"` | `"openai"`
+- [x] Fix prompt model routing for non-Ollama providers (`prompt_with_model` now honors requested model)
+- [x] Extend codex-rs fallback from extract-only to prompt paths (compose/review resilience)
+- [x] Pass explicit model/cwd/schema-json flags through `CodexRsClient` invocation
+- [x] Normalize codex binary env vars across crates (`CODEX_BINARY_PATH` vs `CODEX_BIN`)
 
 ### ollama-rs Enhancements
 - [ ] Coordinator/tool calling support for Gemma3 (function calling API)
-- [ ] Model auto-detection (query /api/tags, pick best available)
-- [ ] Warm model loading (pre-pull before pipeline start)
+- [x] Model auto-detection (query `/api/tags`, pick best available)
+- [x] Warm model loading (startup prep with optional pull + warmup)
+- [x] Add configurable hard timeout wrappers around native ollama-rs chat/warmup calls
+- [x] Add bounded parse/quality-control retry rounds for extraction/generation responses
+- [x] Add adaptive `num_ctx` sizing based on prompt/workload size
+- [x] Add request-level Ollama tuning knobs (`num_gpu`, `num_thread`, `top_p`, `repeat_penalty`, `keep_alive_seconds`) via `LLMConfig` + env overrides
+- [x] Harden JSON object extraction to handle braces inside quoted strings (reduces malformed parse retries)
+- [x] Add native Ollama extraction failover chain (primary -> fallback model -> codex fallback when enabled)
+- [x] Add optional strict runtime prep mode (`ollama_prepare_runtime_strict`) to fail fast instead of warning-and-continue
+- [x] Add optional strict model selection (`ollama_strict_model_selection`) to prevent silent model substitutions
+- [x] Add TTL-based `/api/tags` model cache (`ollama_local_models_cache_ttl_seconds`) to balance freshness vs request overhead
+- [x] Add explicit Ollama decode budget override (`ollama_num_predict`) for latency/memory control
+- [x] Add optional per-call Ollama perf telemetry (`ollama_log_perf_metrics`) using API usage counters for tuning feedback loops
+- [x] Import `git-cluster` structured-output pattern: native extraction requests now use `format=StructuredJson` (`JsonStructure`) before parse-fallback cascade
+- [x] Add native in-flight request limiter (`ollama_max_in_flight`) to cap concurrent requests and reduce overload-driven latency/memory spikes
+- [x] Add extra Ollama decode controls (`top_k`, `repeat_last_n`, `tfs_z`, `seed`) via `LLMConfig` + env vars for tunable throughput/quality tradeoffs
+- [x] Add benchmark/optimization framework command (`benchmark-optimize`) with candidate matrix generation, quality+latency+throughput+memory scoring, and JSON/Markdown recommendation reports
+- [x] Add hard per-run benchmark timeout (`--run-timeout-seconds`) so stalled workflow runs fail fast and still produce actionable reports
+- [x] Add benchmark promotion gates (`--gate-min-success-rate`, `--gate-max-p95-seconds`, `--gate-min-quality`) and fail-fast enforcement
+- [x] Track candidate `p95` plus split `cold` vs `incremental` average run durations in benchmark reports
+- [x] Add repo-local SQLite repo index primitives (`repo_state` + `file_index`) plus git-diff hints for invalidation planning
+- [x] Wire repo-index refresh into full + incremental workflow startup and persist diff plan into memory (`repo_index:diff_plan`)
+- [x] Add repo-index-only workflow mode (`litho-generator index-repo`) for first-run/no-LLM indexing
+- [x] Add LRU + SQLite layered cache adapter in `CacheManager` (in-memory hot cache + sqlite fallback + file cache compatibility)
+- [x] Extend benchmark execution to distinguish cold vs incremental mode (`keep-cache` + multi-run candidate behavior)
+- [x] Add startup warmup smoke script (`scripts/startup-warmup-smoke.ps1`) for README readability + CLI/QMD startup probes
+- [x] Add timing telemetry for preprocess sub-steps and first successful LLM response (`timing:*` memory keys + summary surfacing)
+- [x] Add model-size-aware Qwen context defaults (`<=8b -> 32k`, `<=14b -> 65k`, larger -> 131k) to reduce unnecessary memory pressure
+- [x] Harden default native Ollama concurrency (`ollama_max_in_flight` fallback now clamps to safe cap instead of matching max_parallels)
+- [x] Add exponential backoff + bounded jitter for Ollama retry delays to reduce synchronized retry storms under load
+- [x] Improve adaptive context sizing with token-estimator-based prompt accounting (instead of pure char length)
+- [x] Make agent cache keys model/config-aware to prevent stale cross-model/cross-parameter cache reuse
+- [x] Add in-flight prompt coalescing lock per cache key to avoid duplicate concurrent LLM calls
+- [x] Set benchmark command defaults to stable sampling (`runs_per_candidate=3`, `warmup_runs=1`)
+- [x] Wire benchmark smoke validation into CI (`benchmark-ollama-optimize.ps1 -DryRun`) and standard testing docs
+- [x] Add opt-in live Ollama benchmark CI lane (`workflow_dispatch` + `run_live_benchmark`) for non-dry-run quality/latency gates
+- [ ] Calibrate live benchmark gate defaults by model family/hardware tier to reduce false negatives on slower runners
+- [ ] Add optional two-stage Ollama quality-control reviewer loop (primary model + reviewer model with bounded retries)
+- [ ] Add template-constrained streaming JSON fitter for partial/malformed long responses
 
 ## P2: QMD Backend Strategy (Repo-Local vs Shared Service)
 
-- [ ] Add real `SqliteQmdStore` backend (current `SqliteQmdStore` is alias-only)
-- [ ] Add backend selection in qmd CLI/MCP (`--backend`, env, config)
-- [ ] Default repo-local mode to `.litho/qmd/<index>.sqlite3`
-- [ ] Preserve PostgreSQL as optional shared/service backend
-- [ ] Add cross-backend parity tests for ingest/search/query/get/context/cleanup
-- [ ] Document rollout and migration path (`docs/qmd-repo-local-sqlite-proposal-2026-03-05.md`)
+- [x] Add real `SqliteQmdStore` backend (no longer alias-only)
+- [x] Add backend selection in qmd CLI/MCP via `AutoQmdStore` (env/config/autodetect)
+- [x] Add explicit `--backend` CLI flag (`qmd`, `litho-qmd-mcp`) for deterministic override without env mutation
+- [x] Default repo-local mode to `.litho/qmd/<index>.sqlite3` when running inside a git repo
+- [x] Default to existing local `.litho/qmd/*.sqlite*` file when present (repo-limited/local workflows)
+- [x] Preserve PostgreSQL as optional shared/service backend (`QMD_BACKEND=postgres` or config backend)
+- [x] Add cross-backend parity tests for ingest/search/query/get/context/cleanup (SQLite + existing PostgreSQL integration tests)
+- [x] Document rollout and migration path (`docs/qmd-repo-local-sqlite-proposal-2026-03-05.md`)
 
 ## P2: Incremental Mode — Hardening
 
@@ -123,9 +203,9 @@ but needs real-world hardening.
 - [x] **Selective agent execution** — `execute_research_pipeline_selective()` and `execute_selective()` skip unaffected agents via `changeset.affected_agents`
 - [ ] **Doc merging** — merge incrementally generated sections with existing output (currently overwrites)
 - [ ] **Performance target** — verify <60s for <10% file changes on david-t-martel
-- [ ] **Manifest integrity** — handle corrupt/missing manifest gracefully (fall back to full run)
-- [ ] **Manifest population** — record `file_hashes` and per-agent `modules` during normal runs (currently manifest save path captures git metadata + timing only)
-- [ ] **Change-ratio robustness** — avoid `full_rebuild_needed` inflation when `manifest.file_hashes` is empty/stale
+- [x] **Manifest integrity** — handle corrupt/missing manifest gracefully (fall back to full run)
+- [x] **Manifest population** — record `file_hashes` and per-agent `modules` during normal runs
+- [x] **Change-ratio robustness** — avoid `full_rebuild_needed` inflation when `manifest.file_hashes` is empty/stale
 
 ## P3: AST-Driven Intelligence (Phase 2 Original Plan)
 
@@ -147,10 +227,19 @@ but needs real-world hardening.
 - [ ] Only re-parse files whose hash changed
 - [ ] Store AST snapshots in `.litho/ast_cache/`
 
+### AST/Walker Acceleration
+- [x] Parallelize `litho-extract` file analysis pass with deterministic ordering
+- [x] Add ast-grep batch extraction mode (grouped by language/pattern) with graceful degradation when `sg` missing
+- [x] Wire walker chunking strategy for large repos (deterministic top-level/language grouping + size caps)
+- [x] Build preprocess-time ingestion DAG/RAG artifacts using AST/tree-sitter extraction (`ingestion-dag.json`, memory seeding for research agents)
+- [ ] Add tiny-group merge pass for walker batching to reduce underfilled chunks
+- [ ] Use ingestion DAG provenance to replace coarse manifest `input_files` mapping for incremental agent targeting
+
 ## P3: CLI & Output Polish
 
 ### litho-cli Remaining Commands
-- [ ] `litho search` — delegates to litho-qmd-cli
+- [x] `litho qmd` — passthrough bridge to `litho-qmd-cli`
+- [x] `litho search` — delegates to qmd retrieval flow via native wrapper path
 - [ ] `litho diff` — documentation diff between runs
 
 ### Additional Output Formats
@@ -168,6 +257,66 @@ but needs real-world hardening.
 ---
 
 ## Completed
+
+### Session 55 — Manifest integrity fallback + CLI blocker test closure (2026-03-05)
+- [x] Updated `DocumentationManifest::load()` to return `Result<Option<_>>`:
+  - [x] `Ok(None)` for missing manifest (first incremental run)
+  - [x] `Err(...)` for corrupt/unreadable manifest
+- [x] Updated `launch_incremental()` to gracefully fall back to full generation on missing/corrupt manifest with explicit diagnostics
+- [x] Added `manifest.rs` tests for missing and corrupt manifest behavior (`Ok(None)` vs `Err`)
+- [x] Added `litho-cli` parser unit tests for `status`/`serve`/`validate`/`generate`/`extract` enum parsing + invalid value rejection
+- [x] Added `litho-cli` e2e/functional tests for:
+  - [x] `status` without manifest (guidance path)
+  - [x] `status` with manifest (count/report path)
+  - [x] `serve` fallback behavior when `litho-book` is unavailable
+  - [x] `validate` broken-reference and no-issue paths
+  - [x] `generate` fail-fast missing project path + codex-exec readiness failure path
+- [x] Validation:
+  - [x] `cargo clippy -p litho-cli -p litho-generator --all-targets -- -D warnings`
+  - [x] `cargo test -p litho-generator manifest_ -- --nocapture`
+  - [x] `cargo test -p litho-cli --all-targets`
+  - [x] `cargo nextest run -p litho-cli -p litho-generator --no-fail-fast` (470/470)
+
+### Session 54 — AST-grep backend + dead_code blocker resolution + layered tests (2026-03-05)
+- [x] Added `LithoConfig.extract_backend` (`auto|tree_sitter|ast_grep`) and optional `ast_grep_binary` override
+- [x] Added CLI flags for extraction backend selection and ast-grep binary override (`litho extract --extract-backend --ast-grep-bin`)
+- [x] Implemented ast-grep batch hint backend in `litho-extract` grouped by language/pattern
+- [x] Added graceful per-batch fallback to tree-sitter extraction when ast-grep is missing/failing/malformed
+- [x] Wired ast-grep hints into extraction output (interface/dependency enrichment with dedupe)
+- [x] Resolved `litho-generator` all-target `dead_code` blocker by switching binary entrypoint to library module usage
+- [x] Added layered test coverage:
+  - [x] Unit: ast-grep stream parsing + hint aggregation/error behavior
+  - [x] Integration: backend mode behavior + missing binary fallback + sg-available path
+  - [x] E2E/Functional: `litho-cli extract` with backend flags and fallback behavior
+- [x] Validation:
+  - [x] `cargo clippy -p litho-generator --all-targets -- -D warnings`
+  - [x] `cargo clippy -p litho-extract --all-targets -- -D warnings`
+  - [x] `cargo clippy -p litho-cli --all-targets -- -D warnings`
+  - [x] `cargo test -p litho-core -p litho-extract -p litho-cli -p litho-generator --all-targets`
+  - [x] `cargo nextest run -p litho-core -p litho-extract -p litho-generator -p litho-cli --no-fail-fast` (503/503)
+
+### Session 53 — Codex primary routing + Ollama hardening + tests (2026-03-05)
+- [x] Codex provider path now preserves requested model through `prompt_with_model` and extractor routing
+- [x] Codex prompt fallback added on non-Ollama prompt/reasoning paths when configured (`codex_as_fallback`)
+- [x] Codex client now supports explicit default model + working dir + schema-file structured extraction flags
+- [x] CODEX env normalization completed across crates (`CODEX_BINARY_PATH` primary, `CODEX_BIN` fallback)
+- [x] Native Ollama path now uses bounded retries + timeout wrappers and adaptive context sizing
+- [x] `litho-extract` walker batching added (top-level/language grouping with deterministic chunking)
+- [x] Test expansion:
+  - [x] New codex env precedence tests (`CODEX_BINARY_PATH` vs `CODEX_BIN`)
+  - [x] New provider extractor model propagation tests (Codex + function-calling)
+  - [x] Env-mutation tests serialized in `litho-core` to remove racey failures
+  - [x] All targeted crates pass tests and clippy with `-D warnings`
+
+### Session 52 — Ollama runtime + manifest hardening + extractor parallelism (2026-03-05)
+- [x] Native Ollama runtime prep: `/api/tags` model discovery, optional `/api/pull`, optional startup warmup (`prepare_runtime()`)
+- [x] `LLMClient` startup provider prep wired into both full and incremental workflow launch paths
+- [x] Context window selection now model-aware for native Ollama calls (resolved model-based `num_ctx`)
+- [x] Manifest population now records `file_hashes` and module metadata from preprocess + documentation memory outputs
+- [x] Change detector ratio logic now handles empty/stale `file_hashes` by falling back to module input files (no forced ratio inflation)
+- [x] Agent name normalization improved for incremental selective execution mapping
+- [x] `litho-extract` analysis pass parallelized (`rayon`) with deterministic file ordering
+- [x] Test expansion: new coverage for ollama model selection helpers, config bool parsing + ollama runtime fields, change-detector tracked-file fallback logic
 
 ### Session 51 — Content validator + Markdown fixer (2026-02-28)
 - [x] **Content validator** (`validator/mod.rs`, ~300 LOC, 8 tests)
