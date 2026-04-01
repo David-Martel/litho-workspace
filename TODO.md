@@ -32,20 +32,22 @@ Current state: 540 tests, 11 crates, 5 binaries, repo PUBLIC, Rust 1.94
 ## P1: Async Pipeline & Performance
 
 ### Streaming Pipeline (biggest performance win)
-The preprocessing stage is 87.9% of runtime (5181s/5892s). The pipeline is
-strictly sequential: preprocess ALL → research ALL → compose ALL → validate.
+The preprocessing stage is 87.9% of runtime. The pipeline is strictly sequential:
+preprocess ALL → research ALL → compose ALL → validate. Current async: `Semaphore`
++ `join_all` for agent fan-out, `rayon` for file extraction, `buffer_unordered`
+in structure_extractor. No `JoinSet`, no inter-stage streaming.
 
 - [ ] **Async channel pipeline**: use `tokio::sync::mpsc` to stream preprocessed
-  files into research as they complete (don't wait for all files)
+  files into research as they complete (don't wait for all)
 - [ ] **Replace `join_all` with `JoinSet`**: modernize from `futures::join_all` +
-  `Semaphore` to `tokio::task::JoinSet` for structured concurrency with
-  cancellation support
+  `Semaphore` (in `threads.rs`, `knowledge_sync.rs`) to `tokio::task::JoinSet`
+  for structured concurrency with cancellation
 - [ ] **Add `tower` rate-limiting layer** for LLM calls: replace manual `Semaphore`
-  in `ollama_native.rs` with `tower::limit::RateLimit` + `tower::retry::Retry`
-  for composable middleware (retry, timeout, rate limit in one stack)
-- [ ] **Full cache warming pass**: pre-scan all files with BLAKE3 hashing before
-  LLM calls, skip those unchanged from prior run (BLAKE3 hash exists in
-  `cache/mod.rs` but no pre-scan pass)
+  in `ollama_native.rs:55` with `tower::limit::RateLimit` + `tower::retry::Retry`
+- [ ] **Full cache warming pass**: BLAKE3 hash pre-scan of all files before LLM
+  calls, skip unchanged (BLAKE3 exists in `cache/mod.rs:491` but no pre-scan)
+- [ ] **Add `governor` rate limiter** per LLM provider (e.g., 60 req/min for Ollama)
+  to prevent 429 storms instead of relying on server-side rejection
 
 ### QMD Async Migration
 QMD storage is entirely synchronous (`pub fn`, no async). This blocks the MCP
@@ -76,37 +78,66 @@ server and CLI on I/O.
 
 ## P2: Simplification & Consolidation
 
-### Crate Merges (reduce surface area)
-Evaluate whether thin crates justify separate compilation units:
+### Crate Merges (11 → 9 crates)
+Audit confirmed three crates are too thin for independent compilation units:
 
-- [ ] **Merge `litho-qmd-core` into `litho-qmd-storage`** — `litho-qmd-core` is just
-  trait definitions + types. Merging eliminates one crate and simplifies deps.
-- [ ] **Merge `litho-qmd-llm` into `litho-qmd-storage`** — query expansion + reranking
-  is tightly coupled to storage; separating adds indirection without benefit.
-- [ ] **Evaluate `litho-codex` → `litho-generator`** — codex bridge may fold into
-  generator's provider abstraction. Keep separate only if used standalone.
+- [ ] **Merge `litho-qmd-core` (606 LOC) into `litho-qmd-storage`** — 19 of 22 public
+  methods are single-line pass-through delegation. Move `model.rs`, `traits.rs`,
+  `error.rs` into `litho-qmd-storage` as submodules.
+- [ ] **Merge `litho-qmd-llm` (732 LOC, 0 tests) into `litho-qmd-storage`** — 4
+  utility functions duplicated verbatim between the two crates (`discover_repo_file`,
+  `repo_qmd_config`, `repo_dotenv_values`, `get_dotenv_or_env`). Two incompatible
+  `RepoQmdConfig` struct definitions. Merging fixes both duplication and the config
+  divergence. Add tests (currently 0).
+- [ ] **Keep `litho-codex` separate** — it firewalls the 52-crate codex-rs dependency
+  tree. BUT reconcile the two parallel Codex paths: `litho-codex` (used by litho-cli)
+  vs `litho-generator/codex_provider.rs` (subprocess, used by litho-generator).
+  Pick one integration pattern.
 
-Result: 11 crates → 8-9 crates, fewer inter-crate boundaries.
+Result: QMD subsystem goes from 3 lib + 2 bin → 1 lib (`litho-qmd`) + 2 bin.
+
+### Code Quality Quick Wins
+- [ ] **Split `litho-qmd-storage/src/lib.rs` (2,644 LOC)** — extract `postgres_impl.rs`,
+  `auto_store.rs`, `config.rs` modules (currently a god module)
+- [ ] **Feature-gate PostgreSQL** in litho-qmd-storage — `default = ["sqlite"]`,
+  `postgres` feature for PostgreSQL backend. Saves compile time for local use.
+- [ ] **Feature-gate `pdf-extract`** in litho-generator — used at exactly 1 call site
+  (`integrations/local_docs.rs:382`), pulls in heavy deps (`lopdf`, `encoding_rs`)
+- [ ] **Remove duplicate search commands** from litho-cli — `search`/`query`/`vsearch`
+  duplicate litho-qmd-cli identically (same format string, same `QmdService` setup).
+  Either delegate to subprocess or eliminate litho-qmd-cli entirely.
+- [ ] **Standardize markdown parser** — litho-generator depends on both `comrak` AND
+  `pulldown-cmark`. Pick one to reduce dependency surface.
 
 ### LLM Client Simplification
-The project maintains ~1500 LOC of hand-rolled HTTP client code in `providers.rs`,
-`ollama_native.rs`, `codex_provider.rs`. Consider:
+The project maintains ~2,600 LOC of hand-rolled HTTP client code across `providers.rs`
+(1,009 LOC), `ollama_native.rs` (1,097 LOC), `codex_provider.rs` (579 LOC).
 
-- [ ] **Evaluate `genai` crate** (v0.5) — multi-provider library supporting Ollama,
-  OpenAI, Anthropic, Gemini, DeepSeek, Groq, Cohere out of the box. Could replace
-  most of `providers.rs` and eliminate per-provider format handling.
-  Tradeoff: adds a dependency but removes ~800 LOC of API format code.
-- [ ] **Evaluate `async-openai`** — mature OpenAI-compatible client. Works with Ollama
-  via base URL override. Typed request/response structs, streaming support.
-- [ ] If neither fits: at minimum extract `tower::Service` middleware for retry +
-  rate limit + timeout (currently hand-rolled in each provider).
+- [ ] **Evaluate `async-openai` v0.34** — covers Chat, Responses API, Embeddings with
+  built-in exponential backoff retry on 429s. Works with Ollama via `OPENAI_BASE_URL`.
+  Would replace the OpenAI arm of `providers.rs` (~150 LOC). Does NOT cover Anthropic
+  or Gemini — those still need thin wrappers.
+- [ ] **Evaluate `genai` v0.5** — 14 providers out of the box (Ollama, OpenAI,
+  Anthropic, Gemini, DeepSeek, Groq, Cohere). Would replace most of `providers.rs`.
+  Tradeoff: larger dependency but removes ~800 LOC of per-provider format code.
+- [ ] **Add `reqwest-middleware` + `reqwest-retry`** — composable retry middleware
+  for any custom providers that remain. Replaces ad-hoc backoff logic.
+- [ ] **Add `futures-concurrency` v7.7** — replace `futures::join_all` + `Semaphore`
+  with `FutureGroup` for structured concurrency. `try_join` cancels siblings on
+  first error. `ConcurrentStream` for batch file processing.
+- [ ] **Add `minijinja` v2.7** — replace `format!()` prompt construction with Jinja2
+  templates. Separates prompt text from Rust code, enables iteration without recompile.
 
 ### Configuration Unification
-Currently 4 config surfaces: `litho.toml`, `.env`, CLI flags, `qmd.config.json`.
+Audit found **6 distinct config mechanisms** (2 TOML schemas both called `litho.toml`,
+2 JSON readers for `qmd.config.json` with incompatible structs, 2 `.env` parsers,
+plus CLI flags and raw env vars). Consolidate to 3:
 
+- [ ] Unify `litho-core::LithoConfig` + `litho-generator::Config` into single hierarchy
+  (core defines base fields, generator extends with pipeline-specific fields)
 - [ ] Merge QMD database config into `litho.toml` under `[qmd]` section
 - [ ] Deprecate standalone `qmd.config.json` (provide migration path)
-- [ ] Document single config surface in README.md
+- [ ] One `.env` parser in `litho-core` for `LITHO_*` vars, one in QMD for `QMD_*`
 
 ### Deprecation Path
 - [ ] Add deprecation warnings when `litho-qmd-cli` is invoked directly
@@ -190,19 +221,40 @@ The QMD pipeline currently shells out to external embedding models. `fastembed-r
 
 ---
 
-## Crate Candidates (researched 2026-04-01)
+## Crate Candidates (researched 2026-04-01, agent-verified)
 
-| Crate | Version | Purpose | Replaces |
-|-------|---------|---------|----------|
-| `moka` | 0.12 | Concurrent async cache with TTL/size eviction | Custom LRU in `CacheManager` |
-| `fastembed` | 5.12 | Native ONNX embedding generation (GPU) | External embedding subprocess |
-| `genai` | 0.5 | Multi-provider LLM client (14 providers) | ~800 LOC in `providers.rs` |
-| `tower` | 0.5 | Rate limit + retry + timeout middleware | Manual `Semaphore` + backoff |
-| `insta` | 1.x | Snapshot testing for extract output | Manual output comparison |
-| `wiremock` | 0.6 | HTTP mock server for LLM client tests | No LLM client tests today |
-| `salsa` | 0.3 | Incremental computation framework | Manual cache invalidation |
-| `usearch` | latest | HNSW vector index for fast ANN search | Brute-force cosine similarity |
-| `tokio-rusqlite` | latest | Async SQLite access | `spawn_blocking` + `rusqlite` |
+### Priority Adoption (P0-P1)
+
+| Crate | Version | Purpose | Impact |
+|-------|---------|---------|--------|
+| `async-openai` | 0.34 | OpenAI-compat client with retry, Responses API | Replaces ~150 LOC, built-in 429 backoff |
+| `wiremock` | 0.6 | HTTP mock server for deterministic LLM tests | Eliminates live-Ollama test dependency |
+| `insta` | 1.47 | Snapshot testing with JSON redactions | Catches LLM prompt/output regressions |
+| `moka` | 0.12 | Concurrent async cache, stampede prevention | `get_with()` deduplicates parallel LLM calls |
+| `fastembed` | 5.13 | Native ONNX embeddings (GPU, no subprocess) | Eliminates 12-45s CLI cold-start latency |
+| `futures-concurrency` | 7.7 | `FutureGroup`, `try_join`, `ConcurrentStream` | Structured cancellation, backpressure |
+| `rstest` | 0.25 | Parameterized tests, async fixtures | Reduces quality-scoring test boilerplate |
+
+### Medium-Term (P2)
+
+| Crate | Version | Purpose | Impact |
+|-------|---------|---------|--------|
+| `genai` | 0.5 | 14-provider LLM client | Replaces ~800 LOC provider code |
+| `governor` | 0.10 | GCRA rate limiter for LLM APIs | Prevents 429 storms under parallel agents |
+| `reqwest-middleware` | latest | Composable retry/timeout middleware | Replaces ad-hoc backoff in providers |
+| `minijinja` | 2.7 | Jinja2 prompt templates | Separates prompt text from Rust code |
+| `usearch` | 2.24 | HNSW vector index | No-PostgreSQL embedded search |
+| `tantivy` | 0.25 | Full-text search engine | Replaces `bm25` crate with phrase/facet support |
+| `syn` | 2.0 | Deep Rust AST analysis | Typed AST vs raw tree-sitter for `.rs` files |
+
+### Long-Term (P3)
+
+| Crate | Version | Purpose | Impact |
+|-------|---------|---------|--------|
+| `salsa` | 0.26 | Dependency-tracked incremental computation | Only recompute changed files (salsa-style) |
+| `oxc_parser` | 0.75 | 2-3x faster JS/TS parsing vs tree-sitter | Richer AST for TypeScript extraction |
+| `ast-grep-core` | 0.42 | Structural pattern matching on tree-sitter | Replaces manual cursor walks in discovery |
+| `rig-core` | 0.33 | Full LLM orchestration (revisit after v0.23 removal) | Test if stack overflow fixed in v0.33 |
 
 ## Reference Projects
 
