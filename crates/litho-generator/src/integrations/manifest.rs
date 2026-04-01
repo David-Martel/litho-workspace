@@ -74,11 +74,18 @@ impl DocumentationManifest {
 
     /// Load a manifest from `.litho/manifest.json`.
     ///
-    /// Returns `None` if the file doesn't exist (first run).
-    pub async fn load(internal_path: &Path) -> Option<Self> {
+    /// Returns `Ok(None)` when the manifest doesn't exist (first run).
+    /// Returns `Err` when the manifest exists but cannot be read or parsed.
+    pub async fn load(internal_path: &Path) -> Result<Option<Self>> {
         let manifest_path = internal_path.join("manifest.json");
-        let content = tokio::fs::read_to_string(&manifest_path).await.ok()?;
-        serde_json::from_str(&content).ok()
+        let content = match tokio::fs::read_to_string(&manifest_path).await {
+            Ok(content) => content,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(err) => return Err(err.into()),
+        };
+
+        let manifest = serde_json::from_str(&content)?;
+        Ok(Some(manifest))
     }
 
     /// Record a file hash for a processed source file.
@@ -276,7 +283,7 @@ mod tests {
         assert!(internal_path.join("manifest.json").exists());
 
         // Load it back
-        let loaded = DocumentationManifest::load(&internal_path).await;
+        let loaded = DocumentationManifest::load(&internal_path).await.unwrap();
         assert!(loaded.is_some(), "manifest.load() returned None");
         let loaded = loaded.unwrap();
 
@@ -300,7 +307,22 @@ mod tests {
         let dir = tempdir().unwrap();
         let nonexistent = dir.path().join("no_such_dir");
         let result = DocumentationManifest::load(&nonexistent).await;
-        assert!(result.is_none());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_manifest_load_returns_err_for_corrupt_json() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let internal_path = dir.path().join(".litho");
+        tokio::fs::create_dir_all(&internal_path).await.unwrap();
+        tokio::fs::write(internal_path.join("manifest.json"), "{ not valid json }")
+            .await
+            .unwrap();
+
+        let result = DocumentationManifest::load(&internal_path).await;
+        assert!(result.is_err());
     }
 
     #[tokio::test]

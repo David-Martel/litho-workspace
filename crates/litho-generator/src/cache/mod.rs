@@ -1,7 +1,11 @@
 use anyhow::Result;
+use lru::LruCache;
 use md5::{Digest, Md5};
+use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
+use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::fs;
 
@@ -10,12 +14,99 @@ use crate::i18n::TargetLanguage;
 use crate::llm::client::types::TokenUsage;
 
 pub mod performance_monitor;
+pub mod repo_index;
 pub use performance_monitor::{CachePerformanceMonitor, CachePerformanceReport};
 
 /// Cache manager
 pub struct CacheManager {
     config: CacheConfig,
     performance_monitor: CachePerformanceMonitor,
+    hot_cache: Mutex<LruCache<String, String>>,
+    sqlite_store: Option<SqliteCacheStore>,
+}
+
+#[derive(Debug, Clone)]
+struct SqliteCacheStore {
+    db_path: PathBuf,
+}
+
+impl SqliteCacheStore {
+    fn new(db_path: PathBuf) -> Result<Self> {
+        if let Some(parent) = db_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let conn = Connection::open(&db_path)?;
+        conn.execute_batch(
+            "
+            PRAGMA journal_mode = WAL;
+            PRAGMA synchronous = NORMAL;
+            CREATE TABLE IF NOT EXISTS cache_entries (
+                category TEXT NOT NULL,
+                hash TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                timestamp INTEGER NOT NULL,
+                PRIMARY KEY(category, hash)
+            );
+            CREATE INDEX IF NOT EXISTS idx_cache_entries_timestamp ON cache_entries(timestamp);
+            ",
+        )?;
+        Ok(Self { db_path })
+    }
+
+    async fn get_payload(&self, category: String, hash: String) -> Result<Option<String>> {
+        let db_path = self.db_path.clone();
+        tokio::task::spawn_blocking(move || -> Result<Option<String>> {
+            let conn = Connection::open(&db_path)?;
+            let mut stmt = conn
+                .prepare("SELECT payload FROM cache_entries WHERE category = ?1 AND hash = ?2")?;
+            let mut rows = stmt.query(params![category, hash])?;
+            if let Some(row) = rows.next()? {
+                let payload: String = row.get(0)?;
+                Ok(Some(payload))
+            } else {
+                Ok(None)
+            }
+        })
+        .await?
+    }
+
+    async fn set_payload(
+        &self,
+        category: String,
+        hash: String,
+        payload: String,
+        timestamp: i64,
+    ) -> Result<()> {
+        let db_path = self.db_path.clone();
+        tokio::task::spawn_blocking(move || -> Result<()> {
+            let conn = Connection::open(&db_path)?;
+            conn.execute(
+                "INSERT INTO cache_entries(category, hash, payload, timestamp)
+                 VALUES(?1, ?2, ?3, ?4)
+                 ON CONFLICT(category, hash) DO UPDATE SET
+                    payload = excluded.payload,
+                    timestamp = excluded.timestamp",
+                params![category, hash, payload, timestamp],
+            )?;
+            Ok(())
+        })
+        .await??;
+        Ok(())
+    }
+
+    async fn delete_entry(&self, category: String, hash: String) -> Result<()> {
+        let db_path = self.db_path.clone();
+        tokio::task::spawn_blocking(move || -> Result<()> {
+            let conn = Connection::open(&db_path)?;
+            conn.execute(
+                "DELETE FROM cache_entries WHERE category = ?1 AND hash = ?2",
+                params![category, hash],
+            )?;
+            Ok(())
+        })
+        .await??;
+        Ok(())
+    }
 }
 
 /// Cache entry
@@ -33,9 +124,62 @@ pub struct CacheEntry<T> {
 
 impl CacheManager {
     pub fn new(config: CacheConfig, target_language: TargetLanguage) -> Self {
+        let lru_capacity = NonZeroUsize::new(config.lru_max_entries.max(1))
+            .expect("lru_max_entries.max(1) is always non-zero");
+        let sqlite_store = if config.sqlite_enabled {
+            let sqlite_path = config
+                .sqlite_path
+                .clone()
+                .unwrap_or_else(|| config.cache_dir.join("cache-index.sqlite3"));
+            match SqliteCacheStore::new(sqlite_path) {
+                Ok(store) => Some(store),
+                Err(err) => {
+                    eprintln!("⚠️  Warning: failed to initialize sqlite cache store: {err}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         Self {
             config,
             performance_monitor: CachePerformanceMonitor::new(target_language),
+            hot_cache: Mutex::new(LruCache::new(lru_capacity)),
+            sqlite_store,
+        }
+    }
+
+    fn lru_key(category: &str, hash: &str) -> String {
+        format!("{category}:{hash}")
+    }
+
+    fn cache_entry_from_payload<T>(&self, payload: &str) -> Result<CacheEntry<T>>
+    where
+        T: for<'de> Deserialize<'de>,
+    {
+        Ok(serde_json::from_str::<CacheEntry<T>>(payload)?)
+    }
+
+    fn touch_lru(&self, category: &str, hash: &str, payload: &str) {
+        let key = Self::lru_key(category, hash);
+        if let Ok(mut lru) = self.hot_cache.lock() {
+            lru.put(key, payload.to_string());
+        }
+    }
+
+    fn lru_get(&self, category: &str, hash: &str) -> Option<String> {
+        let key = Self::lru_key(category, hash);
+        self.hot_cache
+            .lock()
+            .ok()
+            .and_then(|mut lru| lru.get(&key).cloned())
+    }
+
+    fn lru_remove(&self, category: &str, hash: &str) {
+        let key = Self::lru_key(category, hash);
+        if let Ok(mut lru) = self.hot_cache.lock() {
+            lru.pop(&key);
         }
     }
 
@@ -76,6 +220,46 @@ impl CacheManager {
         let hash = self.hash_prompt(prompt);
         let cache_path = self.get_cache_path(category, &hash);
 
+        if let Some(payload) = self.lru_get(category, &hash)
+            && let Ok(entry) = self.cache_entry_from_payload::<T>(&payload)
+        {
+            if self.is_expired(entry.timestamp) {
+                self.lru_remove(category, &hash);
+            } else {
+                let estimated_inference_time = self.estimate_inference_time(&payload);
+                if let Some(token_usage) = &entry.token_usage {
+                    self.performance_monitor.record_cache_hit(
+                        category,
+                        estimated_inference_time,
+                        token_usage.clone(),
+                        "",
+                    );
+                }
+                return Ok(Some(entry.data));
+            }
+        }
+
+        if let Some(store) = &self.sqlite_store
+            && let Ok(Some(payload)) = store.get_payload(category.to_string(), hash.clone()).await
+            && let Ok(entry) = self.cache_entry_from_payload::<T>(&payload)
+        {
+            if self.is_expired(entry.timestamp) {
+                let _ = store.delete_entry(category.to_string(), hash.clone()).await;
+            } else {
+                self.touch_lru(category, &hash, &payload);
+                let estimated_inference_time = self.estimate_inference_time(&payload);
+                if let Some(token_usage) = &entry.token_usage {
+                    self.performance_monitor.record_cache_hit(
+                        category,
+                        estimated_inference_time,
+                        token_usage.clone(),
+                        "",
+                    );
+                }
+                return Ok(Some(entry.data));
+            }
+        }
+
         if !fs::try_exists(&cache_path).await.unwrap_or(false) {
             self.performance_monitor.record_cache_miss(category);
             return Ok(None);
@@ -88,8 +272,25 @@ impl CacheManager {
                         if self.is_expired(entry.timestamp) {
                             // Delete expired cache
                             let _ = fs::remove_file(&cache_path).await;
+                            if let Some(store) = &self.sqlite_store {
+                                let _ =
+                                    store.delete_entry(category.to_string(), hash.clone()).await;
+                            }
+                            self.lru_remove(category, &hash);
                             self.performance_monitor.record_cache_miss(category);
                             return Ok(None);
+                        }
+
+                        self.touch_lru(category, &hash, &content);
+                        if let Some(store) = &self.sqlite_store {
+                            let _ = store
+                                .set_payload(
+                                    category.to_string(),
+                                    hash.clone(),
+                                    content.clone(),
+                                    entry.timestamp as i64,
+                                )
+                                .await;
                         }
 
                         // Use stored token information for accurate statistics
@@ -154,14 +355,25 @@ impl CacheManager {
         let entry = CacheEntry {
             data,
             timestamp,
-            prompt_hash: hash,
+            prompt_hash: hash.clone(),
             token_usage: Some(token_usage),
             model_name: None,
         };
 
         match serde_json::to_string_pretty(&entry) {
-            Ok(content) => match fs::write(&cache_path, content).await {
+            Ok(content) => match fs::write(&cache_path, &content).await {
                 Ok(_) => {
+                    self.touch_lru(category, &hash, &content);
+                    if let Some(store) = &self.sqlite_store {
+                        let _ = store
+                            .set_payload(
+                                category.to_string(),
+                                hash.clone(),
+                                content.clone(),
+                                timestamp as i64,
+                            )
+                            .await;
+                    }
                     self.performance_monitor.record_cache_write(category);
                     Ok(())
                 }
@@ -224,14 +436,25 @@ impl CacheManager {
         let entry = CacheEntry {
             data,
             timestamp,
-            prompt_hash: hash,
+            prompt_hash: hash.clone(),
             token_usage: None,
             model_name: None,
         };
 
         match serde_json::to_string_pretty(&entry) {
-            Ok(content) => match fs::write(&cache_path, content).await {
+            Ok(content) => match fs::write(&cache_path, &content).await {
                 Ok(_) => {
+                    self.touch_lru(category, &hash, &content);
+                    if let Some(store) = &self.sqlite_store {
+                        let _ = store
+                            .set_payload(
+                                category.to_string(),
+                                hash.clone(),
+                                content.clone(),
+                                timestamp as i64,
+                            )
+                            .await;
+                    }
                     self.performance_monitor.record_cache_write(category);
                     Ok(())
                 }
@@ -281,6 +504,32 @@ impl CacheManager {
             return Ok(None);
         }
 
+        if let Some(payload) = self.lru_get(category, content_hash)
+            && let Ok(entry) = self.cache_entry_from_payload::<T>(&payload)
+        {
+            if self.is_expired(entry.timestamp) {
+                self.lru_remove(category, content_hash);
+            } else {
+                return Ok(Some(entry.data));
+            }
+        }
+
+        if let Some(store) = &self.sqlite_store
+            && let Ok(Some(payload)) = store
+                .get_payload(category.to_string(), content_hash.to_string())
+                .await
+            && let Ok(entry) = self.cache_entry_from_payload::<T>(&payload)
+        {
+            if self.is_expired(entry.timestamp) {
+                let _ = store
+                    .delete_entry(category.to_string(), content_hash.to_string())
+                    .await;
+            } else {
+                self.touch_lru(category, content_hash, &payload);
+                return Ok(Some(entry.data));
+            }
+        }
+
         let cache_path = self.get_cache_path(category, content_hash);
 
         if !fs::try_exists(&cache_path).await.unwrap_or(false) {
@@ -293,10 +542,27 @@ impl CacheManager {
                 Ok(entry) => {
                     if self.is_expired(entry.timestamp) {
                         let _ = fs::remove_file(&cache_path).await;
+                        if let Some(store) = &self.sqlite_store {
+                            let _ = store
+                                .delete_entry(category.to_string(), content_hash.to_string())
+                                .await;
+                        }
+                        self.lru_remove(category, content_hash);
                         self.performance_monitor.record_cache_miss(category);
                         return Ok(None);
                     }
 
+                    self.touch_lru(category, content_hash, &content);
+                    if let Some(store) = &self.sqlite_store {
+                        let _ = store
+                            .set_payload(
+                                category.to_string(),
+                                content_hash.to_string(),
+                                content.clone(),
+                                entry.timestamp as i64,
+                            )
+                            .await;
+                    }
                     let estimated_inference_time = self.estimate_inference_time(&content);
                     if let Some(token_usage) = &entry.token_usage {
                         self.performance_monitor.record_cache_hit(
@@ -356,8 +622,19 @@ impl CacheManager {
         };
 
         match serde_json::to_string_pretty(&entry) {
-            Ok(content) => match fs::write(&cache_path, content).await {
+            Ok(content) => match fs::write(&cache_path, &content).await {
                 Ok(_) => {
+                    self.touch_lru(category, content_hash, &content);
+                    if let Some(store) = &self.sqlite_store {
+                        let _ = store
+                            .set_payload(
+                                category.to_string(),
+                                content_hash.to_string(),
+                                content.clone(),
+                                timestamp as i64,
+                            )
+                            .await;
+                    }
                     self.performance_monitor.record_cache_write(category);
                     Ok(())
                 }

@@ -40,6 +40,7 @@ impl ResearchOrchestrator {
     pub async fn execute_research_pipeline(&self, context: &GeneratorContext) -> Result<()> {
         println!("🚀 Starting Litho Studies Research investigation pipeline...");
         self.seed_qmd_research_context(context).await?;
+        self.seed_ingestion_research_context(context).await?;
 
         // First layer: Macro analysis (C1)
         self.execute_agent(&SystemContextResearcher, context)
@@ -93,6 +94,7 @@ impl ResearchOrchestrator {
             affected_agents.len()
         );
         self.seed_qmd_research_context(context).await?;
+        self.seed_ingestion_research_context(context).await?;
 
         let is_affected = |name: &str| affected_agents.contains(name);
 
@@ -334,5 +336,30 @@ impl ResearchOrchestrator {
                 })
             })
             .collect())
+    }
+
+    async fn seed_ingestion_research_context(&self, context: &GeneratorContext) -> Result<()> {
+        let rag_chunks: Option<Vec<Value>> = context
+            .get_from_memory(PreprocessMemoryScope::PREPROCESS, ScopedKeys::INGESTION_RAG)
+            .await;
+        let Some(rag_chunks) = rag_chunks else {
+            return Ok(());
+        };
+        if rag_chunks.is_empty() {
+            return Ok(());
+        }
+
+        let payload = json!({
+            "source": "ingestion_dag",
+            "chunks": rag_chunks.into_iter().take(128).collect::<Vec<_>>(),
+        });
+        context
+            .store_to_memory(
+                ResearchMemoryScope::STUDIES_RESEARCH,
+                "IngestionDagRag",
+                payload,
+            )
+            .await?;
+        Ok(())
     }
 }

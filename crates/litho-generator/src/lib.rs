@@ -4,7 +4,9 @@
 //! integration tests in `tests/` can import types without duplicating code.
 //! Production entry-point remains `main.rs`.
 
+pub mod benchmark;
 pub mod cache;
+pub mod cli;
 pub mod config;
 pub mod generator;
 pub mod i18n;

@@ -1,3 +1,5 @@
+use memchr::{memchr, memchr3};
+
 /// Token compression for source code sent to LLM prompts.
 ///
 /// Strips comments and collapses whitespace to reduce per-file prompt token
@@ -61,6 +63,17 @@ fn strip_c_style_comments(source: &str) -> String {
     let mut i = 0;
 
     while i < len {
+        // SIMD-accelerated fast path: jump to the next "interesting" byte.
+        if bytes[i] != b'"' && bytes[i] != b'\'' && bytes[i] != b'`' && bytes[i] != b'/' {
+            if let Some(next_rel) = next_c_style_special(&bytes[i..]) {
+                out.push_str(&source[i..i + next_rel]);
+                i += next_rel;
+                continue;
+            }
+            out.push_str(&source[i..]);
+            break;
+        }
+
         // Entering a double-quoted string literal
         if bytes[i] == b'"' {
             let (literal, consumed) = consume_string_literal(bytes, i, b'"');
@@ -129,6 +142,17 @@ fn strip_c_style_comments(source: &str) -> String {
     out
 }
 
+fn next_c_style_special(bytes: &[u8]) -> Option<usize> {
+    let string_like = memchr3(b'"', b'\'', b'`', bytes);
+    let slash = memchr(b'/', bytes);
+    match (string_like, slash) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
+    }
+}
+
 /// Consume a string literal delimited by `quote` (either `"` or `'`).
 /// Returns `(literal_slice, bytes_consumed)`.
 fn consume_string_literal(bytes: &[u8], start: usize, quote: u8) -> (&str, usize) {
@@ -188,6 +212,17 @@ fn strip_python_comments(source: &str) -> String {
     let mut i = 0;
 
     while i < len {
+        // SIMD-accelerated fast path: skip chunks without quote/comment bytes.
+        if bytes[i] != b'"' && bytes[i] != b'\'' && bytes[i] != b'#' {
+            if let Some(next_rel) = memchr3(b'"', b'\'', b'#', &bytes[i..]) {
+                out.push_str(&source[i..i + next_rel]);
+                i += next_rel;
+                continue;
+            }
+            out.push_str(&source[i..]);
+            break;
+        }
+
         // Triple-quoted strings: """ or '''
         if i + 2 < len
             && ((bytes[i] == b'"' && bytes[i + 1] == b'"' && bytes[i + 2] == b'"')

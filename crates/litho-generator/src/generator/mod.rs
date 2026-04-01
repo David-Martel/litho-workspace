@@ -1,6 +1,7 @@
 pub mod agent_executor;
 pub mod compose;
 pub mod context;
+pub mod ingestion;
 pub mod outlet;
 pub mod preprocess;
 pub mod quality_gate;

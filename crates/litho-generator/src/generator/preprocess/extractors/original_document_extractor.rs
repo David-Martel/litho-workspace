@@ -264,6 +264,8 @@ fn parse_requirements_txt(content: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
+    use tokio::fs;
 
     #[test]
     fn test_trim_markdown_preserves_headings() {
@@ -530,6 +532,126 @@ dependencies = [
             deps.contains(&"fastapi".to_string()),
             "Expected fastapi in {:?}",
             deps
+        );
+    }
+
+    #[tokio::test]
+    async fn supplementary_docs_are_combined_in_priority_order() {
+        let dir = tempdir().expect("tempdir");
+        fs::create_dir_all(dir.path().join("docs"))
+            .await
+            .expect("create docs dir");
+
+        fs::write(dir.path().join("CLAUDE.md"), "# Claude\nAgent guidance")
+            .await
+            .expect("write claude");
+        fs::write(
+            dir.path().join("CONTRIBUTING.md"),
+            "# Contributing\nPlease run tests",
+        )
+        .await
+        .expect("write contributing");
+        fs::write(
+            dir.path().join("docs").join("README.md"),
+            "# Docs\nDesign notes",
+        )
+        .await
+        .expect("write docs readme");
+
+        let docs = read_supplementary_docs(dir.path())
+            .await
+            .expect("supplementary docs");
+
+        let claude_ix = docs.find("#### From CLAUDE.md").expect("claude section");
+        let contrib_ix = docs
+            .find("#### From CONTRIBUTING.md")
+            .expect("contributing section");
+        let docs_ix = docs
+            .find("#### From docs/README.md")
+            .expect("docs/readme section");
+
+        assert!(
+            claude_ix < contrib_ix && contrib_ix < docs_ix,
+            "expected candidate order CLAUDE -> CONTRIBUTING -> docs/README"
+        );
+        assert!(docs.contains("# Claude"));
+        assert!(docs.contains("# Contributing"));
+        assert!(docs.contains("# Docs"));
+    }
+
+    #[tokio::test]
+    async fn supplementary_docs_are_trimmed_and_truncated() {
+        let dir = tempdir().expect("tempdir");
+        let large_content = format!("# Header\n{}\n", "a".repeat(4500));
+        fs::write(dir.path().join("CLAUDE.md"), large_content)
+            .await
+            .expect("write claude");
+
+        let docs = read_supplementary_docs(dir.path())
+            .await
+            .expect("supplementary docs");
+
+        assert!(docs.contains("#### From CLAUDE.md"));
+        assert!(
+            docs.contains("...(truncated)"),
+            "expected truncation suffix when doc exceeds 4000 chars"
+        );
+    }
+
+    #[tokio::test]
+    async fn extract_tech_stack_prefers_pyproject_over_requirements() {
+        let dir = tempdir().expect("tempdir");
+        fs::write(
+            dir.path().join("Cargo.toml"),
+            r#"
+[package]
+name = "demo"
+[dependencies]
+tokio = "1"
+serde = "1"
+"#,
+        )
+        .await
+        .expect("write cargo");
+
+        fs::write(
+            dir.path().join("pyproject.toml"),
+            r#"
+[project]
+dependencies = [
+  "httpx>=0.27",
+  "pydantic>=2.0"
+]
+"#,
+        )
+        .await
+        .expect("write pyproject");
+
+        fs::write(
+            dir.path().join("requirements.txt"),
+            "flask==2.3\nrequests==2.31",
+        )
+        .await
+        .expect("write requirements");
+
+        fs::write(
+            dir.path().join("package.json"),
+            r#"{"dependencies":{"react":"^18.2.0","vite":"^5.0.0"}}"#,
+        )
+        .await
+        .expect("write package");
+
+        let stack = extract_tech_stack(dir.path()).await.expect("tech stack");
+        assert!(stack.iter().any(|v| v == "Rust: tokio, serde"));
+        assert!(
+            stack.iter().any(|v| v == "Python: httpx, pydantic"),
+            "expected python deps from pyproject, not requirements fallback"
+        );
+        assert!(stack.iter().any(|v| v == "Node.js: react, vite"));
+        assert_eq!(
+            stack.iter().filter(|v| v.starts_with("Python:")).count(),
+            1,
+            "python dependency source should not be duplicated"
         );
     }
 }

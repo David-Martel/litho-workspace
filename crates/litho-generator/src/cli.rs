@@ -1,6 +1,6 @@
 use crate::config::{Config, LLMProvider};
 use crate::i18n::TargetLanguage;
-use clap::{Parser, Subcommand};
+use clap::{Args as ClapArgs, Parser, Subcommand};
 use std::path::PathBuf;
 
 /// DeepWiki-RS - Project knowledge base generation engine powered by Rust and AI
@@ -105,6 +105,129 @@ pub enum Commands {
         #[arg(long)]
         force: bool,
     },
+    /// Build/update repo index only (no LLM generation).
+    IndexRepo {
+        /// Configuration file path
+        #[arg(short, long)]
+        config: Option<PathBuf>,
+
+        /// Optional project path override.
+        #[arg(long)]
+        project_path: Option<PathBuf>,
+    },
+    /// Benchmark model/parameter candidates and recommend an optimized profile.
+    BenchmarkOptimize(Box<BenchmarkOptimizeCommand>),
+}
+
+#[derive(ClapArgs, Debug)]
+pub struct BenchmarkOptimizeCommand {
+    /// Configuration file path.
+    #[arg(short, long)]
+    pub config: Option<PathBuf>,
+
+    /// Optional project path override.
+    #[arg(long)]
+    pub project_path: Option<PathBuf>,
+
+    /// Output directory for benchmark artifacts/reports.
+    #[arg(long, default_value = ".litho/benchmark")]
+    pub output_dir: PathBuf,
+
+    /// Comma-separated model list.
+    #[arg(long)]
+    pub models: Option<String>,
+
+    /// Comma-separated context window values.
+    #[arg(long)]
+    pub context_windows: Option<String>,
+
+    /// Comma-separated num_predict values.
+    #[arg(long)]
+    pub num_predict: Option<String>,
+
+    /// Comma-separated temperature values.
+    #[arg(long)]
+    pub temperatures: Option<String>,
+
+    /// Comma-separated top-p values.
+    #[arg(long)]
+    pub top_p_values: Option<String>,
+
+    /// Comma-separated top-k values.
+    #[arg(long)]
+    pub top_k_values: Option<String>,
+
+    /// Comma-separated repeat-penalty values.
+    #[arg(long)]
+    pub repeat_penalty_values: Option<String>,
+
+    /// Comma-separated max-in-flight values.
+    #[arg(long)]
+    pub max_in_flight_values: Option<String>,
+
+    /// Number of measured runs per candidate.
+    #[arg(long, default_value_t = 3)]
+    pub runs_per_candidate: usize,
+
+    /// Warmup runs per candidate (not included in scoring).
+    #[arg(long, default_value_t = 1)]
+    pub warmup_runs: usize,
+
+    /// Maximum number of candidates to evaluate.
+    #[arg(long, default_value_t = 24)]
+    pub max_candidates: usize,
+
+    /// Hard timeout per benchmark run, in seconds.
+    #[arg(long, default_value_t = 300)]
+    pub run_timeout_seconds: u64,
+
+    /// Minimum quality score required for recommendation.
+    #[arg(long, default_value_t = 0.70)]
+    pub min_quality: f64,
+
+    /// Optional promotion gate: minimum required success rate [0.0, 1.0].
+    #[arg(long)]
+    pub gate_min_success_rate: Option<f64>,
+
+    /// Optional promotion gate: maximum allowed p95 run duration in seconds.
+    #[arg(long)]
+    pub gate_max_p95_seconds: Option<f64>,
+
+    /// Optional promotion gate: minimum required quality score [0.0, 1.0].
+    #[arg(long)]
+    pub gate_min_quality: Option<f64>,
+
+    /// Composite-score quality weight.
+    #[arg(long, default_value_t = 0.60)]
+    pub weight_quality: f64,
+
+    /// Composite-score latency weight.
+    #[arg(long, default_value_t = 0.20)]
+    pub weight_latency: f64,
+
+    /// Composite-score throughput weight.
+    #[arg(long, default_value_t = 0.10)]
+    pub weight_throughput: f64,
+
+    /// Composite-score memory weight.
+    #[arg(long, default_value_t = 0.10)]
+    pub weight_memory: f64,
+
+    /// Composite-score stability weight.
+    #[arg(long, default_value_t = 0.00)]
+    pub weight_stability: f64,
+
+    /// Keep cache enabled while benchmarking.
+    #[arg(long, default_value_t = false, action = clap::ArgAction::SetTrue)]
+    pub keep_cache: bool,
+
+    /// Keep per-run docs/artifacts on disk.
+    #[arg(long, default_value_t = false, action = clap::ArgAction::SetTrue)]
+    pub retain_artifacts: bool,
+
+    /// Build candidate matrix and output reports without executing generation runs.
+    #[arg(long, default_value_t = false, action = clap::ArgAction::SetTrue)]
+    pub dry_run: bool,
 }
 
 impl Args {

@@ -70,6 +70,18 @@ pub struct TimingStats {
     pub total_execution_time: f64,
     /// Preprocessing phase time (seconds)
     pub preprocess_time: f64,
+    /// Original-document extraction time.
+    pub preprocess_original_doc_time: f64,
+    /// Project-structure extraction time.
+    pub preprocess_structure_time: f64,
+    /// Core-code identification time.
+    pub preprocess_identify_core_time: f64,
+    /// Code-analysis time.
+    pub preprocess_code_analyze_time: f64,
+    /// Relationship-analysis time.
+    pub preprocess_relationships_time: f64,
+    /// Ingestion DAG/RAG construction time.
+    pub preprocess_ingestion_time: f64,
     /// Research phase time (seconds)
     pub research_time: f64,
     /// Document generation phase time (seconds)
@@ -78,6 +90,8 @@ pub struct TimingStats {
     pub output_time: f64,
     /// Document generation time
     pub document_generation_time: f64,
+    /// Time-to-first-successful LLM response.
+    pub first_llm_response_time: f64,
     /// Summary generation time
     pub summary_generation_time: f64,
 }
@@ -172,6 +186,30 @@ impl SummaryDataCollector {
             .get_from_memory::<f64>(TimingScope::TIMING, TimingKeys::RESEARCH)
             .await
             .unwrap_or(0.0);
+        let preprocess_original_doc_time = context
+            .get_from_memory::<f64>(TimingScope::TIMING, TimingKeys::PREPROCESS_ORIGINAL_DOC)
+            .await
+            .unwrap_or(0.0);
+        let preprocess_structure_time = context
+            .get_from_memory::<f64>(TimingScope::TIMING, TimingKeys::PREPROCESS_STRUCTURE)
+            .await
+            .unwrap_or(0.0);
+        let preprocess_identify_core_time = context
+            .get_from_memory::<f64>(TimingScope::TIMING, TimingKeys::PREPROCESS_IDENTIFY_CORE)
+            .await
+            .unwrap_or(0.0);
+        let preprocess_code_analyze_time = context
+            .get_from_memory::<f64>(TimingScope::TIMING, TimingKeys::PREPROCESS_CODE_ANALYZE)
+            .await
+            .unwrap_or(0.0);
+        let preprocess_relationships_time = context
+            .get_from_memory::<f64>(TimingScope::TIMING, TimingKeys::PREPROCESS_RELATIONSHIPS)
+            .await
+            .unwrap_or(0.0);
+        let preprocess_ingestion_time = context
+            .get_from_memory::<f64>(TimingScope::TIMING, TimingKeys::PREPROCESS_INGESTION)
+            .await
+            .unwrap_or(0.0);
 
         let compose_time = context
             .get_from_memory::<f64>(TimingScope::TIMING, TimingKeys::COMPOSE)
@@ -187,6 +225,10 @@ impl SummaryDataCollector {
             .get_from_memory::<f64>(TimingScope::TIMING, TimingKeys::DOCUMENT_GENERATION)
             .await
             .unwrap_or(0.0);
+        let first_llm_response_time = context
+            .get_from_memory::<f64>(TimingScope::TIMING, TimingKeys::FIRST_LLM_RESPONSE)
+            .await
+            .unwrap_or(0.0);
 
         let total_execution_time = context
             .get_from_memory::<f64>(TimingScope::TIMING, TimingKeys::TOTAL_EXECUTION)
@@ -196,10 +238,17 @@ impl SummaryDataCollector {
         TimingStats {
             total_execution_time,
             preprocess_time,
+            preprocess_original_doc_time,
+            preprocess_structure_time,
+            preprocess_identify_core_time,
+            preprocess_code_analyze_time,
+            preprocess_relationships_time,
+            preprocess_ingestion_time,
             research_time,
             compose_time,
             output_time,
             document_generation_time,
+            first_llm_response_time,
             summary_generation_time: 0.0, // Will be set at call site
         }
     }
@@ -272,6 +321,45 @@ impl SummaryContentGenerator {
             content.push_str(&format!(
                 "- **Document Generation Time**: {:.2} seconds\n",
                 timing.document_generation_time
+            ));
+        }
+        if timing.first_llm_response_time > 0.0 {
+            content.push_str(&format!(
+                "- **First LLM Response Time**: {:.2} seconds\n",
+                timing.first_llm_response_time
+            ));
+        }
+        if timing.preprocess_original_doc_time > 0.0
+            || timing.preprocess_structure_time > 0.0
+            || timing.preprocess_identify_core_time > 0.0
+            || timing.preprocess_code_analyze_time > 0.0
+            || timing.preprocess_relationships_time > 0.0
+            || timing.preprocess_ingestion_time > 0.0
+        {
+            content.push_str("- **Preprocess Sub-steps**:\n");
+            content.push_str(&format!(
+                "  - Original docs: {:.2}s\n",
+                timing.preprocess_original_doc_time
+            ));
+            content.push_str(&format!(
+                "  - Structure extract: {:.2}s\n",
+                timing.preprocess_structure_time
+            ));
+            content.push_str(&format!(
+                "  - Identify core files: {:.2}s\n",
+                timing.preprocess_identify_core_time
+            ));
+            content.push_str(&format!(
+                "  - Code analyze: {:.2}s\n",
+                timing.preprocess_code_analyze_time
+            ));
+            content.push_str(&format!(
+                "  - Relationship analyze: {:.2}s\n",
+                timing.preprocess_relationships_time
+            ));
+            content.push_str(&format!(
+                "  - Ingestion DAG/RAG: {:.2}s\n",
+                timing.preprocess_ingestion_time
             ));
         }
         content.push_str(&format!(
@@ -432,6 +520,12 @@ impl SummaryContentGenerator {
             "**Total Execution Time**: {:.2} seconds\n",
             timing.total_execution_time
         ));
+        if timing.first_llm_response_time > 0.0 {
+            content.push_str(&format!(
+                "**First LLM Response**: {:.2} seconds\n",
+                timing.first_llm_response_time
+            ));
+        }
 
         // Display most time-consuming phases
         let mut stages = vec![

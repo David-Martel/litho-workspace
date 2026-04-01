@@ -63,6 +63,7 @@ impl OutletKind {
     }
 }
 
+#[derive(Clone)]
 pub struct DocTree {
     /// key is the ScopedKey of Documentation in Memory, value is the relative path for document output
     structure: HashMap<String, String>,
@@ -98,6 +99,13 @@ impl DocTree {
     pub fn insert(&mut self, scoped_key: &str, relative_path: &str) {
         self.structure
             .insert(scoped_key.to_string(), relative_path.to_string());
+    }
+
+    pub fn entries(&self) -> Vec<(String, String)> {
+        self.structure
+            .iter()
+            .map(|(key, path)| (key.clone(), path.clone()))
+            .collect()
     }
 }
 

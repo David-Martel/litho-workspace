@@ -142,8 +142,19 @@ impl ContentValidator {
         let section_completeness = Self::check_completeness(&doc_sections, &mut findings);
         let symbol_coverage =
             Self::check_symbol_coverage(&doc_sections, code_insights.as_deref(), &mut findings);
-        // Blend: 60% section structure, 40% symbol coverage
-        let completeness_score = section_completeness * 0.6 + symbol_coverage * 0.4;
+        let representation_score = if let Some(ref ps) = project_structure {
+            Self::check_representation_coverage(
+                &doc_sections,
+                ps,
+                code_insights.as_deref(),
+                &mut findings,
+            )
+        } else {
+            1.0
+        };
+        // Blend: 50% section structure, 30% symbol coverage, 20% file/symbol representation.
+        let completeness_score =
+            section_completeness * 0.5 + symbol_coverage * 0.3 + representation_score * 0.2;
 
         // 2. File path accuracy
         let accuracy_score = if let Some(ref ps) = project_structure {
@@ -654,6 +665,172 @@ impl ContentValidator {
         }
 
         documented as f64 / public_symbols.len() as f64
+    }
+
+    /// Check whether core/source files and their key symbols are represented in docs.
+    ///
+    /// Unlike `check_symbol_coverage`, this pass is file-aware and flags core files
+    /// whose paths/names never appear in generated documentation.
+    pub fn check_representation_coverage(
+        doc_sections: &[(String, String)],
+        project_structure: &ProjectStructure,
+        code_insights: Option<&[CodeInsight]>,
+        findings: &mut Vec<Finding>,
+    ) -> f64 {
+        let all_docs = doc_sections
+            .iter()
+            .map(|(_, content)| content.to_lowercase())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let relevant_files: Vec<_> = project_structure
+            .files
+            .iter()
+            .filter(|f| {
+                f.is_core
+                    || f.extension
+                        .as_deref()
+                        .map(Self::looks_like_source_extension)
+                        .unwrap_or(false)
+            })
+            .collect();
+        if relevant_files.is_empty() {
+            return 1.0;
+        }
+
+        let mut represented_files = 0usize;
+        let mut missing_files = Vec::new();
+        for file in &relevant_files {
+            let path = file
+                .path
+                .to_string_lossy()
+                .replace('\\', "/")
+                .to_lowercase();
+            let name = std::path::Path::new(&path)
+                .file_name()
+                .and_then(|v| v.to_str())
+                .unwrap_or("");
+            if all_docs.contains(&path) || (!name.is_empty() && all_docs.contains(name)) {
+                represented_files += 1;
+            } else {
+                missing_files.push(path);
+            }
+        }
+
+        if !missing_files.is_empty() {
+            findings.push(Finding {
+                severity: Severity::Warning,
+                category: "representation".to_string(),
+                message: format!(
+                    "{}/{} source/core files are not referenced in docs: {}{}",
+                    missing_files.len(),
+                    relevant_files.len(),
+                    missing_files
+                        .iter()
+                        .take(15)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    if missing_files.len() > 15 { "..." } else { "" }
+                ),
+                section: None,
+            });
+        }
+
+        let file_coverage = represented_files as f64 / relevant_files.len() as f64;
+
+        let Some(insights) = code_insights else {
+            return file_coverage;
+        };
+        let mut total_symbols = 0usize;
+        let mut documented_symbols = 0usize;
+        let mut missing_symbols = Vec::new();
+
+        for insight in insights {
+            for symbol in insight
+                .interfaces
+                .iter()
+                .map(|v| v.name.as_str())
+                .chain(insight.code_dossier.functions.iter().map(String::as_str))
+                .chain(insight.code_dossier.interfaces.iter().map(String::as_str))
+            {
+                let symbol = symbol.trim();
+                if symbol.is_empty() {
+                    continue;
+                }
+                total_symbols += 1;
+                let found = if symbol.len() <= 4 {
+                    Regex::new(&format!(r"\b{}\b", regex::escape(symbol)))
+                        .map(|re| re.is_match(&all_docs))
+                        .unwrap_or(false)
+                } else {
+                    all_docs.contains(&symbol.to_ascii_lowercase())
+                };
+                if found {
+                    documented_symbols += 1;
+                } else {
+                    missing_symbols.push(symbol.to_string());
+                }
+            }
+        }
+
+        if !missing_symbols.is_empty() {
+            missing_symbols.sort();
+            missing_symbols.dedup();
+            findings.push(Finding {
+                severity: Severity::Warning,
+                category: "representation".to_string(),
+                message: format!(
+                    "{}/{} extracted symbols are not represented in docs: {}{}",
+                    missing_symbols.len(),
+                    total_symbols.max(1),
+                    missing_symbols
+                        .iter()
+                        .take(20)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    if missing_symbols.len() > 20 {
+                        "..."
+                    } else {
+                        ""
+                    }
+                ),
+                section: None,
+            });
+        }
+
+        let symbol_coverage = if total_symbols == 0 {
+            1.0
+        } else {
+            documented_symbols as f64 / total_symbols as f64
+        };
+
+        file_coverage * 0.6 + symbol_coverage * 0.4
+    }
+
+    fn looks_like_source_extension(ext: &str) -> bool {
+        matches!(
+            ext.to_ascii_lowercase().as_str(),
+            "rs" | "py"
+                | "js"
+                | "jsx"
+                | "ts"
+                | "tsx"
+                | "c"
+                | "h"
+                | "cpp"
+                | "hpp"
+                | "go"
+                | "java"
+                | "cs"
+                | "kt"
+                | "swift"
+                | "php"
+                | "rb"
+                | "scala"
+                | "sql"
+        )
     }
 
     /// Check terminology consistency across all doc sections.
@@ -1351,6 +1528,114 @@ reqwest = { version = "0.12" }
         assert!(
             (score - 0.5).abs() < f64::EPSILON,
             "expected 0.5, got {score}"
+        );
+    }
+
+    #[test]
+    fn test_representation_coverage_flags_missing_core_files() {
+        use crate::types::FileInfo;
+
+        let docs = vec![(
+            "Overview".to_string(),
+            "Only src/main.rs is described in this section.".to_string(),
+        )];
+        let ps = ProjectStructure {
+            project_name: "demo".to_string(),
+            root_path: Path::new(".").to_path_buf(),
+            directories: vec![],
+            files: vec![
+                FileInfo {
+                    path: Path::new("src/main.rs").to_path_buf(),
+                    name: "main.rs".to_string(),
+                    size: 100,
+                    extension: Some("rs".to_string()),
+                    is_core: true,
+                    importance_score: 0.9,
+                    complexity_score: 0.2,
+                    last_modified: None,
+                },
+                FileInfo {
+                    path: Path::new("src/lib.rs").to_path_buf(),
+                    name: "lib.rs".to_string(),
+                    size: 100,
+                    extension: Some("rs".to_string()),
+                    is_core: true,
+                    importance_score: 0.8,
+                    complexity_score: 0.3,
+                    last_modified: None,
+                },
+            ],
+            total_files: 2,
+            total_directories: 1,
+            file_types: Default::default(),
+            size_distribution: Default::default(),
+        };
+
+        let mut findings = Vec::new();
+        let score =
+            ContentValidator::check_representation_coverage(&docs, &ps, None, &mut findings);
+        assert!(score < 1.0);
+        assert!(findings.iter().any(|f| f.category == "representation"));
+    }
+
+    #[test]
+    fn test_representation_coverage_includes_symbol_signal() {
+        use crate::types::FileInfo;
+        use crate::types::code::{CodeDossier, CodeInsight, InterfaceInfo};
+
+        let docs = vec![(
+            "Architecture".to_string(),
+            "The parser pipeline calls run_parser and touches src/parser.rs.".to_string(),
+        )];
+        let ps = ProjectStructure {
+            project_name: "demo".to_string(),
+            root_path: Path::new(".").to_path_buf(),
+            directories: vec![],
+            files: vec![FileInfo {
+                path: Path::new("src/parser.rs").to_path_buf(),
+                name: "parser.rs".to_string(),
+                size: 100,
+                extension: Some("rs".to_string()),
+                is_core: true,
+                importance_score: 0.9,
+                complexity_score: 0.2,
+                last_modified: None,
+            }],
+            total_files: 1,
+            total_directories: 1,
+            file_types: Default::default(),
+            size_distribution: Default::default(),
+        };
+        let insights = vec![CodeInsight {
+            code_dossier: CodeDossier {
+                file_path: Path::new("src/parser.rs").to_path_buf(),
+                functions: vec!["run_parser".to_string()],
+                interfaces: vec![],
+                ..Default::default()
+            },
+            interfaces: vec![InterfaceInfo {
+                name: "ParserConfig".to_string(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }];
+
+        let mut findings = Vec::new();
+        let score = ContentValidator::check_representation_coverage(
+            &docs,
+            &ps,
+            Some(&insights),
+            &mut findings,
+        );
+        assert!(
+            score < 1.0,
+            "expected penalty for missing ParserConfig mention"
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|f| { f.category == "representation" && f.message.contains("symbols") }),
+            "expected representation finding for missing symbols"
         );
     }
 

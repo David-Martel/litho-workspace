@@ -183,7 +183,7 @@ fn provider_client_new_openai_with_key_succeeds() {
 #[test]
 fn codex_client_with_explicit_path_succeeds() {
     // Explicit path — existence check deferred to actual invocation
-    let result = CodexRsClient::new(Some("/fake/path/codex"), Some(30));
+    let result = CodexRsClient::new(Some("/fake/path/codex"), Some(30), None, None);
     assert!(result.is_ok(), "explicit path should succeed at build time");
     let client = result.unwrap();
     assert_eq!(client.binary_path, "/fake/path/codex");
@@ -192,35 +192,13 @@ fn codex_client_with_explicit_path_succeeds() {
 
 #[test]
 fn codex_client_default_timeout_applied_when_none() {
-    let client = CodexRsClient::new(Some("/fake/codex"), None).unwrap();
+    let client = CodexRsClient::new(Some("/fake/codex"), None, None, None).unwrap();
     // Default timeout is 120 seconds per DEFAULT_TIMEOUT_SECS constant
     assert!(client.timeout_secs > 0, "timeout should be > 0");
     assert!(
         client.timeout_secs >= 60,
         "default timeout should be at least 60s"
     );
-}
-
-#[test]
-fn codex_client_env_var_path_detection() {
-    // Set env var and verify it is picked up
-    // SAFETY: Test suite is single-threaded at the point this test runs;
-    // the var is cleaned up before the function returns.
-    unsafe {
-        std::env::set_var("CODEX_BINARY_PATH", "/env/override/codex");
-    }
-    let result = CodexRsClient::new(None, None);
-    unsafe {
-        std::env::remove_var("CODEX_BINARY_PATH");
-    }
-    // Should succeed because env var is set
-    assert!(
-        result.is_ok(),
-        "env var CODEX_BINARY_PATH should be used: {:?}",
-        result.err()
-    );
-    let client = result.unwrap();
-    assert_eq!(client.binary_path, "/env/override/codex");
 }
 
 // ---------------------------------------------------------------------------

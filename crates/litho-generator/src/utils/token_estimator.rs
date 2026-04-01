@@ -59,10 +59,27 @@ impl TokenEstimator {
 
     /// Estimate the number of tokens in text
     pub fn estimate_tokens(&self, text: &str) -> TokenEstimation {
-        let character_count = text.chars().count();
-        let chinese_char_count = self.count_chinese_chars(text);
-        let english_char_count = self.count_english_chars(text);
-        let other_char_count = character_count - chinese_char_count - english_char_count;
+        // `bytecount::num_chars` is SIMD-accelerated on supported targets and
+        // significantly faster than repeatedly walking `text.chars()`.
+        let character_count = bytecount::num_chars(text.as_bytes());
+        let (chinese_char_count, english_char_count) = if text.is_ascii() {
+            (0, character_count)
+        } else {
+            let mut chinese = 0usize;
+            let mut english = 0usize;
+            for ch in text.chars() {
+                if self.is_chinese_char(ch) {
+                    chinese += 1;
+                } else if ch.is_ascii() {
+                    // Keep parity with the original estimator: all ASCII
+                    // chars count as "english" (letters/digits/punctuation/ws).
+                    english += 1;
+                }
+            }
+            (chinese, english)
+        };
+        let other_char_count =
+            character_count.saturating_sub(chinese_char_count + english_char_count);
 
         // Calculate token count for each part
         let chinese_tokens =
@@ -85,23 +102,6 @@ impl TokenEstimator {
             chinese_char_count,
             english_char_count,
         }
-    }
-
-    /// Count number of Chinese characters
-    fn count_chinese_chars(&self, text: &str) -> usize {
-        text.chars().filter(|c| self.is_chinese_char(*c)).count()
-    }
-
-    /// Count number of English characters
-    fn count_english_chars(&self, text: &str) -> usize {
-        text.chars()
-            .filter(|c| {
-                c.is_ascii_alphabetic()
-                    || c.is_ascii_whitespace()
-                    || c.is_ascii_digit()
-                    || c.is_ascii_punctuation()
-            })
-            .count()
     }
 
     /// Check if a character is Chinese

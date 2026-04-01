@@ -282,6 +282,9 @@ mod tests {
     use super::*;
     use crate::integrations::manifest::ModuleManifest;
     use chrono::Utc;
+    use std::fs;
+    use std::process::Command;
+    use tempfile::tempdir;
 
     #[test]
     fn test_changeset_empty() {
@@ -533,5 +536,122 @@ mod tests {
             normalize_agent_name("KeyModulesInsight_ordering"),
             "KeyModulesInsight"
         );
+    }
+
+    fn run_git(dir: &Path, args: &[&str]) {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .status()
+            .expect("run git");
+        assert!(
+            status.success(),
+            "git {:?} failed in {}",
+            args,
+            dir.display()
+        );
+    }
+
+    fn git_output(dir: &Path, args: &[&str]) -> String {
+        let out = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .expect("run git output");
+        assert!(out.status.success(), "git {:?} failed", args);
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    #[tokio::test]
+    async fn detect_changes_maps_modified_file_to_affected_module() {
+        let temp = tempdir().expect("tempdir");
+        let root = temp.path();
+        fs::create_dir_all(root.join("src")).expect("create src");
+        fs::write(root.join("src/main.rs"), "fn main() {}\n").expect("write main");
+
+        run_git(root, &["init"]);
+        run_git(root, &["config", "user.email", "litho@test.local"]);
+        run_git(root, &["config", "user.name", "Litho Test"]);
+        run_git(root, &["add", "."]);
+        run_git(root, &["commit", "-m", "initial"]);
+
+        let commit = git_output(root, &["rev-parse", "HEAD"]);
+
+        let mut manifest = DocumentationManifest::new(root.to_path_buf());
+        manifest.git_commit = Some(commit);
+        for i in 0..10 {
+            manifest
+                .file_hashes
+                .insert(PathBuf::from(format!("src/file{i}.rs")), format!("hash{i}"));
+        }
+        manifest.modules.insert(
+            "Overview".to_string(),
+            ModuleManifest {
+                agent_type: "OverviewEditor".to_string(),
+                output_file: "1.Overview.md".to_string(),
+                input_files: vec![PathBuf::from("src/main.rs")],
+                generated_at: Utc::now(),
+                content_hash: "abc".to_string(),
+            },
+        );
+
+        fs::write(
+            root.join("src/main.rs"),
+            "fn main() { println!(\"hi\"); }\n",
+        )
+        .expect("update main");
+        run_git(root, &["add", "src/main.rs"]);
+        run_git(root, &["commit", "-m", "update main"]);
+
+        let cs = detect_changes(root, &manifest)
+            .await
+            .expect("detect changes");
+        assert!(!cs.full_rebuild_needed);
+        assert!(
+            cs.changed_files.contains(&PathBuf::from("src/main.rs")),
+            "expected src/main.rs in {:?}",
+            cs.changed_files
+        );
+        assert!(cs.affected_agents.contains("Overview"));
+    }
+
+    #[tokio::test]
+    async fn detect_changes_triggers_full_rebuild_above_threshold() {
+        let temp = tempdir().expect("tempdir");
+        let root = temp.path();
+        fs::create_dir_all(root.join("src")).expect("create src");
+        fs::write(root.join("src/a.rs"), "pub fn a() {}\n").expect("write a");
+        fs::write(root.join("src/b.rs"), "pub fn b() {}\n").expect("write b");
+
+        run_git(root, &["init"]);
+        run_git(root, &["config", "user.email", "litho@test.local"]);
+        run_git(root, &["config", "user.name", "Litho Test"]);
+        run_git(root, &["add", "."]);
+        run_git(root, &["commit", "-m", "initial"]);
+
+        let commit = git_output(root, &["rev-parse", "HEAD"]);
+
+        let mut manifest = DocumentationManifest::new(root.to_path_buf());
+        manifest.git_commit = Some(commit);
+        for i in 0..4 {
+            manifest.file_hashes.insert(
+                PathBuf::from(format!("src/tracked{i}.rs")),
+                format!("hash{i}"),
+            );
+        }
+
+        fs::write(root.join("src/a.rs"), "pub fn a() { println!(\"a\"); }\n").expect("update a");
+        fs::write(root.join("src/b.rs"), "pub fn b() { println!(\"b\"); }\n").expect("update b");
+        run_git(root, &["add", "src/a.rs", "src/b.rs"]);
+        run_git(root, &["commit", "-m", "update a and b"]);
+
+        let cs = detect_changes(root, &manifest)
+            .await
+            .expect("detect changes");
+        assert!(
+            cs.full_rebuild_needed,
+            "expected full rebuild for 2/4 changes"
+        );
+        assert!(cs.affected_agents.is_empty());
     }
 }

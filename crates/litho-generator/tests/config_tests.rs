@@ -118,8 +118,8 @@ fn llm_provider_serde_round_trip() {
 }
 
 #[test]
-fn llm_provider_default_is_openai() {
-    assert_eq!(LLMProvider::default(), LLMProvider::OpenAI);
+fn llm_provider_default_is_ollama() {
+    assert_eq!(LLMProvider::default(), LLMProvider::Ollama);
 }
 
 // ---------------------------------------------------------------------------

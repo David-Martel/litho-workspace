@@ -10,7 +10,6 @@ use crate::i18n::TargetLanguage;
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Default)]
 pub enum LLMProvider {
     #[serde(rename = "openai")]
-    #[default]
     OpenAI,
     #[serde(rename = "moonshot")]
     Moonshot,
@@ -25,6 +24,7 @@ pub enum LLMProvider {
     #[serde(rename = "gemini")]
     Gemini,
     #[serde(rename = "ollama")]
+    #[default]
     Ollama,
     /// Local codex-rs binary — used as an emergency fallback provider.
     #[serde(rename = "codexrs")]
@@ -230,10 +230,130 @@ pub struct LLMConfig {
     /// If true, run a lightweight warmup request per active model at startup.
     #[serde(default)]
     pub ollama_warm_models_on_start: bool,
+
+    /// Enable adaptive context sizing for native Ollama calls.
+    #[serde(default = "default_true")]
+    pub ollama_adaptive_context: bool,
+
+    /// Minimum adaptive context window.
+    #[serde(default = "default_ollama_adaptive_context_min")]
+    pub ollama_adaptive_context_min: u32,
+
+    /// Maximum adaptive context window.
+    #[serde(default = "default_ollama_adaptive_context_max")]
+    pub ollama_adaptive_context_max: u32,
+
+    /// Character-to-token estimate used for adaptive context sizing.
+    #[serde(default = "default_ollama_chars_per_token")]
+    pub ollama_chars_per_token: usize,
+
+    /// Extra output headroom tokens reserved for adaptive sizing.
+    #[serde(default = "default_ollama_adaptive_headroom_tokens")]
+    pub ollama_adaptive_headroom_tokens: u32,
+
+    /// Adaptive `num_ctx` step size used when rounding context upward.
+    #[serde(default = "default_ollama_adaptive_step_tokens")]
+    pub ollama_adaptive_step_tokens: u32,
+
+    /// Optional explicit Ollama GPU layer offload count.
+    /// `None` keeps Ollama defaults.
+    #[serde(default)]
+    pub ollama_num_gpu: Option<u32>,
+
+    /// Optional explicit Ollama CPU thread count.
+    /// `None` keeps Ollama defaults.
+    #[serde(default)]
+    pub ollama_num_thread: Option<u32>,
+
+    /// Optional upper bound for concurrently in-flight Ollama requests.
+    /// When `None`, falls back to `max_parallels`.
+    #[serde(default)]
+    pub ollama_max_in_flight: Option<usize>,
+
+    /// Optional top-p sampling control for Ollama.
+    #[serde(default)]
+    pub ollama_top_p: Option<f64>,
+
+    /// Optional top-k sampling control for Ollama.
+    #[serde(default)]
+    pub ollama_top_k: Option<u32>,
+
+    /// Optional repetition window for Ollama.
+    /// `0` disables, `-1` uses full context.
+    #[serde(default)]
+    pub ollama_repeat_last_n: Option<i32>,
+
+    /// Optional repetition penalty control for Ollama.
+    #[serde(default)]
+    pub ollama_repeat_penalty: Option<f64>,
+
+    /// Optional tail-free sampling control for Ollama.
+    #[serde(default)]
+    pub ollama_tfs_z: Option<f64>,
+
+    /// Optional deterministic seed for Ollama generation.
+    #[serde(default)]
+    pub ollama_seed: Option<i32>,
+
+    /// Optional explicit `num_predict` override for Ollama calls.
+    /// When set, this value is used instead of `max_tokens`.
+    #[serde(default)]
+    pub ollama_num_predict: Option<i32>,
+
+    /// Ollama keep-alive policy in seconds.
+    /// -1 keeps model loaded indefinitely, 0 unloads immediately.
+    #[serde(default = "default_ollama_keep_alive_seconds")]
+    pub ollama_keep_alive_seconds: i64,
+
+    /// If true, fail startup when Ollama runtime preparation fails.
+    /// If false, preparation failures are logged and generation continues.
+    #[serde(default)]
+    pub ollama_prepare_runtime_strict: bool,
+
+    /// If true, missing requested models cause hard failure instead of
+    /// auto-detecting a local fallback model.
+    #[serde(default)]
+    pub ollama_strict_model_selection: bool,
+
+    /// Cache TTL for local Ollama model discovery (`/api/tags`).
+    #[serde(default = "default_ollama_local_models_cache_ttl_seconds")]
+    pub ollama_local_models_cache_ttl_seconds: u64,
+
+    /// Emit per-request Ollama performance metrics (latency and tokens/sec).
+    #[serde(default)]
+    pub ollama_log_perf_metrics: bool,
 }
 
 fn default_context_window() -> u32 {
     32768
+}
+
+fn default_ollama_adaptive_context_min() -> u32 {
+    8192
+}
+
+fn default_ollama_adaptive_context_max() -> u32 {
+    131072
+}
+
+fn default_ollama_chars_per_token() -> usize {
+    4
+}
+
+fn default_ollama_adaptive_headroom_tokens() -> u32 {
+    2048
+}
+
+fn default_ollama_adaptive_step_tokens() -> u32 {
+    1024
+}
+
+fn default_ollama_keep_alive_seconds() -> i64 {
+    1800
+}
+
+fn default_ollama_local_models_cache_ttl_seconds() -> u64 {
+    120
 }
 
 /// Look up the default context window for a model name pattern.
@@ -246,18 +366,37 @@ fn default_context_window() -> u32 {
 /// ```
 /// # use litho_generator::config::model_default_context_window;
 /// assert_eq!(model_default_context_window("gemma3:12b"), 131_072);
-/// assert_eq!(model_default_context_window("qwen2.5-coder:7b"), 131_072);
+/// assert_eq!(model_default_context_window("qwen2.5-coder:7b"), 32_768);
 /// assert_eq!(model_default_context_window("mistral:7b"), 32_768);
 /// assert_eq!(model_default_context_window("some-unknown-model"), 32_768);
 /// ```
 pub fn model_default_context_window(model: &str) -> u32 {
+    fn parse_model_size_b(model: &str) -> Option<u32> {
+        model
+            .to_ascii_lowercase()
+            .split(|ch: char| !ch.is_ascii_alphanumeric())
+            .find_map(|token| {
+                let numeric = token.strip_suffix('b')?;
+                if numeric.chars().all(|ch| ch.is_ascii_digit()) {
+                    numeric.parse::<u32>().ok()
+                } else {
+                    None
+                }
+            })
+    }
+
     // Gemma 3 / Gemma 2 family — 128K context
     if model.starts_with("gemma3") || model.starts_with("gemma-3") || model.starts_with("gemma2") {
         return 131_072;
     }
-    // Qwen 2.5 / Qwen 3 family — 128K context
+    // Qwen 2.5 / Qwen 3 family — tune by parameter size to avoid over-allocating
+    // KV cache on small models (which hurts latency + memory footprint).
     if model.starts_with("qwen2.5") || model.starts_with("qwen-2.5") || model.starts_with("qwen3") {
-        return 131_072;
+        return match parse_model_size_b(model) {
+            Some(size) if size <= 8 => 32_768,
+            Some(size) if size <= 14 => 65_536,
+            _ => 131_072,
+        };
     }
     // Llama 3.x family — 128K context
     if model.starts_with("llama3") || model.starts_with("llama-3") {
@@ -495,6 +634,21 @@ pub struct CacheConfig {
 
     /// Cache expiration time (hours)
     pub expire_hours: u64,
+
+    /// In-memory LRU capacity (entry count).
+    pub lru_max_entries: usize,
+
+    /// Enable SQLite-backed cache index/payload store.
+    pub sqlite_enabled: bool,
+
+    /// Optional SQLite cache DB path (defaults to `<cache_dir>/cache-index.sqlite3`).
+    pub sqlite_path: Option<PathBuf>,
+
+    /// Enable repo-level SQLite index for file DAG invalidation planning.
+    pub repo_index_enabled: bool,
+
+    /// Optional repo-index SQLite path (defaults to `<internal_path>/repo-index.sqlite3`).
+    pub repo_index_path: Option<PathBuf>,
 }
 
 /// Knowledge configuration for external documentation sources
@@ -1056,6 +1210,7 @@ impl Default for LLMConfig {
             max_parallels: 8,
             codex_binary_path: std::env::var("CODEX_BINARY_PATH")
                 .ok()
+                .or_else(|| std::env::var("CODEX_BIN").ok())
                 .filter(|s| !s.is_empty()),
             codex_as_fallback: true,
             context_window: std::env::var("LITHO_CONTEXT_WINDOW")
@@ -1083,6 +1238,82 @@ impl Default for LLMConfig {
                 .ok()
                 .and_then(|s| parse_bool_str(&s))
                 .unwrap_or(false),
+            ollama_adaptive_context: std::env::var("LITHO_OLLAMA_ADAPTIVE_CONTEXT")
+                .ok()
+                .and_then(|s| parse_bool_str(&s))
+                .unwrap_or(true),
+            ollama_adaptive_context_min: std::env::var("LITHO_OLLAMA_ADAPTIVE_CTX_MIN")
+                .ok()
+                .and_then(|s| s.parse::<u32>().ok())
+                .unwrap_or_else(default_ollama_adaptive_context_min),
+            ollama_adaptive_context_max: std::env::var("LITHO_OLLAMA_ADAPTIVE_CTX_MAX")
+                .ok()
+                .and_then(|s| s.parse::<u32>().ok())
+                .unwrap_or_else(default_ollama_adaptive_context_max),
+            ollama_chars_per_token: std::env::var("LITHO_OLLAMA_CHARS_PER_TOKEN")
+                .ok()
+                .and_then(|s| s.parse::<usize>().ok())
+                .unwrap_or_else(default_ollama_chars_per_token),
+            ollama_adaptive_headroom_tokens: std::env::var("LITHO_OLLAMA_ADAPTIVE_HEADROOM")
+                .ok()
+                .and_then(|s| s.parse::<u32>().ok())
+                .unwrap_or_else(default_ollama_adaptive_headroom_tokens),
+            ollama_adaptive_step_tokens: std::env::var("LITHO_OLLAMA_ADAPTIVE_STEP")
+                .ok()
+                .and_then(|s| s.parse::<u32>().ok())
+                .unwrap_or_else(default_ollama_adaptive_step_tokens),
+            ollama_num_gpu: std::env::var("LITHO_OLLAMA_NUM_GPU")
+                .ok()
+                .and_then(|s| s.parse::<u32>().ok()),
+            ollama_num_thread: std::env::var("LITHO_OLLAMA_NUM_THREAD")
+                .ok()
+                .and_then(|s| s.parse::<u32>().ok()),
+            ollama_max_in_flight: std::env::var("LITHO_OLLAMA_MAX_IN_FLIGHT")
+                .ok()
+                .and_then(|s| s.parse::<usize>().ok()),
+            ollama_top_p: std::env::var("LITHO_OLLAMA_TOP_P")
+                .ok()
+                .and_then(|s| s.parse::<f64>().ok()),
+            ollama_top_k: std::env::var("LITHO_OLLAMA_TOP_K")
+                .ok()
+                .and_then(|s| s.parse::<u32>().ok()),
+            ollama_repeat_last_n: std::env::var("LITHO_OLLAMA_REPEAT_LAST_N")
+                .ok()
+                .and_then(|s| s.parse::<i32>().ok()),
+            ollama_repeat_penalty: std::env::var("LITHO_OLLAMA_REPEAT_PENALTY")
+                .ok()
+                .and_then(|s| s.parse::<f64>().ok()),
+            ollama_tfs_z: std::env::var("LITHO_OLLAMA_TFS_Z")
+                .ok()
+                .and_then(|s| s.parse::<f64>().ok()),
+            ollama_seed: std::env::var("LITHO_OLLAMA_SEED")
+                .ok()
+                .and_then(|s| s.parse::<i32>().ok()),
+            ollama_num_predict: std::env::var("LITHO_OLLAMA_NUM_PREDICT")
+                .ok()
+                .and_then(|s| s.parse::<i32>().ok()),
+            ollama_keep_alive_seconds: std::env::var("LITHO_OLLAMA_KEEP_ALIVE_SECONDS")
+                .ok()
+                .and_then(|s| s.parse::<i64>().ok())
+                .unwrap_or_else(default_ollama_keep_alive_seconds),
+            ollama_prepare_runtime_strict: std::env::var("LITHO_OLLAMA_PREPARE_STRICT")
+                .ok()
+                .and_then(|s| parse_bool_str(&s))
+                .unwrap_or(false),
+            ollama_strict_model_selection: std::env::var("LITHO_OLLAMA_STRICT_MODEL")
+                .ok()
+                .and_then(|s| parse_bool_str(&s))
+                .unwrap_or(false),
+            ollama_local_models_cache_ttl_seconds: std::env::var(
+                "LITHO_OLLAMA_MODELS_CACHE_TTL_SECONDS",
+            )
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or_else(default_ollama_local_models_cache_ttl_seconds),
+            ollama_log_perf_metrics: std::env::var("LITHO_OLLAMA_LOG_PERF")
+                .ok()
+                .and_then(|s| parse_bool_str(&s))
+                .unwrap_or(false),
         }
     }
 }
@@ -1101,6 +1332,11 @@ impl Default for CacheConfig {
             enabled: true,
             cache_dir: PathBuf::from(".litho/cache"),
             expire_hours: 8760,
+            lru_max_entries: 4096,
+            sqlite_enabled: true,
+            sqlite_path: None,
+            repo_index_enabled: true,
+            repo_index_path: None,
         }
     }
 }
@@ -1115,8 +1351,8 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn provider_default_is_openai() {
-        assert_eq!(LLMProvider::default(), LLMProvider::OpenAI);
+    fn provider_default_is_ollama() {
+        assert_eq!(LLMProvider::default(), LLMProvider::Ollama);
     }
 
     #[test]
@@ -1527,10 +1763,11 @@ mod tests {
 
     #[test]
     fn context_window_qwen_auto_detect() {
-        assert_eq!(model_default_context_window("qwen2.5-coder:7b"), 131_072);
+        assert_eq!(model_default_context_window("qwen2.5-coder:3b"), 32_768);
+        assert_eq!(model_default_context_window("qwen2.5-coder:7b"), 32_768);
+        assert_eq!(model_default_context_window("qwen3:8b"), 32_768);
+        assert_eq!(model_default_context_window("qwen-2.5:14b"), 65_536);
         assert_eq!(model_default_context_window("qwen2.5-coder:32b"), 131_072);
-        assert_eq!(model_default_context_window("qwen3:8b"), 131_072);
-        assert_eq!(model_default_context_window("qwen-2.5:14b"), 131_072);
     }
 
     #[test]
@@ -1610,7 +1847,7 @@ mod tests {
             model_efficient: "qwen2.5-coder:7b".to_string(),
             ..Default::default()
         };
-        assert_eq!(config.resolve_context_window(), 131_072);
+        assert_eq!(config.resolve_context_window(), 32_768);
     }
 
     #[test]
@@ -1640,6 +1877,27 @@ ollama_auto_detect_models = false
 ollama_required_models = ["gemma3:12b", "qwen2.5-coder:7b"]
 ollama_auto_pull_missing_models = true
 ollama_warm_models_on_start = true
+ollama_adaptive_context = true
+ollama_adaptive_context_min = 4096
+ollama_adaptive_context_max = 65536
+ollama_chars_per_token = 3
+ollama_adaptive_headroom_tokens = 1024
+ollama_adaptive_step_tokens = 2048
+ollama_num_gpu = 16
+ollama_num_thread = 8
+ollama_max_in_flight = 3
+ollama_top_p = 0.9
+ollama_top_k = 40
+ollama_repeat_last_n = 128
+ollama_repeat_penalty = 1.1
+ollama_tfs_z = 1.0
+ollama_seed = 42
+ollama_num_predict = 1536
+ollama_keep_alive_seconds = 900
+ollama_prepare_runtime_strict = true
+ollama_strict_model_selection = true
+ollama_local_models_cache_ttl_seconds = 30
+ollama_log_perf_metrics = true
 "#;
 
         let parsed: LLMConfig = toml::from_str(text).expect("llm config TOML should parse");
@@ -1650,5 +1908,26 @@ ollama_warm_models_on_start = true
         );
         assert!(parsed.ollama_auto_pull_missing_models);
         assert!(parsed.ollama_warm_models_on_start);
+        assert!(parsed.ollama_adaptive_context);
+        assert_eq!(parsed.ollama_adaptive_context_min, 4096);
+        assert_eq!(parsed.ollama_adaptive_context_max, 65536);
+        assert_eq!(parsed.ollama_chars_per_token, 3);
+        assert_eq!(parsed.ollama_adaptive_headroom_tokens, 1024);
+        assert_eq!(parsed.ollama_adaptive_step_tokens, 2048);
+        assert_eq!(parsed.ollama_num_gpu, Some(16));
+        assert_eq!(parsed.ollama_num_thread, Some(8));
+        assert_eq!(parsed.ollama_max_in_flight, Some(3));
+        assert_eq!(parsed.ollama_top_p, Some(0.9));
+        assert_eq!(parsed.ollama_top_k, Some(40));
+        assert_eq!(parsed.ollama_repeat_last_n, Some(128));
+        assert_eq!(parsed.ollama_repeat_penalty, Some(1.1));
+        assert_eq!(parsed.ollama_tfs_z, Some(1.0));
+        assert_eq!(parsed.ollama_seed, Some(42));
+        assert_eq!(parsed.ollama_num_predict, Some(1536));
+        assert_eq!(parsed.ollama_keep_alive_seconds, 900);
+        assert!(parsed.ollama_prepare_runtime_strict);
+        assert!(parsed.ollama_strict_model_selection);
+        assert_eq!(parsed.ollama_local_models_cache_ttl_seconds, 30);
+        assert!(parsed.ollama_log_perf_metrics);
     }
 }
