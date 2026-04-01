@@ -3,6 +3,7 @@ use litho_core::types::Language;
 use std::path::{Path, PathBuf};
 
 /// A source file discovered during project walking.
+#[derive(Clone)]
 pub struct DiscoveredFile {
     /// Absolute path to the file.
     pub path: PathBuf,

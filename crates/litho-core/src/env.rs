@@ -25,7 +25,9 @@ impl LithoEnv {
 
     /// Get the path to the codex binary.
     pub fn codex_bin() -> Option<PathBuf> {
-        Self::get_optional("CODEX_BIN").map(PathBuf::from)
+        Self::get_optional("CODEX_BINARY_PATH")
+            .or_else(|| Self::get_optional("CODEX_BIN"))
+            .map(PathBuf::from)
     }
 
     /// Get the database URL for PostgreSQL.
@@ -47,15 +49,20 @@ impl LithoEnv {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_optional_var() {
+        let _guard = ENV_LOCK.lock().unwrap();
         let key = "NON_EXISTENT_VAR_XYZ";
         assert!(LithoEnv::get_optional(key).is_none());
     }
 
     #[test]
     fn test_required_var_missing() {
+        let _guard = ENV_LOCK.lock().unwrap();
         let key = "MISSING_REQUIRED_VAR";
         let result = LithoEnv::get_required(key);
         assert!(result.is_err());
@@ -63,6 +70,7 @@ mod tests {
 
     #[test]
     fn test_ollama_default() {
+        let _guard = ENV_LOCK.lock().unwrap();
         // Ensure it returns default if not set
         unsafe {
             env::remove_var("OLLAMA_URL");
@@ -72,9 +80,10 @@ mod tests {
 
     #[test]
     fn test_type_safe_accessors() {
+        let _guard = ENV_LOCK.lock().unwrap();
         unsafe {
             env::set_var("DATABASE_URL", "postgres://test");
-            env::set_var("CODEX_BIN", "C:\\bin\\codex.exe");
+            env::set_var("CODEX_BINARY_PATH", "C:\\bin\\codex.exe");
             env::set_var("CODEX_MODEL", "gpt-4");
         }
 
@@ -87,8 +96,24 @@ mod tests {
 
         unsafe {
             env::remove_var("DATABASE_URL");
-            env::remove_var("CODEX_BIN");
+            env::remove_var("CODEX_BINARY_PATH");
             env::remove_var("CODEX_MODEL");
+        }
+    }
+
+    #[test]
+    fn codex_bin_falls_back_to_legacy_env_name() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        unsafe {
+            env::remove_var("CODEX_BINARY_PATH");
+            env::set_var("CODEX_BIN", "C:\\legacy\\codex.exe");
+        }
+        assert_eq!(
+            LithoEnv::codex_bin().unwrap(),
+            PathBuf::from("C:\\legacy\\codex.exe")
+        );
+        unsafe {
+            env::remove_var("CODEX_BIN");
         }
     }
 }

@@ -34,10 +34,27 @@ pub struct LithoConfig {
     pub excluded_dirs: Vec<String>,
     /// File extensions (without leading `.`) that are always skipped.
     pub excluded_extensions: Vec<String>,
+    /// Backend selection for AST extraction.
+    pub extract_backend: ExtractBackend,
+    /// Optional ast-grep (`sg`) binary path override.
+    pub ast_grep_binary: Option<String>,
     /// LLM provider settings.
     pub llm: LlmConfig,
     /// Response-cache settings.
     pub cache: CacheConfig,
+}
+
+/// Backend used by litho-extract for AST/symbol extraction.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ExtractBackend {
+    /// Prefer ast-grep when available, otherwise use built-in tree-sitter flow.
+    #[default]
+    Auto,
+    /// Always use built-in tree-sitter extractors.
+    TreeSitter,
+    /// Prefer ast-grep queries, then gracefully fallback to tree-sitter.
+    AstGrep,
 }
 
 /// Identifies which LLM backend will handle generation requests.
@@ -125,6 +142,8 @@ impl Default for LithoConfig {
             .iter()
             .map(|s| s.to_string())
             .collect(),
+            extract_backend: ExtractBackend::default(),
+            ast_grep_binary: None,
             llm: LlmConfig::default(),
             cache: CacheConfig::default(),
         }
@@ -210,11 +229,15 @@ mod tests {
         let toml_str = toml::to_string_pretty(&config).unwrap();
         let parsed: LithoConfig = toml::from_str(&toml_str).unwrap();
         assert_eq!(parsed.llm.provider, config.llm.provider);
+        assert_eq!(parsed.extract_backend, config.extract_backend);
     }
 
     #[test]
     fn config_from_file_overrides_defaults() {
         let toml = r#"
+extract_backend = "ast_grep"
+ast_grep_binary = "/usr/local/bin/sg"
+
 [llm]
 provider = "ollama"
 api_base_url = "http://localhost:11434"
@@ -222,5 +245,14 @@ model_efficient = "qwen2.5-coder:3b"
 "#;
         let config: LithoConfig = toml::from_str(toml).unwrap();
         assert_eq!(config.llm.api_base_url, "http://localhost:11434");
+        assert_eq!(config.extract_backend, ExtractBackend::AstGrep);
+        assert_eq!(config.ast_grep_binary.as_deref(), Some("/usr/local/bin/sg"));
+    }
+
+    #[test]
+    fn extract_backend_defaults_to_auto() {
+        let config = LithoConfig::default();
+        assert_eq!(config.extract_backend, ExtractBackend::Auto);
+        assert!(config.ast_grep_binary.is_none());
     }
 }
