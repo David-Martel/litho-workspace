@@ -20,3 +20,6 @@ litho-qmd-storage = { path = "../litho-qmd-storage" }
 
 [build-dependencies]
 chrono = { workspace = true }
+
+[dev-dependencies]
+proptest = "1.6"

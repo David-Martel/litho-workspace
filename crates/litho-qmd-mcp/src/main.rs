@@ -1,14 +1,14 @@
 use anyhow::Context as _;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use litho_qmd_core::{DocumentRequest, MultiGetRequest, QmdService, SearchOptions};
 use litho_qmd_llm::AdaptiveLlmEngine;
-use litho_qmd_storage::PostgresQmdStore;
+use litho_qmd_storage::{AutoQmdStore, QmdBackendKind};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::io::{self, BufReader};
 
-type AppService = QmdService<PostgresQmdStore, AdaptiveLlmEngine>;
+type AppService = QmdService<AutoQmdStore, AdaptiveLlmEngine>;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -24,11 +24,36 @@ struct Cli {
     )]
     index: Option<String>,
 
+    #[arg(
+        long,
+        value_enum,
+        default_value_t = BackendArg::Auto,
+        help = "QMD backend override (auto, sqlite, postgres)"
+    )]
+    backend: BackendArg,
+
     #[arg(long, help = "Print supported tools in JSON and exit")]
     dump_capabilities: bool,
 
     #[arg(long, help = "Run startup checks and exit")]
     healthcheck: bool,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, ValueEnum)]
+enum BackendArg {
+    Auto,
+    Sqlite,
+    Postgres,
+}
+
+impl BackendArg {
+    fn as_kind(self) -> Option<QmdBackendKind> {
+        match self {
+            BackendArg::Auto => None,
+            BackendArg::Sqlite => Some(QmdBackendKind::Sqlite),
+            BackendArg::Postgres => Some(QmdBackendKind::Postgres),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -68,6 +93,373 @@ enum DispatchOutcome {
     Exit(i32),
 }
 
+const SUPPORTED_REQUEST_METHODS: &[&str] = &[
+    "initialize",
+    "tools/list",
+    "tools/call",
+    "resources/list",
+    "resources/read",
+    "prompts/list",
+    "prompts/get",
+];
+
+const SUPPORTED_TOOL_NAMES: &[&str] = &[
+    "search",
+    "vsearch",
+    "query",
+    "get",
+    "multi_get",
+    "status",
+    "ingest",
+    "embed",
+];
+
+#[derive(Debug, Clone, Copy)]
+enum JsonType {
+    String,
+    Integer,
+    Number,
+    Boolean,
+    Object,
+}
+
+impl JsonType {
+    fn label(self) -> &'static str {
+        match self {
+            JsonType::String => "string",
+            JsonType::Integer => "integer",
+            JsonType::Number => "number",
+            JsonType::Boolean => "boolean",
+            JsonType::Object => "object",
+        }
+    }
+
+    fn matches(self, value: &Value) -> bool {
+        match self {
+            JsonType::String => value.is_string(),
+            JsonType::Integer => value.as_i64().is_some() || value.as_u64().is_some(),
+            JsonType::Number => value.as_f64().is_some(),
+            JsonType::Boolean => value.is_boolean(),
+            JsonType::Object => value.is_object(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct FieldSpec {
+    name: &'static str,
+    kind: JsonType,
+    required: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ObjectSchema {
+    fields: &'static [FieldSpec],
+    allow_unknown: bool,
+}
+
+const TOOLS_CALL_PARAMS_FIELDS: &[FieldSpec] = &[
+    FieldSpec {
+        name: "name",
+        kind: JsonType::String,
+        required: true,
+    },
+    FieldSpec {
+        name: "arguments",
+        kind: JsonType::Object,
+        required: false,
+    },
+];
+
+const SEARCH_ARGS_FIELDS: &[FieldSpec] = &[
+    FieldSpec {
+        name: "query",
+        kind: JsonType::String,
+        required: true,
+    },
+    FieldSpec {
+        name: "limit",
+        kind: JsonType::Integer,
+        required: false,
+    },
+    FieldSpec {
+        name: "minScore",
+        kind: JsonType::Number,
+        required: false,
+    },
+    FieldSpec {
+        name: "collection",
+        kind: JsonType::String,
+        required: false,
+    },
+];
+
+const GET_ARGS_FIELDS: &[FieldSpec] = &[
+    FieldSpec {
+        name: "file",
+        kind: JsonType::String,
+        required: true,
+    },
+    FieldSpec {
+        name: "fromLine",
+        kind: JsonType::Integer,
+        required: false,
+    },
+    FieldSpec {
+        name: "maxLines",
+        kind: JsonType::Integer,
+        required: false,
+    },
+    FieldSpec {
+        name: "lineNumbers",
+        kind: JsonType::Boolean,
+        required: false,
+    },
+];
+
+const MULTI_GET_ARGS_FIELDS: &[FieldSpec] = &[
+    FieldSpec {
+        name: "pattern",
+        kind: JsonType::String,
+        required: true,
+    },
+    FieldSpec {
+        name: "maxLines",
+        kind: JsonType::Integer,
+        required: false,
+    },
+    FieldSpec {
+        name: "maxBytes",
+        kind: JsonType::Integer,
+        required: false,
+    },
+    FieldSpec {
+        name: "lineNumbers",
+        kind: JsonType::Boolean,
+        required: false,
+    },
+];
+
+const STATUS_ARGS_FIELDS: &[FieldSpec] = &[];
+
+const FORCE_ARGS_FIELDS: &[FieldSpec] = &[FieldSpec {
+    name: "force",
+    kind: JsonType::Boolean,
+    required: false,
+}];
+
+const RESOURCE_READ_PARAMS_FIELDS: &[FieldSpec] = &[FieldSpec {
+    name: "uri",
+    kind: JsonType::String,
+    required: true,
+}];
+
+const PROMPT_GET_PARAMS_FIELDS: &[FieldSpec] = &[FieldSpec {
+    name: "name",
+    kind: JsonType::String,
+    required: true,
+}];
+
+const TOOLS_CALL_PARAMS_SCHEMA: ObjectSchema = ObjectSchema {
+    fields: TOOLS_CALL_PARAMS_FIELDS,
+    allow_unknown: false,
+};
+const SEARCH_ARGS_SCHEMA: ObjectSchema = ObjectSchema {
+    fields: SEARCH_ARGS_FIELDS,
+    allow_unknown: false,
+};
+const GET_ARGS_SCHEMA: ObjectSchema = ObjectSchema {
+    fields: GET_ARGS_FIELDS,
+    allow_unknown: false,
+};
+const MULTI_GET_ARGS_SCHEMA: ObjectSchema = ObjectSchema {
+    fields: MULTI_GET_ARGS_FIELDS,
+    allow_unknown: false,
+};
+const STATUS_ARGS_SCHEMA: ObjectSchema = ObjectSchema {
+    fields: STATUS_ARGS_FIELDS,
+    allow_unknown: false,
+};
+const FORCE_ARGS_SCHEMA: ObjectSchema = ObjectSchema {
+    fields: FORCE_ARGS_FIELDS,
+    allow_unknown: false,
+};
+const RESOURCE_READ_PARAMS_SCHEMA: ObjectSchema = ObjectSchema {
+    fields: RESOURCE_READ_PARAMS_FIELDS,
+    allow_unknown: false,
+};
+const PROMPT_GET_PARAMS_SCHEMA: ObjectSchema = ObjectSchema {
+    fields: PROMPT_GET_PARAMS_FIELDS,
+    allow_unknown: false,
+};
+
+fn invalid_params(message: impl Into<String>) -> RpcError {
+    RpcError {
+        code: -32602,
+        message: message.into(),
+    }
+}
+
+fn value_type_name(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "boolean",
+        Value::Number(num) => {
+            if num.is_i64() || num.is_u64() {
+                "integer"
+            } else {
+                "number"
+            }
+        }
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
+}
+
+fn find_best_suggestion<'a>(input: &str, candidates: &'a [&'a str]) -> Option<&'a str> {
+    if candidates.is_empty() || input.trim().is_empty() {
+        return None;
+    }
+    let input_norm = input.trim().to_ascii_lowercase();
+    let mut best: Option<(&str, usize)> = None;
+    for &candidate in candidates {
+        let cand_norm = candidate.to_ascii_lowercase();
+        if cand_norm == input_norm {
+            return Some(candidate);
+        }
+        let dist = levenshtein_distance(&input_norm, &cand_norm);
+        match best {
+            None => best = Some((candidate, dist)),
+            Some((_, best_dist)) if dist < best_dist => best = Some((candidate, dist)),
+            _ => {}
+        }
+    }
+    let (candidate, dist) = best?;
+    let threshold = if input_norm.len() <= 4 { 1 } else { 2 };
+    (dist <= threshold).then_some(candidate)
+}
+
+fn unknown_name_error(kind: &str, actual: &str, candidates: &[&str], code: i64) -> RpcError {
+    let mut message = format!("unknown {kind}: {actual}");
+    if let Some(suggestion) = find_best_suggestion(actual, candidates) {
+        message.push_str(&format!(" (did you mean '{suggestion}'?)"));
+    }
+    RpcError { code, message }
+}
+
+fn validate_object_schema(value: &Value, schema: ObjectSchema, path: &str) -> Result<(), RpcError> {
+    let Some(obj) = value.as_object() else {
+        return Err(invalid_params(format!(
+            "invalid params at {path}: expected object, got {}",
+            value_type_name(value)
+        )));
+    };
+
+    if !schema.allow_unknown {
+        let known = schema.fields.iter().map(|f| f.name).collect::<Vec<_>>();
+        for field_name in obj.keys() {
+            if schema.fields.iter().any(|f| f.name == field_name) {
+                continue;
+            }
+            let mut message = format!("unknown field '{field_name}' in {path}");
+            if let Some(suggestion) = find_best_suggestion(field_name, &known) {
+                message.push_str(&format!(" (did you mean '{suggestion}'?)"));
+            }
+            return Err(invalid_params(message));
+        }
+    }
+
+    for field in schema.fields {
+        match obj.get(field.name) {
+            Some(field_value) => {
+                if !field.kind.matches(field_value) {
+                    return Err(invalid_params(format!(
+                        "invalid params at {path}.{}: expected {}, got {}",
+                        field.name,
+                        field.kind.label(),
+                        value_type_name(field_value)
+                    )));
+                }
+            }
+            None if field.required => {
+                return Err(invalid_params(format!(
+                    "missing required field {path}.{}",
+                    field.name
+                )));
+            }
+            None => {}
+        }
+    }
+
+    Ok(())
+}
+
+fn tool_argument_schema(name: &str) -> Option<ObjectSchema> {
+    match name {
+        "search" | "vsearch" | "query" => Some(SEARCH_ARGS_SCHEMA),
+        "get" => Some(GET_ARGS_SCHEMA),
+        "multi_get" => Some(MULTI_GET_ARGS_SCHEMA),
+        "status" => Some(STATUS_ARGS_SCHEMA),
+        "ingest" | "embed" => Some(FORCE_ARGS_SCHEMA),
+        _ => None,
+    }
+}
+
+fn parse_tool_call_params(params: &Value) -> Result<(String, Value), RpcError> {
+    validate_object_schema(params, TOOLS_CALL_PARAMS_SCHEMA, "tools/call.params")?;
+    let name = params
+        .get("name")
+        .and_then(Value::as_str)
+        .expect("schema validation should enforce tools/call.params.name");
+    if !SUPPORTED_TOOL_NAMES.contains(&name) {
+        return Err(unknown_name_error(
+            "tool",
+            name,
+            SUPPORTED_TOOL_NAMES,
+            -32601,
+        ));
+    }
+    let args = params
+        .get("arguments")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    let schema = tool_argument_schema(name).expect("supported tool must have schema");
+    validate_object_schema(
+        &args,
+        schema,
+        &format!("tools/call.params.arguments (tool '{name}')"),
+    )?;
+    Ok((name.to_string(), args))
+}
+
+fn levenshtein_distance(left: &str, right: &str) -> usize {
+    if left.is_empty() {
+        return right.chars().count();
+    }
+    if right.is_empty() {
+        return left.chars().count();
+    }
+
+    let right_chars = right.chars().collect::<Vec<_>>();
+    let mut previous = (0..=right_chars.len()).collect::<Vec<_>>();
+    let mut current = vec![0usize; right_chars.len() + 1];
+
+    for (left_idx, left_ch) in left.chars().enumerate() {
+        current[0] = left_idx + 1;
+        for (right_idx, right_ch) in right_chars.iter().enumerate() {
+            let cost = usize::from(left_ch != *right_ch);
+            let insertion = current[right_idx] + 1;
+            let deletion = previous[right_idx + 1] + 1;
+            let substitution = previous[right_idx] + cost;
+            current[right_idx + 1] = insertion.min(deletion).min(substitution);
+        }
+        std::mem::swap(&mut previous, &mut current);
+    }
+
+    previous[right_chars.len()]
+}
+
 fn main() -> anyhow::Result<()> {
     if let Err(msg) = litho_core::build_info::assert_expected_token_sync() {
         anyhow::bail!("Build token sync check failed: {msg}");
@@ -79,8 +471,8 @@ fn main() -> anyhow::Result<()> {
         .init();
 
     let cli = Cli::parse();
-    let store = PostgresQmdStore::open_default(cli.index.as_deref())
-        .context("failed to open qmd postgres/config store")?;
+    let store = AutoQmdStore::open_with_backend(cli.index.as_deref(), cli.backend.as_kind())
+        .context("failed to open qmd store")?;
     let service = QmdService::new(store, AdaptiveLlmEngine::from_env());
 
     if cli.healthcheck {
@@ -287,10 +679,12 @@ fn handle_request(request: RpcRequest, service: &AppService) -> RpcResponse {
         "resources/read" => read_resource(&request.params, service),
         "prompts/list" => list_prompts(),
         "prompts/get" => get_prompt(&request.params),
-        _ => Err(RpcError {
-            code: -32601,
-            message: format!("unknown method: {}", request.method),
-        }),
+        _ => Err(unknown_name_error(
+            "method",
+            &request.method,
+            SUPPORTED_REQUEST_METHODS,
+            -32601,
+        )),
     };
 
     match result {
@@ -420,19 +814,9 @@ fn capabilities_payload() -> Value {
 }
 
 fn call_tool(params: &Value, service: &AppService) -> Result<Value, RpcError> {
-    let name = params
-        .get("name")
-        .and_then(Value::as_str)
-        .ok_or_else(|| RpcError {
-            code: -32602,
-            message: "missing tools/call.params.name".to_string(),
-        })?;
-    let args = params
-        .get("arguments")
-        .cloned()
-        .unwrap_or_else(|| json!({}));
+    let (name, args) = parse_tool_call_params(params)?;
 
-    match name {
+    match name.as_str() {
         "search" => {
             let query = parse_string(&args, "query")?;
             let options = parse_search_options(&args);
@@ -531,10 +915,12 @@ fn call_tool(params: &Value, service: &AppService) -> Result<Value, RpcError> {
                 "structuredContent": out
             }))
         }
-        _ => Err(RpcError {
-            code: -32601,
-            message: format!("unknown tool: {name}"),
-        }),
+        _ => Err(unknown_name_error(
+            "tool",
+            &name,
+            SUPPORTED_TOOL_NAMES,
+            -32601,
+        )),
     }
 }
 
@@ -554,13 +940,11 @@ fn list_resources(service: &AppService) -> Result<Value, RpcError> {
 }
 
 fn read_resource(params: &Value, service: &AppService) -> Result<Value, RpcError> {
+    validate_object_schema(params, RESOURCE_READ_PARAMS_SCHEMA, "resources/read.params")?;
     let uri = params
         .get("uri")
         .and_then(Value::as_str)
-        .ok_or_else(|| RpcError {
-            code: -32602,
-            message: "missing resources/read.params.uri".to_string(),
-        })?;
+        .ok_or_else(|| invalid_params("missing resources/read.params.uri"))?;
     let file = uri.strip_prefix("qmd://").unwrap_or(uri).to_string();
     let doc = service
         .get(&DocumentRequest {
@@ -590,18 +974,13 @@ fn list_prompts() -> Result<Value, RpcError> {
 }
 
 fn get_prompt(params: &Value) -> Result<Value, RpcError> {
+    validate_object_schema(params, PROMPT_GET_PARAMS_SCHEMA, "prompts/get.params")?;
     let name = params
         .get("name")
         .and_then(Value::as_str)
-        .ok_or_else(|| RpcError {
-            code: -32602,
-            message: "missing prompts/get.params.name".to_string(),
-        })?;
+        .ok_or_else(|| invalid_params("missing prompts/get.params.name"))?;
     if name != "query" {
-        return Err(RpcError {
-            code: -32602,
-            message: format!("unknown prompt: {name}"),
-        });
+        return Err(unknown_name_error("prompt", name, &["query"], -32602));
     }
     Ok(json!({
         "messages": [{
@@ -653,6 +1032,7 @@ fn map_tool_error(err: impl std::fmt::Display) -> RpcError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     fn request(id: Option<Value>, method: &str) -> RpcRequest {
         RpcRequest {
@@ -786,6 +1166,121 @@ mod tests {
         let err_wrong_type =
             parse_string(&json!({ "file": 123 }), "file").expect_err("non-string should fail");
         assert_eq!(err_wrong_type.code, -32602);
+    }
+
+    #[test]
+    fn parse_tool_call_params_suggests_closest_tool_name() {
+        let err = parse_tool_call_params(&json!({
+            "name": "serch",
+            "arguments": { "query": "ownership" }
+        }))
+        .expect_err("unknown tool should fail");
+        assert_eq!(err.code, -32601);
+        assert!(
+            err.message.contains("did you mean 'search'"),
+            "expected did-you-mean suggestion, got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn parse_tool_call_params_rejects_unknown_argument_with_suggestion() {
+        let err = parse_tool_call_params(&json!({
+            "name": "search",
+            "arguments": {
+                "qurey": "ownership"
+            }
+        }))
+        .expect_err("unknown argument should fail");
+        assert_eq!(err.code, -32602);
+        assert!(
+            err.message.contains("did you mean 'query'"),
+            "expected query suggestion, got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn parse_tool_call_params_rejects_invalid_argument_type() {
+        let err = parse_tool_call_params(&json!({
+            "name": "search",
+            "arguments": {
+                "query": "ownership",
+                "limit": "ten"
+            }
+        }))
+        .expect_err("invalid type should fail");
+        assert_eq!(err.code, -32602);
+        assert!(err.message.contains("expected integer"));
+        assert!(err.message.contains("got string"));
+    }
+
+    #[test]
+    fn parse_tool_call_params_accepts_valid_shape() {
+        let parsed = parse_tool_call_params(&json!({
+            "name": "query",
+            "arguments": {
+                "query": "state machine",
+                "limit": 5,
+                "minScore": 0.25
+            }
+        }))
+        .expect("valid schema");
+
+        assert_eq!(parsed.0, "query");
+        assert_eq!(parsed.1["query"], "state machine");
+        assert_eq!(parsed.1["limit"], 5);
+    }
+
+    proptest! {
+        #[test]
+        fn levenshtein_distance_is_symmetric(a in "[a-z]{0,16}", b in "[a-z]{0,16}") {
+            prop_assert_eq!(
+                levenshtein_distance(&a, &b),
+                levenshtein_distance(&b, &a)
+            );
+        }
+
+        #[test]
+        fn parse_header_fuzz_no_panics(input in ".{0,128}") {
+            let _ = parse_header(&input);
+        }
+
+        #[test]
+        fn parse_tool_call_params_fuzz_never_panics(
+            tool_name in ".{0,24}",
+            query in ".{0,48}",
+            limit in any::<i32>(),
+            typo_key in "[a-z]{1,12}"
+        ) {
+            let mut args = serde_json::Map::new();
+            args.insert("query".to_string(), Value::String(query));
+            args.insert(typo_key, Value::Number(limit.into()));
+            let payload = json!({
+                "name": tool_name,
+                "arguments": Value::Object(args)
+            });
+            let _ = parse_tool_call_params(&payload);
+        }
+    }
+
+    #[test]
+    fn cli_accepts_backend_sqlite_override() {
+        let cli = Cli::try_parse_from(["litho-qmd-mcp", "--backend", "sqlite", "--healthcheck"])
+            .expect("parse");
+        assert_eq!(cli.backend, BackendArg::Sqlite);
+    }
+
+    #[test]
+    fn cli_rejects_invalid_backend_override() {
+        let err = Cli::try_parse_from(["litho-qmd-mcp", "--backend", "invalid", "--healthcheck"])
+            .expect_err("invalid backend should fail");
+        assert!(
+            err.to_string()
+                .to_ascii_lowercase()
+                .contains("possible values"),
+            "expected clap value-enum guidance, got: {err}"
+        );
     }
 
     #[test]

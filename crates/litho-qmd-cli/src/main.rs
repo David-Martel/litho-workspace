@@ -1,17 +1,17 @@
 use anyhow::{Context as _, bail};
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use litho_qmd_core::{
     CollectionMutation, CollectionRecord, ContextMutation, ContextRecord, ContextTarget,
     DocumentRequest, MultiGetRequest, QmdService, SearchOptions,
 };
 use litho_qmd_llm::AdaptiveLlmEngine;
-use litho_qmd_storage::PostgresQmdStore;
+use litho_qmd_storage::{AutoQmdStore, QmdBackendKind};
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-type AppService = QmdService<PostgresQmdStore, AdaptiveLlmEngine>;
+type AppService = QmdService<AutoQmdStore, AdaptiveLlmEngine>;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -27,8 +27,41 @@ struct Cli {
     )]
     index: Option<String>,
 
+    #[arg(
+        long,
+        value_enum,
+        default_value_t = BackendArg::Auto,
+        help = "QMD backend override (auto, sqlite, postgres)"
+    )]
+    backend: BackendArg,
+
     #[command(subcommand)]
     command: CommandSet,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, ValueEnum)]
+enum BackendArg {
+    Auto,
+    Sqlite,
+    Postgres,
+}
+
+impl BackendArg {
+    fn as_kind(self) -> Option<QmdBackendKind> {
+        match self {
+            BackendArg::Auto => None,
+            BackendArg::Sqlite => Some(QmdBackendKind::Sqlite),
+            BackendArg::Postgres => Some(QmdBackendKind::Postgres),
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            BackendArg::Auto => "auto",
+            BackendArg::Sqlite => "sqlite",
+            BackendArg::Postgres => "postgres",
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -187,9 +220,14 @@ fn main() -> anyhow::Result<()> {
 
 fn run(cli: Cli) -> anyhow::Result<()> {
     let index = cli.index.as_deref();
+    let backend = cli.backend;
 
     if let CommandSet::Mcp { passthrough } = cli.command {
-        let status = Command::new("litho-qmd-mcp")
+        let mut command = Command::new("litho-qmd-mcp");
+        if backend != BackendArg::Auto {
+            command.arg("--backend").arg(backend.as_str());
+        }
+        let status = command
             .args(passthrough)
             .status()
             .context("failed to start litho-qmd-mcp; ensure crate is built and on PATH")?;
@@ -199,8 +237,8 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let store = PostgresQmdStore::open_default(index)
-        .context("failed to open qmd postgres/config store")?;
+    let store = AutoQmdStore::open_with_backend(index, backend.as_kind())
+        .context("failed to open qmd store")?;
     let service = QmdService::new(store, AdaptiveLlmEngine::from_env());
 
     match cli.command {
@@ -949,5 +987,23 @@ mod tests {
                 "compiled build token differs from LITHO_EXPECT_BUILD_TOKEN"
             );
         }
+    }
+
+    #[test]
+    fn cli_accepts_backend_sqlite_override() {
+        let cli = Cli::try_parse_from(["qmd", "--backend", "sqlite", "status"]).expect("parse");
+        assert_eq!(cli.backend, BackendArg::Sqlite);
+    }
+
+    #[test]
+    fn cli_rejects_invalid_backend_override() {
+        let err = Cli::try_parse_from(["qmd", "--backend", "invalid", "status"])
+            .expect_err("invalid backend should fail");
+        assert!(
+            err.to_string()
+                .to_ascii_lowercase()
+                .contains("possible values"),
+            "expected clap value-enum guidance, got: {err}"
+        );
     }
 }

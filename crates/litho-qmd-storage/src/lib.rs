@@ -1,5 +1,6 @@
 #[doc(hidden)]
 pub mod fast_table;
+mod sqlite_impl;
 
 use chrono::{DateTime, Utc};
 use fast_table::{FastHashSet, FastHashTable};
@@ -16,12 +17,14 @@ use postgres_native_tls::MakeTlsConnector;
 use r2d2::{Pool, PooledConnection};
 use r2d2_postgres::PostgresConnectionManager;
 use r2d2_postgres::postgres::{Client, NoTls, config::SslMode};
+use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 const DEFAULT_INDEX_NAME: &str = "index";
@@ -35,8 +38,24 @@ pub struct PostgresQmdStore {
     pool: PgPool,
 }
 
+pub struct SqliteQmdStore {
+    database_path: PathBuf,
+    config_path: PathBuf,
+    conn: Mutex<Connection>,
+}
+
+pub enum AutoQmdStore {
+    Postgres(PostgresQmdStore),
+    Sqlite(SqliteQmdStore),
+}
+
 pub type PgQmdStore = PostgresQmdStore;
-pub type SqliteQmdStore = PostgresQmdStore;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QmdBackendKind {
+    Postgres,
+    Sqlite,
+}
 
 enum PgPool {
     NoTls(Pool<PostgresConnectionManager<NoTls>>),
@@ -62,7 +81,11 @@ struct RepoPathsConfig {
 #[derive(Debug, Clone, Deserialize, Default)]
 struct RepoDatabaseConfig {
     #[serde(default)]
+    backend: Option<String>,
+    #[serde(default)]
     url: Option<String>,
+    #[serde(default)]
+    sqlite_path: Option<String>,
     #[serde(default)]
     host: Option<String>,
     #[serde(default)]
@@ -337,6 +360,139 @@ impl PostgresQmdStore {
 
         best.map(|(_, text)| text)
             .or_else(|| config.global_context.clone())
+    }
+}
+
+impl AutoQmdStore {
+    pub fn open_default(index_name: Option<&str>) -> QmdResult<Self> {
+        Self::open_with_backend(index_name, None)
+    }
+
+    pub fn open_with_backend(
+        index_name: Option<&str>,
+        backend: Option<QmdBackendKind>,
+    ) -> QmdResult<Self> {
+        let index = index_name.unwrap_or(DEFAULT_INDEX_NAME);
+        let resolved = backend.unwrap_or_else(|| sqlite_impl::resolve_backend_kind(index));
+        match resolved {
+            QmdBackendKind::Postgres => {
+                Ok(Self::Postgres(PostgresQmdStore::open_default(Some(index))?))
+            }
+            QmdBackendKind::Sqlite => Ok(Self::Sqlite(SqliteQmdStore::open_default(Some(index))?)),
+        }
+    }
+
+    pub fn backend_kind(&self) -> QmdBackendKind {
+        match self {
+            AutoQmdStore::Postgres(_) => QmdBackendKind::Postgres,
+            AutoQmdStore::Sqlite(_) => QmdBackendKind::Sqlite,
+        }
+    }
+}
+
+impl SqliteQmdStore {
+    pub fn open_default(index_name: Option<&str>) -> QmdResult<Self> {
+        let index = index_name.unwrap_or(DEFAULT_INDEX_NAME);
+        let runtime = sqlite_impl::resolve_sqlite_runtime(index);
+        let config_path = resolve_collection_config_path(index)?;
+        Self::open_with_paths(runtime.database_path, config_path)
+    }
+
+    pub fn open_with_paths(
+        database_path: impl Into<PathBuf>,
+        config_path: impl Into<PathBuf>,
+    ) -> QmdResult<Self> {
+        let database_path = database_path.into();
+        let config_path = config_path.into();
+
+        if let Some(parent) = database_path.parent() {
+            fs::create_dir_all(parent).map_err(io_error)?;
+        }
+        if let Some(parent) = config_path.parent() {
+            fs::create_dir_all(parent).map_err(io_error)?;
+        }
+
+        let conn = Connection::open(&database_path).map_err(sqlite_impl::sqlite_error)?;
+        conn.pragma_update(None, "foreign_keys", "ON")
+            .map_err(sqlite_impl::sqlite_error)?;
+        conn.pragma_update(None, "journal_mode", "WAL")
+            .map_err(sqlite_impl::sqlite_error)?;
+        conn.pragma_update(None, "synchronous", "NORMAL")
+            .map_err(sqlite_impl::sqlite_error)?;
+
+        sqlite_impl::initialize_sqlite_schema(&conn)?;
+
+        Ok(Self {
+            database_path,
+            config_path,
+            conn: Mutex::new(conn),
+        })
+    }
+
+    pub fn database_path(&self) -> &Path {
+        &self.database_path
+    }
+
+    pub fn config_path(&self) -> &Path {
+        &self.config_path
+    }
+
+    fn with_conn<T>(&self, f: impl FnOnce(&mut Connection) -> QmdResult<T>) -> QmdResult<T> {
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|e| QmdError::Internal(format!("sqlite mutex poisoned: {e}")))?;
+        f(&mut conn)
+    }
+
+    fn load_config(&self) -> QmdResult<ConfigFile> {
+        if !self.config_path.exists() {
+            return Ok(ConfigFile::default());
+        }
+
+        let content = fs::read_to_string(&self.config_path).map_err(io_error)?;
+        let parsed: ConfigFile = serde_yaml::from_str(&content)
+            .map_err(|e| QmdError::Internal(format!("failed to parse config: {e}")))?;
+        Ok(parsed)
+    }
+
+    fn save_config(&self, config: &ConfigFile) -> QmdResult<()> {
+        let yaml = serde_yaml::to_string(config)
+            .map_err(|e| QmdError::Internal(format!("failed to serialize config: {e}")))?;
+        fs::write(&self.config_path, yaml).map_err(io_error)
+    }
+
+    fn resolve_document(&self, file: &str) -> QmdResult<StoredDocument> {
+        let (lookup, parsed_from_line) = parse_file_lookup(file);
+        let doc = self.with_conn(|conn| {
+            if let Some(docid) = lookup.strip_prefix('#') {
+                let id = docid.parse::<i64>().map_err(|_| {
+                    QmdError::InvalidRequest(format!("docid must be numeric, got '{docid}'"))
+                })?;
+                return sqlite_impl::get_document_by_id_sqlite(conn, id);
+            }
+
+            if let Some((collection, path)) = split_collection_path(lookup) {
+                let exact =
+                    sqlite_impl::get_document_by_collection_path_sqlite(conn, collection, path)?;
+                if exact.is_some() {
+                    return Ok(exact);
+                }
+            }
+
+            sqlite_impl::get_document_by_suffix_sqlite(conn, lookup)
+        })?;
+
+        let mut doc =
+            doc.ok_or_else(|| QmdError::NotFound(format!("document not found: {}", lookup)))?;
+        if parsed_from_line.is_some() {
+            doc.default_from_line = parsed_from_line;
+        }
+        Ok(doc)
+    }
+
+    fn context_for_path(config: &ConfigFile, display_path: &str) -> Option<String> {
+        PostgresQmdStore::context_for_path(config, display_path)
     }
 }
 
@@ -1172,6 +1328,127 @@ impl QmdStore for PostgresQmdStore {
         });
 
         Ok(report)
+    }
+}
+
+impl QmdStore for AutoQmdStore {
+    fn status(&self) -> QmdResult<IndexStatus> {
+        match self {
+            AutoQmdStore::Postgres(store) => store.status(),
+            AutoQmdStore::Sqlite(store) => store.status(),
+        }
+    }
+
+    fn search_bm25(&self, query: &str, options: &SearchOptions) -> QmdResult<Vec<SearchHit>> {
+        match self {
+            AutoQmdStore::Postgres(store) => store.search_bm25(query, options),
+            AutoQmdStore::Sqlite(store) => store.search_bm25(query, options),
+        }
+    }
+
+    fn search_vector(&self, query: &str, options: &SearchOptions) -> QmdResult<Vec<SearchHit>> {
+        match self {
+            AutoQmdStore::Postgres(store) => store.search_vector(query, options),
+            AutoQmdStore::Sqlite(store) => store.search_vector(query, options),
+        }
+    }
+
+    fn get_document(&self, request: &DocumentRequest) -> QmdResult<DocumentContent> {
+        match self {
+            AutoQmdStore::Postgres(store) => store.get_document(request),
+            AutoQmdStore::Sqlite(store) => store.get_document(request),
+        }
+    }
+
+    fn multi_get(&self, request: &MultiGetRequest) -> QmdResult<MultiGetResponse> {
+        match self {
+            AutoQmdStore::Postgres(store) => store.multi_get(request),
+            AutoQmdStore::Sqlite(store) => store.multi_get(request),
+        }
+    }
+
+    fn list_files(&self, prefix: Option<&str>) -> QmdResult<Vec<String>> {
+        match self {
+            AutoQmdStore::Postgres(store) => store.list_files(prefix),
+            AutoQmdStore::Sqlite(store) => store.list_files(prefix),
+        }
+    }
+
+    fn list_collections(&self) -> QmdResult<Vec<CollectionRecord>> {
+        match self {
+            AutoQmdStore::Postgres(store) => store.list_collections(),
+            AutoQmdStore::Sqlite(store) => store.list_collections(),
+        }
+    }
+
+    fn add_collection(&self, input: &CollectionMutation) -> QmdResult<()> {
+        match self {
+            AutoQmdStore::Postgres(store) => store.add_collection(input),
+            AutoQmdStore::Sqlite(store) => store.add_collection(input),
+        }
+    }
+
+    fn remove_collection(&self, name: &str) -> QmdResult<bool> {
+        match self {
+            AutoQmdStore::Postgres(store) => store.remove_collection(name),
+            AutoQmdStore::Sqlite(store) => store.remove_collection(name),
+        }
+    }
+
+    fn rename_collection(&self, old_name: &str, new_name: &str) -> QmdResult<()> {
+        match self {
+            AutoQmdStore::Postgres(store) => store.rename_collection(old_name, new_name),
+            AutoQmdStore::Sqlite(store) => store.rename_collection(old_name, new_name),
+        }
+    }
+
+    fn run_collection_updates(&self) -> QmdResult<Vec<CollectionUpdateResult>> {
+        match self {
+            AutoQmdStore::Postgres(store) => store.run_collection_updates(),
+            AutoQmdStore::Sqlite(store) => store.run_collection_updates(),
+        }
+    }
+
+    fn ingest_collections(&self, force: bool) -> QmdResult<IngestReport> {
+        match self {
+            AutoQmdStore::Postgres(store) => store.ingest_collections(force),
+            AutoQmdStore::Sqlite(store) => store.ingest_collections(force),
+        }
+    }
+
+    fn embed_native(&self, force: bool) -> QmdResult<EmbeddingReport> {
+        match self {
+            AutoQmdStore::Postgres(store) => store.embed_native(force),
+            AutoQmdStore::Sqlite(store) => store.embed_native(force),
+        }
+    }
+
+    fn list_contexts(&self) -> QmdResult<Vec<ContextRecord>> {
+        match self {
+            AutoQmdStore::Postgres(store) => store.list_contexts(),
+            AutoQmdStore::Sqlite(store) => store.list_contexts(),
+        }
+    }
+
+    fn add_context(&self, input: &ContextMutation) -> QmdResult<()> {
+        match self {
+            AutoQmdStore::Postgres(store) => store.add_context(input),
+            AutoQmdStore::Sqlite(store) => store.add_context(input),
+        }
+    }
+
+    fn remove_context(&self, target: &ContextTarget) -> QmdResult<bool> {
+        match self {
+            AutoQmdStore::Postgres(store) => store.remove_context(target),
+            AutoQmdStore::Sqlite(store) => store.remove_context(target),
+        }
+    }
+
+    fn cleanup(&self) -> QmdResult<CleanupReport> {
+        match self {
+            AutoQmdStore::Postgres(store) => store.cleanup(),
+            AutoQmdStore::Sqlite(store) => store.cleanup(),
+        }
     }
 }
 
