@@ -23,8 +23,12 @@ impl<'a> AgentBuilder<'a> {
         Self { client, config }
     }
 
-    /// Build Agent with built-in preset tools
-    pub fn build_agent_with_tools(&self, system_prompt: &str) -> ProviderAgent {
+    /// Build Agent with built-in preset tools using the provided model.
+    pub fn build_agent_with_tools_for_model(
+        &self,
+        system_prompt: &str,
+        model: &str,
+    ) -> ProviderAgent {
         let llm_config = &self.config.llm;
 
         if !llm_config.disable_preset_tools {
@@ -43,22 +47,26 @@ impl<'a> AgentBuilder<'a> {
                 Arc::new(tool_time),
             ];
 
-            self.client.create_agent_with_tools(
-                &llm_config.model_efficient,
-                &system_prompt_with_tools,
-                llm_config,
-                tools,
-            )
-        } else {
             self.client
-                .create_agent(&llm_config.model_efficient, system_prompt, llm_config)
+                .create_agent_with_tools(model, &system_prompt_with_tools, llm_config, tools)
+        } else {
+            self.client.create_agent(model, system_prompt, llm_config)
         }
     }
 
     /// Build Agent without tools
     pub fn build_agent_without_tools(&self, system_prompt: &str) -> ProviderAgent {
         let llm_config = &self.config.llm;
-        self.client
-            .create_agent(&llm_config.model_efficient, system_prompt, llm_config)
+        self.build_agent_without_tools_for_model(system_prompt, &llm_config.model_efficient)
+    }
+
+    /// Build Agent without tools using the provided model.
+    pub fn build_agent_without_tools_for_model(
+        &self,
+        system_prompt: &str,
+        model: &str,
+    ) -> ProviderAgent {
+        let llm_config = &self.config.llm;
+        self.client.create_agent(model, system_prompt, llm_config)
     }
 }

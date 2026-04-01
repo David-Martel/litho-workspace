@@ -42,6 +42,8 @@ impl ProviderClient {
             Some(CodexRsClient::new(
                 config.codex_binary_path.as_deref(),
                 Some(config.timeout_seconds),
+                Some(config.model_powerful.clone()),
+                None,
             )?)
         } else {
             None
@@ -114,6 +116,7 @@ impl ProviderClient {
                 let client = self.codex_client.clone().expect("CodexRs client not set");
                 ProviderExtractor::CodexRs {
                     client,
+                    model: model.to_string(),
                     system_prompt: system_prompt.to_string(),
                     _phantom: std::marker::PhantomData,
                 }
@@ -542,7 +545,9 @@ impl ProviderAgent {
         if let Some(ref codex) = self.client.codex_client
             && self.client.provider == LLMProvider::CodexRs
         {
-            return codex.prompt(&self.system_prompt, user_prompt).await;
+            return codex
+                .prompt_with_model(&self.system_prompt, user_prompt, Some(&self.model))
+                .await;
         }
 
         let messages = vec![
@@ -576,7 +581,7 @@ impl ProviderAgent {
             && self.client.provider == LLMProvider::CodexRs
         {
             return codex
-                .prompt(&self.system_prompt, user_prompt)
+                .prompt_with_model(&self.system_prompt, user_prompt, Some(&self.model))
                 .await
                 .map_err(PromptError::CompletionError);
         }
@@ -681,6 +686,7 @@ where
     /// CodexRs subprocess extraction.
     CodexRs {
         client: CodexRsClient,
+        model: String,
         system_prompt: String,
         _phantom: std::marker::PhantomData<T>,
     },
@@ -712,9 +718,14 @@ where
             ProviderExtractor::Ollama(wrapper) => wrapper.extract(prompt).await,
             ProviderExtractor::CodexRs {
                 client,
+                model,
                 system_prompt,
                 ..
-            } => client.extract::<T>(system_prompt, prompt).await,
+            } => {
+                client
+                    .extract_with_model::<T>(system_prompt, prompt, Some(model))
+                    .await
+            }
         }
     }
 
@@ -936,5 +947,63 @@ fn gemini_to_completion(content: GeminiContent) -> CompletionResponse {
         text: text_parts.join("\n"),
         tool_calls,
         reasoning: Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use schemars::JsonSchema;
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+    struct TestExtraction {
+        value: String,
+    }
+
+    #[test]
+    fn create_extractor_codexrs_keeps_requested_model() {
+        let cfg = LLMConfig {
+            provider: LLMProvider::CodexRs,
+            codex_binary_path: Some("/fake/codex".to_string()),
+            ..LLMConfig::default()
+        };
+
+        let client = ProviderClient::new(&cfg).unwrap();
+        let extractor = client.create_extractor::<TestExtraction>("o3-mini", "sys", &cfg);
+
+        match extractor {
+            ProviderExtractor::CodexRs {
+                model,
+                system_prompt,
+                ..
+            } => {
+                assert_eq!(model, "o3-mini");
+                assert_eq!(system_prompt, "sys");
+            }
+            _ => panic!("expected CodexRs extractor"),
+        }
+    }
+
+    #[test]
+    fn create_extractor_function_calling_keeps_requested_model() {
+        let cfg = LLMConfig {
+            provider: LLMProvider::OpenAI,
+            ..LLMConfig::default()
+        };
+        let client = ProviderClient::new(&cfg).unwrap();
+        let extractor = client.create_extractor::<TestExtraction>("deepseek-chat", "sys", &cfg);
+
+        match extractor {
+            ProviderExtractor::FunctionCalling {
+                model,
+                system_prompt,
+                ..
+            } => {
+                assert_eq!(model, "deepseek-chat");
+                assert_eq!(system_prompt, "sys");
+            }
+            _ => panic!("expected function-calling extractor"),
+        }
     }
 }

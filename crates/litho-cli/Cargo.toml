@@ -12,6 +12,9 @@ path = "src/main.rs"
 litho-core = { workspace = true }
 litho-extract = { workspace = true }
 litho-codex = { workspace = true }
+litho-qmd-core = { path = "../litho-qmd-core" }
+litho-qmd-llm = { path = "../litho-qmd-llm" }
+litho-qmd-storage = { path = "../litho-qmd-storage" }
 clap = { workspace = true }
 tokio = { workspace = true }
 serde_json = { workspace = true }
@@ -21,3 +24,7 @@ chrono = { version = "0.4", features = ["serde"] }
 
 [build-dependencies]
 chrono = { workspace = true }
+
+[dev-dependencies]
+assert_cmd = { workspace = true }
+tempfile = { workspace = true }

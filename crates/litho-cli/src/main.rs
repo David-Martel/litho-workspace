@@ -9,13 +9,23 @@
 //! - `litho status <path>` — Show generation status from the documentation manifest.
 //! - `litho serve <path>` — Launch litho-book to serve generated documentation.
 //! - `litho validate <path>` — Check generated docs for broken references.
+//! - `litho qmd ...` — Forward QMD retrieval/indexing commands to `litho-qmd-cli`.
+//! - `litho search <query>` — Run QMD hybrid search without entering passthrough mode.
+//! - `litho query <query>` — Run QMD query mode without entering passthrough mode.
+//! - `litho vsearch <query>` — Run QMD vector search without entering passthrough mode.
 
 use anyhow::Context as _;
 use clap::{Parser, Subcommand, ValueEnum};
 use litho_codex::exec::CodexExecGenerator;
-use litho_core::config::LithoConfig;
+use litho_core::config::{ExtractBackend, LithoConfig};
 use litho_core::types::ExtractedCodebase;
+use litho_qmd_core::{QmdService, SearchOptions};
+use litho_qmd_llm::AdaptiveLlmEngine;
+use litho_qmd_storage::{AutoQmdStore, QmdBackendKind};
 use std::path::PathBuf;
+use std::process::Stdio;
+
+type AppQmdService = QmdService<AutoQmdStore, AdaptiveLlmEngine>;
 
 // ---------------------------------------------------------------------------
 // CLI definition
@@ -55,6 +65,18 @@ enum Commands {
 
     /// Check generated docs for broken file path references.
     Validate(ValidateArgs),
+
+    /// Forward all remaining args to litho-qmd-cli.
+    Qmd(QmdArgs),
+
+    /// Run a QMD hybrid search.
+    Search(QmdSearchArgs),
+
+    /// Run a QMD query.
+    Query(QmdSearchArgs),
+
+    /// Run a QMD vector search.
+    Vsearch(QmdSearchArgs),
 }
 
 // ---------------------------------------------------------------------------
@@ -79,12 +101,37 @@ struct ExtractArgs {
     /// contacted).
     #[arg(long, value_name = "PATH")]
     config: Option<PathBuf>,
+
+    /// Extraction backend strategy (`auto`, `tree-sitter`, `ast-grep`).
+    #[arg(long, value_enum)]
+    extract_backend: Option<ExtractBackendArg>,
+
+    /// Optional ast-grep binary path override.
+    #[arg(long, value_name = "BIN")]
+    ast_grep_bin: Option<String>,
 }
 
 #[derive(Debug, Clone, ValueEnum)]
 enum OutputFormat {
     Json,
     Summary,
+}
+
+#[derive(Debug, Clone, ValueEnum)]
+enum ExtractBackendArg {
+    Auto,
+    TreeSitter,
+    AstGrep,
+}
+
+impl From<ExtractBackendArg> for ExtractBackend {
+    fn from(value: ExtractBackendArg) -> Self {
+        match value {
+            ExtractBackendArg::Auto => ExtractBackend::Auto,
+            ExtractBackendArg::TreeSitter => ExtractBackend::TreeSitter,
+            ExtractBackendArg::AstGrep => ExtractBackend::AstGrep,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -157,6 +204,54 @@ struct ValidateArgs {
     path: PathBuf,
 }
 
+#[derive(Debug, Parser)]
+struct QmdArgs {
+    /// Raw args forwarded to litho-qmd-cli.
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    args: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum QmdBackendArg {
+    Auto,
+    Sqlite,
+    Postgres,
+}
+
+impl QmdBackendArg {
+    fn as_kind(self) -> Option<QmdBackendKind> {
+        match self {
+            QmdBackendArg::Auto => None,
+            QmdBackendArg::Sqlite => Some(QmdBackendKind::Sqlite),
+            QmdBackendArg::Postgres => Some(QmdBackendKind::Postgres),
+        }
+    }
+}
+
+#[derive(Debug, Parser)]
+struct QmdSearchArgs {
+    /// Query string.
+    query: String,
+    /// Max hits to return.
+    #[arg(long, default_value_t = 10)]
+    limit: usize,
+    /// Minimum score threshold.
+    #[arg(long = "min-score", default_value_t = 0.0)]
+    min_score: f32,
+    /// Optional collection filter.
+    #[arg(short = 'c', long)]
+    collection: Option<String>,
+    /// Emit JSON output from qmd.
+    #[arg(long)]
+    json: bool,
+    /// Optional qmd index override.
+    #[arg(long)]
+    index: Option<String>,
+    /// Optional backend override.
+    #[arg(long, value_enum)]
+    backend: Option<QmdBackendArg>,
+}
+
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
@@ -175,6 +270,10 @@ async fn main() -> anyhow::Result<()> {
         Commands::Status(args) => cmd_status(args).await,
         Commands::Serve(args) => cmd_serve(args).await,
         Commands::Validate(args) => cmd_validate(args).await,
+        Commands::Qmd(args) => cmd_qmd(args).await,
+        Commands::Search(args) => cmd_qmd_search_like("search", args).await,
+        Commands::Query(args) => cmd_qmd_search_like("query", args).await,
+        Commands::Vsearch(args) => cmd_qmd_search_like("vsearch", args).await,
     }
 }
 
@@ -188,15 +287,21 @@ async fn cmd_extract(args: ExtractArgs) -> anyhow::Result<()> {
         .canonicalize()
         .with_context(|| format!("project path does not exist: {}", args.path.display()))?;
 
-    let extracted = match args.config {
-        Some(config_path) => {
-            let cfg = LithoConfig::from_file(&config_path)
-                .with_context(|| format!("failed to load config from {}", config_path.display()))?;
-            litho_extract::extract_with_config(&project_path, &cfg)
-        }
-        None => litho_extract::extract(&project_path),
+    let mut cfg = match args.config {
+        Some(config_path) => LithoConfig::from_file(&config_path)
+            .with_context(|| format!("failed to load config from {}", config_path.display()))?,
+        None => LithoConfig::default(),
+    };
+
+    if let Some(backend) = args.extract_backend {
+        cfg.extract_backend = backend.into();
     }
-    .with_context(|| format!("extraction failed for {}", project_path.display()))?;
+    if let Some(bin) = args.ast_grep_bin {
+        cfg.ast_grep_binary = Some(bin);
+    }
+
+    let extracted = litho_extract::extract_with_config(&project_path, &cfg)
+        .with_context(|| format!("extraction failed for {}", project_path.display()))?;
 
     match args.format {
         OutputFormat::Json => print_json(&extracted)?,
@@ -498,6 +603,7 @@ async fn cmd_validate(args: ValidateArgs) -> anyhow::Result<()> {
 
     let mut issues: Vec<String> = Vec::new();
     let mut files_checked = 0;
+    let project_root = detect_project_root(&docs_path);
 
     // Walk all .md files in the docs directory
     for entry in walkdir(&docs_path)? {
@@ -517,8 +623,6 @@ async fn cmd_validate(args: ValidateArgs) -> anyhow::Result<()> {
                 let ref_path = PathBuf::from(&cap);
                 // Only check paths that look like file references (contain / or \, have extension)
                 if (cap.contains('/') || cap.contains('\\')) && cap.contains('.') {
-                    // Try to resolve relative to the project root (parent of docs dir)
-                    let project_root = docs_path.parent().unwrap_or(&docs_path);
                     let resolved = project_root.join(&ref_path);
                     if !resolved.exists() {
                         issues.push(format!(
@@ -548,6 +652,158 @@ async fn cmd_validate(args: ValidateArgs) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+async fn cmd_qmd(args: QmdArgs) -> anyhow::Result<()> {
+    run_qmd_cli(args.args).await
+}
+
+async fn cmd_qmd_search_like(mode: &str, args: QmdSearchArgs) -> anyhow::Result<()> {
+    let service = build_qmd_service(args.index.as_deref(), args.backend)
+        .context("failed to initialize qmd service")?;
+    let response = match mode {
+        "search" => service
+            .search(
+                &args.query,
+                SearchOptions {
+                    limit: args.limit,
+                    min_score: args.min_score,
+                    collection: args.collection,
+                },
+            )
+            .map_err(anyhow::Error::msg)?,
+        "query" => service
+            .query(
+                &args.query,
+                SearchOptions {
+                    limit: args.limit,
+                    min_score: args.min_score,
+                    collection: args.collection,
+                },
+            )
+            .map_err(anyhow::Error::msg)?,
+        "vsearch" => service
+            .vsearch(
+                &args.query,
+                SearchOptions {
+                    limit: args.limit,
+                    min_score: args.min_score,
+                    collection: args.collection,
+                },
+            )
+            .map_err(anyhow::Error::msg)?,
+        _ => anyhow::bail!("unsupported qmd mode: {mode}"),
+    };
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&response)?);
+    } else if mode == "search" {
+        println!(
+            "Found {} result(s) for \"{}\":",
+            response.results.len(),
+            response.query
+        );
+        for hit in response.results {
+            println!(
+                "{} {:.2} {} - {}",
+                hit.docid, hit.score, hit.file, hit.title
+            );
+        }
+    } else {
+        for hit in response.results {
+            println!(
+                "{} {:.2} {} - {}",
+                hit.docid, hit.score, hit.file, hit.title
+            );
+        }
+    }
+    Ok(())
+}
+
+async fn run_qmd_cli(args: Vec<String>) -> anyhow::Result<()> {
+    let Some(bin) = which_qmd_cli() else {
+        anyhow::bail!(
+            "litho-qmd-cli not found in PATH. Build or install `litho-qmd-cli` to use `litho qmd ...`"
+        );
+    };
+
+    let status = tokio::process::Command::new(bin)
+        .args(&args)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()
+        .await
+        .context("failed to spawn litho-qmd-cli")?;
+
+    if !status.success() {
+        anyhow::bail!("litho-qmd-cli exited with status: {}", status);
+    }
+
+    Ok(())
+}
+
+fn build_qmd_service(
+    index: Option<&str>,
+    backend: Option<QmdBackendArg>,
+) -> anyhow::Result<AppQmdService> {
+    let backend_kind = backend.and_then(QmdBackendArg::as_kind);
+    let store =
+        AutoQmdStore::open_with_backend(index, backend_kind).context("failed to open qmd store")?;
+    Ok(QmdService::new(store, AdaptiveLlmEngine::from_env()))
+}
+
+/// Detect project root for doc reference resolution.
+///
+/// Prefer nearest ancestor containing `.git` or `.litho`; otherwise fall back
+/// to the direct parent of the docs directory.
+fn detect_project_root(docs_path: &std::path::Path) -> PathBuf {
+    for ancestor in docs_path.ancestors() {
+        if ancestor.join(".git").exists() || ancestor.join(".litho").exists() {
+            return ancestor.to_path_buf();
+        }
+    }
+
+    docs_path.parent().unwrap_or(docs_path).to_path_buf()
+}
+
+fn which_qmd_cli() -> Option<PathBuf> {
+    let cmd = if cfg!(target_os = "windows") {
+        "where"
+    } else {
+        "which"
+    };
+    if let Ok(output) = std::process::Command::new(cmd)
+        .arg("litho-qmd-cli")
+        .output()
+        && output.status.success()
+    {
+        let path = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if !path.is_empty() {
+            return Some(PathBuf::from(path));
+        }
+    }
+
+    let candidates = [
+        ".claude/tools/bin/litho-qmd-cli.exe",
+        ".claude/tools/bin/litho-qmd-cli",
+        "target/release/litho-qmd-cli.exe",
+        "target/release/litho-qmd-cli",
+    ];
+
+    for candidate in &candidates {
+        let path = PathBuf::from(candidate);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
+    None
 }
 
 /// Walk a directory and collect all file paths.
@@ -596,6 +852,192 @@ fn find_backtick_paths(line: &str) -> Vec<String> {
     }
 
     paths
+}
+
+#[cfg(test)]
+mod cli_parse_tests {
+    use super::*;
+
+    #[test]
+    fn cli_parses_status_default_path() {
+        let cli = Cli::try_parse_from(["litho", "status"]).expect("failed to parse status command");
+        match cli.command {
+            Commands::Status(args) => assert_eq!(args.path, PathBuf::from(".")),
+            _ => panic!("expected status subcommand"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_serve_with_port() {
+        let cli = Cli::try_parse_from(["litho", "serve", "docs", "--port", "4444"])
+            .expect("failed to parse serve command");
+        match cli.command {
+            Commands::Serve(args) => {
+                assert_eq!(args.path, PathBuf::from("docs"));
+                assert_eq!(args.port, 4444);
+            }
+            _ => panic!("expected serve subcommand"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_validate_with_path() {
+        let cli =
+            Cli::try_parse_from(["litho", "validate", "docs"]).expect("failed to parse validate");
+        match cli.command {
+            Commands::Validate(args) => assert_eq!(args.path, PathBuf::from("docs")),
+            _ => panic!("expected validate subcommand"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_generate_provider_output_and_model() {
+        let cli = Cli::try_parse_from([
+            "litho",
+            "generate",
+            ".",
+            "--provider",
+            "codex-exec",
+            "--output",
+            "out",
+            "--model",
+            "o3",
+        ])
+        .expect("failed to parse generate command");
+        match cli.command {
+            Commands::Generate(args) => {
+                assert!(matches!(args.provider, Provider::CodexExec));
+                assert_eq!(args.output, PathBuf::from("out"));
+                assert_eq!(args.model.as_deref(), Some("o3"));
+            }
+            _ => panic!("expected generate subcommand"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_extract_backend_and_format() {
+        let cli = Cli::try_parse_from([
+            "litho",
+            "extract",
+            ".",
+            "--format",
+            "summary",
+            "--extract-backend",
+            "ast-grep",
+        ])
+        .expect("failed to parse extract command");
+        match cli.command {
+            Commands::Extract(args) => {
+                assert!(matches!(args.format, OutputFormat::Summary));
+                assert!(matches!(
+                    args.extract_backend,
+                    Some(ExtractBackendArg::AstGrep)
+                ));
+            }
+            _ => panic!("expected extract subcommand"),
+        }
+    }
+
+    #[test]
+    fn cli_rejects_invalid_generate_provider() {
+        let err = Cli::try_parse_from(["litho", "generate", ".", "--provider", "bad-provider"])
+            .expect_err("expected invalid provider parse error");
+        assert!(
+            err.to_string()
+                .to_ascii_lowercase()
+                .contains("possible values"),
+            "unexpected parse error: {err}"
+        );
+    }
+
+    #[test]
+    fn cli_rejects_invalid_extract_backend() {
+        let err =
+            Cli::try_parse_from(["litho", "extract", ".", "--extract-backend", "bad-backend"])
+                .expect_err("expected invalid backend parse error");
+        assert!(
+            err.to_string()
+                .to_ascii_lowercase()
+                .contains("possible values"),
+            "unexpected parse error: {err}"
+        );
+    }
+
+    #[test]
+    fn cli_parses_qmd_passthrough_args() {
+        let cli =
+            Cli::try_parse_from(["litho", "qmd", "search", "--query", "cache", "--limit", "3"])
+                .expect("failed to parse qmd passthrough command");
+        match cli.command {
+            Commands::Qmd(args) => assert_eq!(
+                args.args,
+                vec![
+                    "search".to_string(),
+                    "--query".to_string(),
+                    "cache".to_string(),
+                    "--limit".to_string(),
+                    "3".to_string()
+                ]
+            ),
+            _ => panic!("expected qmd subcommand"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_search_subcommand() {
+        let cli = Cli::try_parse_from([
+            "litho",
+            "search",
+            "cache manager",
+            "--limit",
+            "5",
+            "--min-score",
+            "0.4",
+            "--json",
+            "--backend",
+            "sqlite",
+            "--index",
+            "index",
+        ])
+        .expect("failed to parse search command");
+        match cli.command {
+            Commands::Search(args) => {
+                assert_eq!(args.query, "cache manager");
+                assert_eq!(args.limit, 5);
+                assert_eq!(args.min_score, 0.4);
+                assert!(args.json);
+                assert!(matches!(args.backend, Some(QmdBackendArg::Sqlite)));
+                assert_eq!(args.index.as_deref(), Some("index"));
+            }
+            _ => panic!("expected search subcommand"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_query_subcommand_collection() {
+        let cli =
+            Cli::try_parse_from(["litho", "query", "status endpoint", "--collection", "docs"])
+                .expect("failed to parse query command");
+        match cli.command {
+            Commands::Query(args) => {
+                assert_eq!(args.query, "status endpoint");
+                assert_eq!(args.collection.as_deref(), Some("docs"));
+            }
+            _ => panic!("expected query subcommand"),
+        }
+    }
+
+    #[test]
+    fn detect_project_root_prefers_ancestor_with_git() {
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let repo = temp.path().join("repo");
+        std::fs::create_dir_all(repo.join(".git")).expect("create .git");
+        let docs = repo.join("docs").join("auto").join("litho_docs");
+        std::fs::create_dir_all(&docs).expect("create docs tree");
+
+        let root = detect_project_root(&docs);
+        assert_eq!(root, repo);
+    }
 }
 
 #[cfg(test)]

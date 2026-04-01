@@ -59,6 +59,17 @@ impl LLMClient {
         })
     }
 
+    /// Prepare provider runtime before pipeline execution.
+    ///
+    /// For native Ollama this performs model availability checks, optional pulls,
+    /// and optional warmup calls.
+    pub async fn prepare_runtime(&self) -> Result<()> {
+        if let Some(ref native) = self.ollama_native {
+            native.prepare_runtime(&self.config.llm).await?;
+        }
+        Ok(())
+    }
+
     /// Whether we should prefer the native ollama-rs path.
     #[allow(dead_code)]
     fn use_native_ollama(&self) -> bool {
@@ -158,6 +169,7 @@ impl LLMClient {
                             if let Ok(result) = Box::pin(self.try_codex_fallback::<T>(
                                 system_prompt,
                                 user_prompt,
+                                Some(&befitting_model),
                             ))
                             .await
                             {
@@ -193,9 +205,62 @@ impl LLMClient {
     {
         // Prefer native ollama-rs path for Ollama provider.
         if let Some(ref native) = self.ollama_native {
-            return native
+            match native
                 .extract::<T>(&primary_model, system_prompt, user_prompt, &self.config.llm)
-                .await;
+                .await
+            {
+                Ok(result) => return Ok(result),
+                Err(primary_err) => {
+                    let mut aggregated = format!(
+                        "native Ollama extract failed with primary model '{}': {}",
+                        primary_model, primary_err
+                    );
+
+                    if let Some(ref fallback) = fallback_model {
+                        let user_prompt_with_fixer = format!(
+                            "{}\n\n**Notice** Previous model call failed: \"{}\". \
+Please fix the issue and regenerate valid output.",
+                            user_prompt, primary_err
+                        );
+                        match native
+                            .extract::<T>(
+                                fallback,
+                                system_prompt,
+                                &user_prompt_with_fixer,
+                                &self.config.llm,
+                            )
+                            .await
+                        {
+                            Ok(result) => return Ok(result),
+                            Err(fallback_err) => {
+                                aggregated.push_str(&format!(
+                                    " | fallback model '{}' failed: {}",
+                                    fallback, fallback_err
+                                ));
+                            }
+                        }
+                    }
+
+                    if self.config.llm.codex_as_fallback {
+                        match self
+                            .try_codex_fallback::<T>(
+                                system_prompt,
+                                user_prompt,
+                                Some(&primary_model),
+                            )
+                            .await
+                        {
+                            Ok(result) => return Ok(result),
+                            Err(codex_err) => {
+                                aggregated
+                                    .push_str(&format!(" | codex fallback failed: {}", codex_err));
+                            }
+                        }
+                    }
+
+                    return Err(anyhow::anyhow!(aggregated));
+                }
+            }
         }
 
         self.extract_inner(system_prompt, user_prompt, primary_model, fallback_model)
@@ -222,10 +287,24 @@ impl LLMClient {
         }
 
         let agent_builder = self.get_agent_builder();
-        let agent = agent_builder.build_agent_without_tools(system_prompt);
+        let agent = agent_builder.build_agent_without_tools_for_model(system_prompt, model);
 
-        self.retry_with_backoff(|| async { agent.prompt(user_prompt).await })
+        match self
+            .retry_with_backoff(|| async { agent.prompt(user_prompt).await })
             .await
+        {
+            Ok(reply) => Ok(reply),
+            Err(err) => {
+                if self.config.llm.codex_as_fallback
+                    && let Ok(reply) = self
+                        .try_codex_prompt_fallback(system_prompt, user_prompt, Some(model))
+                        .await
+                {
+                    return Ok(reply);
+                }
+                Err(err)
+            }
+        }
     }
 
     /// Multi-turn dialogue (with tools) using an explicit model name.
@@ -245,17 +324,23 @@ impl LLMClient {
                 .await;
         }
 
-        // For non-Ollama providers the model selection is embedded in the
-        // ReActExecutor call.  We defer to `prompt()` which handles the
-        // full ReAct / summary-reasoning lifecycle.
-        self.prompt(system_prompt, user_prompt).await
+        let react_config = ReActConfig::default();
+        let response = self
+            .prompt_with_react_with_model(model, system_prompt, user_prompt, react_config)
+            .await?;
+        Ok(response.content)
     }
 
     /// Attempt extraction via the local codex-rs binary as a last resort.
     ///
     /// Returns `Ok(T)` on success; any error is propagated to the caller so it
     /// can decide whether to surface the original primary-model error instead.
-    async fn try_codex_fallback<T>(&self, system_prompt: &str, user_prompt: &str) -> Result<T>
+    async fn try_codex_fallback<T>(
+        &self,
+        system_prompt: &str,
+        user_prompt: &str,
+        model: Option<&str>,
+    ) -> Result<T>
     where
         T: JsonSchema + for<'a> Deserialize<'a> + Serialize + Send + Sync + 'static,
     {
@@ -263,8 +348,30 @@ impl LLMClient {
         let client = CodexRsClient::new(
             llm_config.codex_binary_path.as_deref(),
             Some(llm_config.timeout_seconds),
+            Some(llm_config.model_powerful.clone()),
+            Some(self.config.project_path.clone()),
         )?;
-        client.extract::<T>(system_prompt, user_prompt).await
+        client
+            .extract_with_model::<T>(system_prompt, user_prompt, model)
+            .await
+    }
+
+    async fn try_codex_prompt_fallback(
+        &self,
+        system_prompt: &str,
+        user_prompt: &str,
+        model: Option<&str>,
+    ) -> Result<String> {
+        let llm_config = &self.config.llm;
+        let client = CodexRsClient::new(
+            llm_config.codex_binary_path.as_deref(),
+            Some(llm_config.timeout_seconds),
+            Some(llm_config.model_powerful.clone()),
+            Some(self.config.project_path.clone()),
+        )?;
+        client
+            .prompt_with_model(system_prompt, user_prompt, model)
+            .await
     }
 
     /// Intelligent dialogue method (using default ReAct configuration).
@@ -294,11 +401,23 @@ impl LLMClient {
         user_prompt: &str,
         react_config: ReActConfig,
     ) -> Result<ReActResponse> {
-        let agent_builder = self.get_agent_builder();
-        let agent = agent_builder.build_agent_with_tools(system_prompt);
         let model_name = self.config.llm.model_efficient.clone();
+        self.prompt_with_react_with_model(&model_name, system_prompt, user_prompt, react_config)
+            .await
+    }
 
-        let response = self
+    pub async fn prompt_with_react_with_model(
+        &self,
+        model: &str,
+        system_prompt: &str,
+        user_prompt: &str,
+        react_config: ReActConfig,
+    ) -> Result<ReActResponse> {
+        let agent_builder = self.get_agent_builder();
+        let agent = agent_builder.build_agent_with_tools_for_model(system_prompt, model);
+        let model_name = model.to_string();
+
+        let response_result = self
             .retry_with_backoff(|| async {
                 ReActExecutor::execute(
                     &agent,
@@ -309,7 +428,21 @@ impl LLMClient {
                 )
                 .await
             })
-            .await?;
+            .await;
+
+        let response = match response_result {
+            Ok(response) => response,
+            Err(err) => {
+                if self.config.llm.codex_as_fallback
+                    && let Ok(reply) = self
+                        .try_codex_prompt_fallback(system_prompt, user_prompt, Some(model))
+                        .await
+                {
+                    return Ok(ReActResponse::success(reply, 1));
+                }
+                return Err(err);
+            }
+        };
 
         // If max iterations reached and summary reasoning enabled, attempt fallover
         if response.stopped_by_max_depth
