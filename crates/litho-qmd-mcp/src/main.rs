@@ -1,8 +1,8 @@
 use anyhow::Context as _;
 use clap::{Parser, ValueEnum};
-use litho_qmd_core::{DocumentRequest, MultiGetRequest, QmdService, SearchOptions};
 use litho_qmd_llm::AdaptiveLlmEngine;
 use litho_qmd_storage::{AutoQmdStore, QmdBackendKind};
+use litho_qmd_storage::{DocumentRequest, MultiGetRequest, QmdService, SearchOptions};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -580,9 +580,8 @@ fn parse_header(line: &str) -> Option<(String, String)> {
 }
 
 fn write_message(stdout: &mut impl io::Write, response: &RpcResponse) -> anyhow::Result<()> {
-    let payload = serde_json::to_vec(response)?;
-    write!(stdout, "Content-Length: {}\r\n\r\n", payload.len())?;
-    stdout.write_all(&payload)?;
+    serde_json::to_writer(&mut *stdout, response)?;
+    stdout.write_all(b"\n")?;
     stdout.flush()?;
     Ok(())
 }
