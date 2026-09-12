@@ -459,7 +459,7 @@ fn compute_replacements(
         }
     }
 
-    replacements.sort_by(|(lhs_idx, _, _), (rhs_idx, _, _)| lhs_idx.cmp(rhs_idx));
+    replacements.sort_by_key(|(start_idx, _, _)| *start_idx);
 
     Ok(replacements)
 }
