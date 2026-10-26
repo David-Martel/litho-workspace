@@ -1961,34 +1961,54 @@ fn normalize_context_path(path: &str) -> String {
 }
 
 fn extract_snippet(body: &str, query: &str, max_chars: usize) -> String {
-    if body.is_empty() {
+    if body.is_empty() || max_chars == 0 {
         return String::new();
     }
 
-    if let Some(idx) = body.to_lowercase().find(&query.to_lowercase()) {
-        let start = idx.saturating_sub(max_chars / 4);
-        let end = (idx + (max_chars * 3 / 4)).min(body.len());
-        return body[start..end].trim().to_string();
+    if let Some(index) = snippet_match_index(body, &body.to_lowercase(), &query.to_lowercase()) {
+        return snippet_window(body, index, max_chars);
     }
 
     body.chars().take(max_chars).collect()
 }
 
 fn extract_snippet_multi(body: &str, terms: &[String], max_chars: usize) -> String {
-    if body.is_empty() {
+    if body.is_empty() || max_chars == 0 {
         return String::new();
     }
+    let lowercase = body.to_lowercase();
     for term in terms {
         if term.is_empty() {
             continue;
         }
-        if let Some(idx) = body.to_lowercase().find(term) {
-            let start = idx.saturating_sub(max_chars / 4);
-            let end = (idx + (max_chars * 3 / 4)).min(body.len());
-            return body[start..end].trim().to_string();
+        if let Some(index) = snippet_match_index(body, &lowercase, &term.to_lowercase()) {
+            return snippet_window(body, index, max_chars);
         }
     }
     body.chars().take(max_chars).collect()
+}
+
+fn snippet_match_index(body: &str, lowercase: &str, term: &str) -> Option<usize> {
+    let byte_index = lowercase.find(term)?;
+    let mut lowercase_bytes = 0;
+    // Lowercasing can change UTF-8 length and expand one character (for example İ).
+    // Map the match back to an original character index before taking a window.
+    body.chars().position(|ch| {
+        lowercase_bytes += ch.to_lowercase().map(char::len_utf8).sum::<usize>();
+        lowercase_bytes > byte_index
+    })
+}
+
+fn snippet_window(body: &str, match_index: usize, max_chars: usize) -> String {
+    let before = max_chars / 4;
+    let start = match_index.saturating_sub(before);
+    let length = max_chars - before + (match_index - start);
+    body.chars()
+        .skip(start)
+        .take(length)
+        .collect::<String>()
+        .trim()
+        .to_string()
 }
 
 fn tokenize(input: &str) -> Vec<String> {
@@ -2641,4 +2661,62 @@ fn pg_error(err: r2d2_postgres::postgres::Error) -> QmdError {
 
 fn io_error(err: std::io::Error) -> QmdError {
     QmdError::Internal(format!("io error: {err}"))
+}
+
+#[cfg(test)]
+mod snippet_tests {
+    use super::{extract_snippet, extract_snippet_multi};
+
+    fn assert_both(body: &str, query: &str, max_chars: usize, expected: &str) {
+        assert_eq!(extract_snippet(body, query, max_chars), expected);
+        assert_eq!(
+            extract_snippet_multi(body, &[query.to_string()], max_chars),
+            expected
+        );
+    }
+
+    #[test]
+    fn unicode_snippet_windows_preserve_characters_and_limits() {
+        assert_both("ééééneedle🦀🦀🦀🦀", "needle", 8, "ééneedle");
+        assert_both("前前前前needle後後後後", "needle", 12, "前前前needle後後後");
+        assert_both("🦀🦀🦀🦀needleéééé", "needle", 12, "🦀🦀🦀needleééé");
+    }
+
+    #[test]
+    fn unicode_snippet_matches_map_expanded_and_shortened_lowercase_offsets() {
+        assert_both("İİİİneedleXYZ", "NEEDLE", 8, "İİneedle");
+        assert_both("KKKKneedleXYZ", "needle", 8, "KKneedle");
+        assert_both("ȺȺȺȺneedleXYZ", "needle", 8, "ȺȺneedle");
+        assert_both(
+            "prefix İSTANBUL suffix",
+            "i\u{307}stanbul",
+            12,
+            "ix İSTANBUL",
+        );
+        assert_both("ΟΣ NEEDLE trailing", "ος", 8, "ΟΣ NEE");
+    }
+
+    #[test]
+    fn unicode_snippet_boundaries_empty_inputs_and_missing_terms() {
+        assert_both("éneedle🦀", "needle", 8, "éneedle");
+        assert_both("ééééneedle", "needle", usize::MAX, "ééééneedle");
+        assert_both("é🦀東京", "missing", 3, "é🦀東");
+        assert_both("éneedle", "needle", 0, "");
+        assert_both("", "needle", 20, "");
+        assert_eq!(extract_snippet_multi("é🦀東京", &[], 2), "é🦀");
+        assert_eq!(extract_snippet_multi("é🦀東京", &[String::new()], 2), "é🦀");
+    }
+
+    #[test]
+    fn unicode_snippet_multi_uses_first_matching_term() {
+        let terms = vec![
+            "absent".to_string(),
+            "SECOND".to_string(),
+            "first".to_string(),
+        ];
+        assert_eq!(
+            extract_snippet_multi("first éééé second 後後後", &terms, 8),
+            "é second"
+        );
+    }
 }

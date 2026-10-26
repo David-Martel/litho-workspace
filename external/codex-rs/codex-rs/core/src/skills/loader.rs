@@ -256,7 +256,15 @@ pub(crate) fn skill_roots_from_layer_stack_with_agents(
     config_layer_stack: &ConfigLayerStack,
     cwd: &Path,
 ) -> Vec<SkillRoot> {
-    let mut roots = skill_roots_from_layer_stack_inner(config_layer_stack, home_dir().as_deref());
+    skill_roots_with_agents_and_home(config_layer_stack, cwd, home_dir().as_deref())
+}
+
+fn skill_roots_with_agents_and_home(
+    config_layer_stack: &ConfigLayerStack,
+    cwd: &Path,
+    home: Option<&Path>,
+) -> Vec<SkillRoot> {
+    let mut roots = skill_roots_from_layer_stack_inner(config_layer_stack, home);
     roots.extend(repo_agents_skill_roots(config_layer_stack, cwd));
     dedupe_skill_roots_by_path(&mut roots);
     roots
@@ -828,6 +836,17 @@ mod tests {
 
     const REPO_ROOT_CONFIG_DIR_NAME: &str = ".codex";
 
+    fn load_fixture_skills(config: &Config) -> SkillLoadOutcome {
+        // CODEX_HOME alone does not isolate user skills: production also reads
+        // the OS profile's .agents/skills. Keep that home inside this fixture.
+        let home = config.codex_home.join("fixture-home");
+        load_skills_from_roots(skill_roots_with_agents_and_home(
+            &config.config_layer_stack,
+            &config.cwd,
+            Some(&home),
+        ))
+    }
+
     async fn make_config(codex_home: &TempDir) -> Config {
         make_config_for_cwd(codex_home, codex_home.path().to_path_buf()).await
     }
@@ -1041,6 +1060,77 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn fixture_home_loads_its_user_skill_and_excludes_another_home() -> anyhow::Result<()> {
+        let codex_home = tempfile::tempdir()?;
+        let other_home = tempfile::tempdir()?;
+        let controlled_path = write_skill_at(
+            &codex_home
+                .path()
+                .join("fixture-home")
+                .join(AGENTS_DIR_NAME)
+                .join(SKILLS_DIR_NAME),
+            "controlled",
+            "controlled-user-skill",
+            "from the controlled home",
+        );
+        let sentinel_path = write_skill_at(
+            &other_home
+                .path()
+                .join(AGENTS_DIR_NAME)
+                .join(SKILLS_DIR_NAME),
+            "sentinel",
+            "other-home-sentinel",
+            "from a separate home",
+        );
+        let cfg = make_config(&codex_home).await;
+
+        let outcome = load_fixture_skills(&cfg);
+        assert!(outcome.errors.is_empty(), "{:?}", outcome.errors);
+        assert_eq!(
+            outcome.skills,
+            vec![SkillMetadata {
+                name: "controlled-user-skill".to_string(),
+                description: "from the controlled home".to_string(),
+                short_description: None,
+                interface: None,
+                dependencies: None,
+                policy: None,
+                permissions: None,
+                path: normalized(&controlled_path),
+                scope: SkillScope::User,
+            }]
+        );
+
+        // Prove the excluded sentinel is a valid discoverable skill, not an
+        // invalid fixture that would be rejected regardless of home selection.
+        let other_outcome = load_skills_from_roots(skill_roots_with_agents_and_home(
+            &cfg.config_layer_stack,
+            &cfg.cwd,
+            Some(other_home.path()),
+        ));
+        assert!(
+            other_outcome.errors.is_empty(),
+            "{:?}",
+            other_outcome.errors
+        );
+        assert_eq!(
+            other_outcome.skills,
+            vec![SkillMetadata {
+                name: "other-home-sentinel".to_string(),
+                description: "from a separate home".to_string(),
+                short_description: None,
+                interface: None,
+                dependencies: None,
+                policy: None,
+                permissions: None,
+                path: normalized(&sentinel_path),
+                scope: SkillScope::User,
+            }]
+        );
+        Ok(())
+    }
+
     fn write_skill(codex_home: &TempDir, dir: &str, name: &str, description: &str) -> PathBuf {
         write_skill_at(&codex_home.path().join("skills"), dir, name, description)
     }
@@ -1129,7 +1219,7 @@ mod tests {
         );
 
         let cfg = make_config(&codex_home).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
 
         assert!(
             outcome.errors.is_empty(),
@@ -1208,7 +1298,7 @@ interface:
         );
 
         let cfg = make_config(&codex_home).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
 
         assert!(
             outcome.errors.is_empty(),
@@ -1258,7 +1348,7 @@ policy:
         );
 
         let cfg = make_config(&codex_home).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
 
         assert!(
             outcome.errors.is_empty(),
@@ -1289,7 +1379,7 @@ policy: {}
         );
 
         let cfg = make_config(&codex_home).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
 
         assert!(
             outcome.errors.is_empty(),
@@ -1332,7 +1422,7 @@ permissions:
         );
 
         let cfg = make_config(&codex_home).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
 
         assert!(
             outcome.errors.is_empty(),
@@ -1393,7 +1483,7 @@ permissions: {}
         );
 
         let cfg = make_config(&codex_home).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
 
         assert!(
             outcome.errors.is_empty(),
@@ -1449,7 +1539,7 @@ permissions:
         );
 
         let cfg = make_config(&codex_home).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
 
         assert!(
             outcome.errors.is_empty(),
@@ -1499,7 +1589,7 @@ permissions:
         );
 
         let cfg = make_config(&codex_home).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
 
         assert!(
             outcome.errors.is_empty(),
@@ -1543,7 +1633,7 @@ permissions:
         );
 
         let cfg = make_config(&codex_home).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
 
         assert!(
             outcome.errors.is_empty(),
@@ -1591,7 +1681,7 @@ permissions:
         );
 
         let cfg = make_config(&codex_home).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
 
         assert!(
             outcome.errors.is_empty(),
@@ -1638,7 +1728,7 @@ permissions:
         );
 
         let cfg = make_config(&codex_home).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
 
         assert!(
             outcome.errors.is_empty(),
@@ -1687,7 +1777,7 @@ permissions:
         );
 
         let cfg = make_config(&codex_home).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
 
         assert!(
             outcome.errors.is_empty(),
@@ -1732,7 +1822,7 @@ permissions:
         symlink_dir(shared.path(), &codex_home.path().join("skills/shared"));
 
         let cfg = make_config(&codex_home).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
 
         assert!(
             outcome.errors.is_empty(),
@@ -1769,7 +1859,7 @@ permissions:
         symlink_file(&shared_skill_path, &skill_dir.join(SKILLS_FILENAME));
 
         let cfg = make_config(&codex_home).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
 
         assert!(
             outcome.errors.is_empty(),
@@ -1793,7 +1883,7 @@ permissions:
         let skill_path = write_skill_at(&cycle_dir, "demo", "cycle-skill", "still loads");
 
         let cfg = make_config(&codex_home).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
 
         assert!(
             outcome.errors.is_empty(),
@@ -1871,7 +1961,7 @@ permissions:
         symlink_dir(shared.path(), &repo_skills_root.join("shared"));
 
         let cfg = make_config_for_cwd(&codex_home, repo_dir.path().to_path_buf()).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
 
         assert!(
             outcome.errors.is_empty(),
@@ -1968,7 +2058,7 @@ permissions:
         let skill_path = write_skill(&codex_home, "demo", "demo-skill", "does things\ncarefully");
         let cfg = make_config(&codex_home).await;
 
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
         assert!(
             outcome.errors.is_empty(),
             "unexpected errors: {:?}",
@@ -2000,7 +2090,7 @@ permissions:
         fs::write(&skill_path, contents).unwrap();
 
         let cfg = make_config(&codex_home).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
         assert!(
             outcome.errors.is_empty(),
             "unexpected errors: {:?}",
@@ -2034,7 +2124,7 @@ permissions:
         fs::write(skill_dir.join(SKILLS_FILENAME), contents).unwrap();
 
         let cfg = make_config(&codex_home).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
         assert_eq!(outcome.skills.len(), 0);
         assert_eq!(outcome.errors.len(), 1);
         assert!(
@@ -2063,7 +2153,7 @@ permissions:
         fs::write(invalid_dir.join(SKILLS_FILENAME), "---\nname: bad").unwrap();
 
         let cfg = make_config(&codex_home).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
         assert_eq!(outcome.skills.len(), 0);
         assert_eq!(outcome.errors.len(), 1);
         assert!(
@@ -2081,7 +2171,7 @@ permissions:
         write_skill(&codex_home, "max-len", "max-len", &max_desc);
         let cfg = make_config(&codex_home).await;
 
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
         assert!(
             outcome.errors.is_empty(),
             "unexpected errors: {:?}",
@@ -2091,7 +2181,7 @@ permissions:
 
         let too_long_desc = "\u{1F4A1}".repeat(MAX_DESCRIPTION_LEN + 1);
         write_skill(&codex_home, "too-long", "too-long", &too_long_desc);
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
         assert_eq!(outcome.skills.len(), 1);
         assert_eq!(outcome.errors.len(), 1);
         assert!(
@@ -2113,7 +2203,7 @@ permissions:
         let skill_path = write_skill_at(&skills_root, "repo", "repo-skill", "from repo");
         let cfg = make_config_for_cwd(&codex_home, repo_dir.path().to_path_buf()).await;
 
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
         assert!(
             outcome.errors.is_empty(),
             "unexpected errors: {:?}",
@@ -2149,7 +2239,7 @@ permissions:
         );
         let cfg = make_config_for_cwd(&codex_home, repo_dir.path().to_path_buf()).await;
 
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
         assert!(
             outcome.errors.is_empty(),
             "unexpected errors: {:?}",
@@ -2202,7 +2292,7 @@ permissions:
 
         let cfg = make_config_for_cwd(&codex_home, nested_dir).await;
 
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
         assert!(
             outcome.errors.is_empty(),
             "unexpected errors: {:?}",
@@ -2254,7 +2344,7 @@ permissions:
 
         let cfg = make_config_for_cwd(&codex_home, work_dir.path().to_path_buf()).await;
 
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
         assert!(
             outcome.errors.is_empty(),
             "unexpected errors: {:?}",
@@ -2333,7 +2423,7 @@ permissions:
 
         let cfg = make_config_for_cwd(&codex_home, repo_dir.path().to_path_buf()).await;
 
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
         assert!(
             outcome.errors.is_empty(),
             "unexpected errors: {:?}",
@@ -2398,7 +2488,7 @@ permissions:
         );
 
         let cfg = make_config_for_cwd(&codex_home, nested_dir).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
 
         assert!(
             outcome.errors.is_empty(),
@@ -2464,7 +2554,7 @@ permissions:
 
         let cfg = make_config_for_cwd(&codex_home, repo_dir).await;
 
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
         assert!(
             outcome.errors.is_empty(),
             "unexpected errors: {:?}",
@@ -2493,7 +2583,7 @@ permissions:
 
         let cfg = make_config_for_cwd(&codex_home, file_path).await;
 
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
         assert!(
             outcome.errors.is_empty(),
             "unexpected errors: {:?}",
@@ -2534,7 +2624,7 @@ permissions:
 
         let cfg = make_config_for_cwd(&codex_home, nested_dir).await;
 
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
         assert!(
             outcome.errors.is_empty(),
             "unexpected errors: {:?}",
@@ -2552,7 +2642,7 @@ permissions:
 
         let cfg = make_config_for_cwd(&codex_home, work_dir.path().to_path_buf()).await;
 
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
         assert!(
             outcome.errors.is_empty(),
             "unexpected errors: {:?}",

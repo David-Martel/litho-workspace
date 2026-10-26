@@ -34,7 +34,7 @@ impl KeyModulesInsightEditor {
                     let insight_key = format!(
                         "{}_{}",
                         ResearchAgentType::KeyModulesInsight,
-                        &insight_report.domain_name
+                        insight_report.domain_name
                     );
                     let domain_name = insight_report.domain_name.clone();
                     let kmie = KeyModuleInsightEditor::new(insight_key.clone(), insight_report);
@@ -62,7 +62,7 @@ impl KeyModulesInsightEditor {
                             .config
                             .target_language
                             .get_directory_name("deep_exploration"),
-                        &domain_name
+                        domain_name
                     )
                     .as_str(),
                 );
@@ -134,7 +134,7 @@ impl StepForwardAgent for KeyModuleInsightEditor {
             4. **Readability**: Clear structure, rich language narrative, and easy to understand
             5. **Practicality**: Provide valuable module knowledge and technical implementation details.
             "#,
-            &report.domain_name, &report.domain_name
+            report.domain_name, report.domain_name
         );
 
         PromptTemplate {

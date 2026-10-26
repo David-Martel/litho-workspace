@@ -837,13 +837,14 @@ impl McpConnectionManager {
 async fn emit_update(
     tx_event: &Sender<Event>,
     update: McpStartupUpdateEvent,
-) -> Result<(), async_channel::SendError<Event>> {
+) -> Result<(), Box<async_channel::SendError<Event>>> {
     tx_event
         .send(Event {
             id: INITIAL_SUBMIT_ID.to_owned(),
             msg: EventMsg::McpStartupUpdate(update),
         })
         .await
+        .map_err(Box::new)
 }
 
 /// A tool is allowed to be used if both are true:
@@ -1309,9 +1310,63 @@ mod mcp_init_error_display_tests {}
 mod tests {
     use super::*;
     use codex_protocol::protocol::McpAuthStatus;
+    use pretty_assertions::assert_eq;
     use rmcp::model::JsonObject;
     use std::collections::HashSet;
     use std::sync::Arc;
+
+    #[tokio::test]
+    async fn emit_update_delivers_complete_event_once() {
+        let (tx_event, rx_event) = async_channel::bounded(1);
+        let update = McpStartupUpdateEvent {
+            server: "test-server".to_string(),
+            status: McpStartupStatus::Ready,
+        };
+        let expected = Event {
+            id: INITIAL_SUBMIT_ID.to_owned(),
+            msg: EventMsg::McpStartupUpdate(update.clone()),
+        };
+
+        emit_update(&tx_event, update).await.unwrap();
+
+        let delivered = rx_event.try_recv().unwrap();
+        assert_eq!(
+            serde_json::to_value(delivered).unwrap(),
+            serde_json::to_value(expected).unwrap()
+        );
+        assert!(matches!(
+            rx_event.try_recv(),
+            Err(async_channel::TryRecvError::Empty)
+        ));
+    }
+
+    #[tokio::test]
+    async fn emit_update_preserves_unsent_event_when_receiver_is_closed() {
+        let (tx_event, rx_event) = async_channel::bounded(1);
+        rx_event.close();
+        let update = McpStartupUpdateEvent {
+            server: "test-server".to_string(),
+            status: McpStartupStatus::Failed {
+                error: "startup failed".to_string(),
+            },
+        };
+        let expected = Event {
+            id: INITIAL_SUBMIT_ID.to_owned(),
+            msg: EventMsg::McpStartupUpdate(update.clone()),
+        };
+
+        let error = emit_update(&tx_event, update).await.unwrap_err();
+        let unsent = (*error).0;
+
+        assert_eq!(
+            serde_json::to_value(unsent).unwrap(),
+            serde_json::to_value(expected).unwrap()
+        );
+        assert!(matches!(
+            rx_event.try_recv(),
+            Err(async_channel::TryRecvError::Closed)
+        ));
+    }
 
     fn create_test_tool(server_name: &str, tool_name: &str) -> ToolInfo {
         ToolInfo {
