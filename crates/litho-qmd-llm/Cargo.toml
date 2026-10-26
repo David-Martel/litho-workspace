@@ -6,7 +6,10 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-litho-qmd-core = { path = "../litho-qmd-core" }
+litho-qmd-storage = { path = "../litho-qmd-storage" }
 anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+[dev-dependencies]
+serial_test = { workspace = true }

@@ -4115,6 +4115,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "037711b3d59c33004d3856fbdc83b99d4ff37a24768fa1be9ce3538a1cde4393"
 
 [[package]]
+name = "futures-timer"
+version = "3.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f288b0a4f20f9a56b5d1da57e2227c661b7b16168e2f72365f57b63326e29b24"
+
+[[package]]
 name = "futures-util"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5426,13 +5432,13 @@ dependencies = [
  "litho-codex",
  "litho-core",
  "litho-extract",
- "litho-qmd-core",
  "litho-qmd-llm",
  "litho-qmd-storage",
  "serde",
  "serde_json",
  "tempfile",
  "tokio",
+ "toml 0.9.12+spec-1.1.0",
 ]
 
 [[package]]
@@ -5470,9 +5476,11 @@ version = "2.0.0-alpha.1"
 dependencies = [
  "anyhow",
  "ignore",
+ "insta",
  "litho-core",
  "proptest",
  "rayon",
+ "rstest",
  "serde",
  "serde_json",
  "tempfile",
@@ -5503,6 +5511,7 @@ dependencies = [
  "lru 0.16.3",
  "md-5",
  "memchr",
+ "moka",
  "ollama-rs",
  "pathdiff",
  "pdf-extract",
@@ -5523,6 +5532,7 @@ dependencies = [
  "url",
  "uuid",
  "walkdir",
+ "wiremock",
 ]
 
 [[package]]
@@ -5533,7 +5543,6 @@ dependencies = [
  "chrono",
  "clap",
  "litho-core",
- "litho-qmd-core",
  "litho-qmd-llm",
  "litho-qmd-storage",
  "serde_json",
@@ -5546,8 +5555,7 @@ name = "litho-qmd-core"
 version = "2.0.0-alpha.1"
 dependencies = [
  "criterion",
- "serde",
- "thiserror 2.0.18",
+ "litho-qmd-storage",
 ]
 
 [[package]]
@@ -5555,9 +5563,10 @@ name = "litho-qmd-llm"
 version = "2.0.0-alpha.1"
 dependencies = [
  "anyhow",
- "litho-qmd-core",
+ "litho-qmd-storage",
  "serde",
  "serde_json",
+ "serial_test",
 ]
 
 [[package]]
@@ -5568,7 +5577,6 @@ dependencies = [
  "chrono",
  "clap",
  "litho-core",
- "litho-qmd-core",
  "litho-qmd-llm",
  "litho-qmd-storage",
  "proptest",
@@ -5589,22 +5597,19 @@ dependencies = [
  "dirs",
  "globset",
  "ignore",
- "litho-qmd-core",
- "litho-qmd-llm",
  "native-tls",
  "postgres",
  "postgres-native-tls",
- "postgres_rustls",
  "r2d2",
  "r2d2_postgres",
  "rusqlite",
- "rustls",
  "serde",
  "serde_json",
  "serde_yaml",
  "serial_test",
  "tempfile",
  "thiserror 2.0.18",
+ "toml 0.9.12+spec-1.1.0",
  "tracing",
  "url",
 ]
@@ -5881,10 +5886,13 @@ version = "0.12.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4ac832c50ced444ef6be0767a008b02c106a909ba79d1d830501e94b96f6b7e"
 dependencies = [
+ "async-lock",
  "crossbeam-channel",
  "crossbeam-epoch",
  "crossbeam-utils",
  "equivalent",
+ "event-listener",
+ "futures-util",
  "parking_lot",
  "portable-atomic",
  "smallvec",
@@ -7060,18 +7068,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "postgres_rustls"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0be4c5d09a4d8147b8f380292d8846f2d8ab5ee7eb9e8a6de4e9b04ea83d1903"
-dependencies = [
- "sha2",
- "tokio",
- "tokio-postgres",
- "tokio-rustls",
-]
-
-[[package]]
 name = "postscript"
 version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7977,6 +7973,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a96887878f22d7bad8a3b6dc5b7440e0ada9a245242924394987b21cf2210a4c"
 
 [[package]]
+name = "relative-path"
+version = "1.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba39f3699c378cd8970968dcbff9c43159ea4cfbd88d43c00b22f2ef10a435d2"
+
+[[package]]
 name = "reqwest"
 version = "0.12.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8112,6 +8114,36 @@ dependencies = [
  "spki",
  "subtle",
  "zeroize",
+]
+
+[[package]]
+name = "rstest"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "03e905296805ab93e13c1ec3a03f4b6c4f35e9498a3d5fa96dc626d22c03cd89"
+dependencies = [
+ "futures-timer",
+ "futures-util",
+ "rstest_macros",
+ "rustc_version",
+]
+
+[[package]]
+name = "rstest_macros"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef0053bbffce09062bee4bcc499b0fbe7a57b879f1efe088d6d8d4c7adcdef9b"
+dependencies = [
+ "cfg-if",
+ "glob",
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "relative-path",
+ "rustc_version",
+ "syn 2.0.117",
+ "unicode-ident",
 ]
 
 [[package]]

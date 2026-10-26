@@ -1,6 +1,7 @@
 # Build artifacts
 /target/
 /target-*/
+/release/
 *.exe
 *.pdb
 

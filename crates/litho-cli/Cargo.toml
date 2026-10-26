@@ -8,11 +8,14 @@ build = "build.rs"
 name = "litho"
 path = "src/main.rs"
 
+[features]
+default = []
+postgres = ["litho-qmd-storage/postgres"]
+
 [dependencies]
 litho-core = { workspace = true }
 litho-extract = { workspace = true }
 litho-codex = { workspace = true }
-litho-qmd-core = { path = "../litho-qmd-core" }
 litho-qmd-llm = { path = "../litho-qmd-llm" }
 litho-qmd-storage = { path = "../litho-qmd-storage" }
 clap = { workspace = true }
@@ -21,6 +24,7 @@ serde_json = { workspace = true }
 serde = { workspace = true }
 anyhow = { workspace = true }
 chrono = { version = "0.4", features = ["serde"] }
+toml = { workspace = true }
 
 [build-dependencies]
 chrono = { workspace = true }

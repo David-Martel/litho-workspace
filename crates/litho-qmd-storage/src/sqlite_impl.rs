@@ -1,4 +1,6 @@
 use super::*;
+use crate::load_repo_dotenv_values as repo_dotenv_values;
+use crate::load_repo_qmd_config as repo_qmd_config;
 
 pub(super) struct SqliteRuntimeSettings {
     pub(super) database_path: PathBuf,
@@ -43,7 +45,11 @@ fn resolve_backend_kind_for(
         return QmdBackendKind::Postgres;
     }
 
-    QmdBackendKind::Postgres
+    if cfg!(feature = "postgres") {
+        QmdBackendKind::Postgres
+    } else {
+        QmdBackendKind::Sqlite
+    }
 }
 
 pub(super) fn resolve_sqlite_runtime(index_name: &str) -> SqliteRuntimeSettings {
@@ -1373,6 +1379,18 @@ mod tests {
         let cwd = PathBuf::from("C:/tmp/repo");
         assert_eq!(
             resolve_backend_kind_for("index", &cfg, &dot, &cwd, Some(Path::new("C:/tmp/repo"))),
+            QmdBackendKind::Sqlite
+        );
+    }
+
+    #[cfg(not(feature = "postgres"))]
+    #[test]
+    fn backend_resolution_defaults_to_sqlite_without_postgres_feature() {
+        let cfg = RepoQmdConfig::default();
+        let dot = BTreeMap::new();
+        let cwd = PathBuf::from("C:/tmp");
+        assert_eq!(
+            resolve_backend_kind_for("index", &cfg, &dot, &cwd, None),
             QmdBackendKind::Sqlite
         );
     }

@@ -1,24 +1,50 @@
+mod auto_store;
+mod backend;
+mod config;
+mod error;
 #[doc(hidden)]
 pub mod fast_table;
+mod model;
+mod repo_config;
+mod service;
 mod sqlite_impl;
+mod traits;
 
+use crate::load_repo_qmd_config as repo_qmd_config;
+pub use backend::QmdBackendKind;
 use chrono::{DateTime, Utc};
+use config::{CollectionConfig, ConfigFile, resolve_collection_config_path, sanitize_index_name};
+#[cfg(feature = "postgres")]
+use config::{
+    RuntimeDbSettings, default_runtime_db_settings, resolve_runtime_db_settings, runtime_password,
+};
+pub use error::{QmdError, QmdResult};
 use fast_table::{FastHashSet, FastHashTable};
 use globset::Glob;
 use ignore::WalkBuilder;
-use litho_qmd_core::{
+pub use model::{
     CleanupReport, CollectionMutation, CollectionRecord, CollectionUpdateResult, ContextMutation,
     ContextRecord, ContextTarget, DocumentContent, DocumentRequest, EmbeddingReport, IndexStatus,
-    IngestReport, MultiGetRequest, MultiGetResponse, QmdError, QmdResult, QmdStore, SearchHit,
-    SearchOptions,
+    IngestReport, ModelPullResult, ModelStatus, MultiGetRequest, MultiGetResponse, SearchHit,
+    SearchMode, SearchOptions, SearchResponse,
 };
+#[cfg(feature = "postgres")]
 use native_tls::TlsConnector;
+#[cfg(feature = "postgres")]
 use postgres_native_tls::MakeTlsConnector;
+#[cfg(feature = "postgres")]
 use r2d2::{Pool, PooledConnection};
+#[cfg(feature = "postgres")]
 use r2d2_postgres::PostgresConnectionManager;
+#[cfg(feature = "postgres")]
 use r2d2_postgres::postgres::{Client, NoTls, config::SslMode};
+pub use repo_config::{
+    REPO_DOTENV_CANDIDATES, REPO_QMD_CONFIG_CANDIDATES, RepoDatabaseConfig, RepoLlmConfig,
+    RepoPathsConfig, RepoQmdConfig, discover_repo_file, get_dotenv_or_env, load_repo_dotenv_values,
+    load_repo_json_config, load_repo_qmd_config,
+};
 use rusqlite::{Connection, params};
-use serde::{Deserialize, Serialize};
+pub use service::QmdService;
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::io::Write;
@@ -26,12 +52,13 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
+pub use traits::{QmdLlmEngine, QmdStore};
 
 const DEFAULT_INDEX_NAME: &str = "index";
-const DEFAULT_PATTERN: &str = "**/*.md";
 const NATIVE_VECTOR_DIM: usize = 256;
 const NATIVE_VECTOR_MODEL: &str = "native-hash-v1";
 
+#[cfg(feature = "postgres")]
 pub struct PostgresQmdStore {
     database_url: String,
     config_path: PathBuf,
@@ -45,99 +72,21 @@ pub struct SqliteQmdStore {
 }
 
 pub enum AutoQmdStore {
+    #[cfg(feature = "postgres")]
     Postgres(PostgresQmdStore),
     Sqlite(SqliteQmdStore),
 }
 
+#[cfg(feature = "postgres")]
 pub type PgQmdStore = PostgresQmdStore;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum QmdBackendKind {
-    Postgres,
-    Sqlite,
-}
-
+#[cfg(feature = "postgres")]
 enum PgPool {
     NoTls(Pool<PostgresConnectionManager<NoTls>>),
     Tls(Pool<PostgresConnectionManager<MakeTlsConnector>>),
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
-struct RepoQmdConfig {
-    #[serde(default)]
-    database: RepoDatabaseConfig,
-    #[serde(default)]
-    paths: RepoPathsConfig,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-struct RepoPathsConfig {
-    #[serde(default)]
-    collections_config_path: Option<String>,
-    #[serde(default)]
-    search_telemetry_path: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-struct RepoDatabaseConfig {
-    #[serde(default)]
-    backend: Option<String>,
-    #[serde(default)]
-    url: Option<String>,
-    #[serde(default)]
-    sqlite_path: Option<String>,
-    #[serde(default)]
-    host: Option<String>,
-    #[serde(default)]
-    port: Option<u16>,
-    #[serde(default)]
-    user: Option<String>,
-    #[serde(default)]
-    password: Option<String>,
-    #[serde(default)]
-    name: Option<String>,
-    #[serde(default)]
-    sslmode: Option<String>,
-    #[serde(default)]
-    admin_db: Option<String>,
-    #[serde(default)]
-    bootstrap: Option<bool>,
-    #[serde(default)]
-    pool_max: Option<u32>,
-    #[serde(default)]
-    pool_min_idle: Option<u32>,
-    #[serde(default)]
-    pool_connect_timeout_ms: Option<u64>,
-    #[serde(default)]
-    pool_idle_timeout_ms: Option<u64>,
-    #[serde(default)]
-    pool_max_lifetime_ms: Option<u64>,
-    #[serde(default)]
-    pool_test_on_check_out: Option<bool>,
-    #[serde(default)]
-    db_connect_timeout_ms: Option<u64>,
-    #[serde(default)]
-    allow_tls: Option<bool>,
-    #[serde(default)]
-    allow_insecure_tls: Option<bool>,
-}
-
-#[derive(Debug, Clone)]
-struct RuntimeDbSettings {
-    database_url: String,
-    admin_db: String,
-    bootstrap: bool,
-    pool_max: u32,
-    pool_min_idle: u32,
-    pool_connect_timeout_ms: u64,
-    pool_idle_timeout_ms: u64,
-    pool_max_lifetime_ms: u64,
-    pool_test_on_check_out: bool,
-    db_connect_timeout_ms: u64,
-    allow_tls: bool,
-    allow_insecure_tls: bool,
-}
-
+#[cfg(feature = "postgres")]
 impl PostgresQmdStore {
     pub fn open_default(index_name: Option<&str>) -> QmdResult<Self> {
         let index = index_name.unwrap_or(DEFAULT_INDEX_NAME);
@@ -363,33 +312,6 @@ impl PostgresQmdStore {
     }
 }
 
-impl AutoQmdStore {
-    pub fn open_default(index_name: Option<&str>) -> QmdResult<Self> {
-        Self::open_with_backend(index_name, None)
-    }
-
-    pub fn open_with_backend(
-        index_name: Option<&str>,
-        backend: Option<QmdBackendKind>,
-    ) -> QmdResult<Self> {
-        let index = index_name.unwrap_or(DEFAULT_INDEX_NAME);
-        let resolved = backend.unwrap_or_else(|| sqlite_impl::resolve_backend_kind(index));
-        match resolved {
-            QmdBackendKind::Postgres => {
-                Ok(Self::Postgres(PostgresQmdStore::open_default(Some(index))?))
-            }
-            QmdBackendKind::Sqlite => Ok(Self::Sqlite(SqliteQmdStore::open_default(Some(index))?)),
-        }
-    }
-
-    pub fn backend_kind(&self) -> QmdBackendKind {
-        match self {
-            AutoQmdStore::Postgres(_) => QmdBackendKind::Postgres,
-            AutoQmdStore::Sqlite(_) => QmdBackendKind::Sqlite,
-        }
-    }
-}
-
 impl SqliteQmdStore {
     pub fn open_default(index_name: Option<&str>) -> QmdResult<Self> {
         let index = index_name.unwrap_or(DEFAULT_INDEX_NAME);
@@ -492,10 +414,11 @@ impl SqliteQmdStore {
     }
 
     fn context_for_path(config: &ConfigFile, display_path: &str) -> Option<String> {
-        PostgresQmdStore::context_for_path(config, display_path)
+        crate::context_for_path(config, display_path)
     }
 }
 
+#[cfg(feature = "postgres")]
 impl QmdStore for PostgresQmdStore {
     fn status(&self) -> QmdResult<IndexStatus> {
         let config = self.load_config()?;
@@ -1331,157 +1254,6 @@ impl QmdStore for PostgresQmdStore {
     }
 }
 
-impl QmdStore for AutoQmdStore {
-    fn status(&self) -> QmdResult<IndexStatus> {
-        match self {
-            AutoQmdStore::Postgres(store) => store.status(),
-            AutoQmdStore::Sqlite(store) => store.status(),
-        }
-    }
-
-    fn search_bm25(&self, query: &str, options: &SearchOptions) -> QmdResult<Vec<SearchHit>> {
-        match self {
-            AutoQmdStore::Postgres(store) => store.search_bm25(query, options),
-            AutoQmdStore::Sqlite(store) => store.search_bm25(query, options),
-        }
-    }
-
-    fn search_vector(&self, query: &str, options: &SearchOptions) -> QmdResult<Vec<SearchHit>> {
-        match self {
-            AutoQmdStore::Postgres(store) => store.search_vector(query, options),
-            AutoQmdStore::Sqlite(store) => store.search_vector(query, options),
-        }
-    }
-
-    fn get_document(&self, request: &DocumentRequest) -> QmdResult<DocumentContent> {
-        match self {
-            AutoQmdStore::Postgres(store) => store.get_document(request),
-            AutoQmdStore::Sqlite(store) => store.get_document(request),
-        }
-    }
-
-    fn multi_get(&self, request: &MultiGetRequest) -> QmdResult<MultiGetResponse> {
-        match self {
-            AutoQmdStore::Postgres(store) => store.multi_get(request),
-            AutoQmdStore::Sqlite(store) => store.multi_get(request),
-        }
-    }
-
-    fn list_files(&self, prefix: Option<&str>) -> QmdResult<Vec<String>> {
-        match self {
-            AutoQmdStore::Postgres(store) => store.list_files(prefix),
-            AutoQmdStore::Sqlite(store) => store.list_files(prefix),
-        }
-    }
-
-    fn list_collections(&self) -> QmdResult<Vec<CollectionRecord>> {
-        match self {
-            AutoQmdStore::Postgres(store) => store.list_collections(),
-            AutoQmdStore::Sqlite(store) => store.list_collections(),
-        }
-    }
-
-    fn add_collection(&self, input: &CollectionMutation) -> QmdResult<()> {
-        match self {
-            AutoQmdStore::Postgres(store) => store.add_collection(input),
-            AutoQmdStore::Sqlite(store) => store.add_collection(input),
-        }
-    }
-
-    fn remove_collection(&self, name: &str) -> QmdResult<bool> {
-        match self {
-            AutoQmdStore::Postgres(store) => store.remove_collection(name),
-            AutoQmdStore::Sqlite(store) => store.remove_collection(name),
-        }
-    }
-
-    fn rename_collection(&self, old_name: &str, new_name: &str) -> QmdResult<()> {
-        match self {
-            AutoQmdStore::Postgres(store) => store.rename_collection(old_name, new_name),
-            AutoQmdStore::Sqlite(store) => store.rename_collection(old_name, new_name),
-        }
-    }
-
-    fn run_collection_updates(&self) -> QmdResult<Vec<CollectionUpdateResult>> {
-        match self {
-            AutoQmdStore::Postgres(store) => store.run_collection_updates(),
-            AutoQmdStore::Sqlite(store) => store.run_collection_updates(),
-        }
-    }
-
-    fn ingest_collections(&self, force: bool) -> QmdResult<IngestReport> {
-        match self {
-            AutoQmdStore::Postgres(store) => store.ingest_collections(force),
-            AutoQmdStore::Sqlite(store) => store.ingest_collections(force),
-        }
-    }
-
-    fn embed_native(&self, force: bool) -> QmdResult<EmbeddingReport> {
-        match self {
-            AutoQmdStore::Postgres(store) => store.embed_native(force),
-            AutoQmdStore::Sqlite(store) => store.embed_native(force),
-        }
-    }
-
-    fn list_contexts(&self) -> QmdResult<Vec<ContextRecord>> {
-        match self {
-            AutoQmdStore::Postgres(store) => store.list_contexts(),
-            AutoQmdStore::Sqlite(store) => store.list_contexts(),
-        }
-    }
-
-    fn add_context(&self, input: &ContextMutation) -> QmdResult<()> {
-        match self {
-            AutoQmdStore::Postgres(store) => store.add_context(input),
-            AutoQmdStore::Sqlite(store) => store.add_context(input),
-        }
-    }
-
-    fn remove_context(&self, target: &ContextTarget) -> QmdResult<bool> {
-        match self {
-            AutoQmdStore::Postgres(store) => store.remove_context(target),
-            AutoQmdStore::Sqlite(store) => store.remove_context(target),
-        }
-    }
-
-    fn cleanup(&self) -> QmdResult<CleanupReport> {
-        match self {
-            AutoQmdStore::Postgres(store) => store.cleanup(),
-            AutoQmdStore::Sqlite(store) => store.cleanup(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-struct ConfigFile {
-    #[serde(default)]
-    global_context: Option<String>,
-    #[serde(default)]
-    collections: BTreeMap<String, CollectionConfig>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct CollectionConfig {
-    path: String,
-    #[serde(default = "default_pattern")]
-    pattern: String,
-    #[serde(default)]
-    context: BTreeMap<String, String>,
-    #[serde(default)]
-    update: Option<String>,
-}
-
-impl Default for CollectionConfig {
-    fn default() -> Self {
-        Self {
-            path: String::new(),
-            pattern: default_pattern(),
-            context: BTreeMap::new(),
-            update: None,
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 struct StoredDocument {
     collection: String,
@@ -1491,6 +1263,42 @@ struct StoredDocument {
     default_from_line: Option<usize>,
 }
 
+fn context_for_path(config: &ConfigFile, display_path: &str) -> Option<String> {
+    let Some((collection_name, rel)) = split_collection_path(display_path) else {
+        return config.global_context.clone();
+    };
+
+    let Some(collection) = config.collections.get(collection_name) else {
+        return config.global_context.clone();
+    };
+
+    if collection.context.is_empty() {
+        return config.global_context.clone();
+    }
+
+    let normalized_rel = normalize_context_path(rel);
+    let mut best: Option<(usize, String)> = None;
+    for (prefix, text) in &collection.context {
+        let normalized_prefix = normalize_context_path(prefix);
+        if normalized_rel == normalized_prefix
+            || normalized_rel.starts_with(&(normalized_prefix.clone() + "/"))
+        {
+            let len = normalized_prefix.len();
+            let should_replace = best
+                .as_ref()
+                .map(|(best_len, _)| len > *best_len)
+                .unwrap_or(true);
+            if should_replace {
+                best = Some((len, text.clone()));
+            }
+        }
+    }
+
+    best.map(|(_, text)| text)
+        .or_else(|| config.global_context.clone())
+}
+
+#[cfg(feature = "postgres")]
 fn initialize_schema(conn: &mut Client) -> QmdResult<()> {
     // Prevent concurrent schema bootstrap races across parallel test/process runs.
     const SCHEMA_INIT_LOCK_KEY: i64 = 0x6C6974686F514D44;
@@ -1563,6 +1371,7 @@ fn initialize_schema(conn: &mut Client) -> QmdResult<()> {
     }
 }
 
+#[cfg(feature = "postgres")]
 fn get_document_by_id(conn: &mut Client, id: i64) -> QmdResult<Option<StoredDocument>> {
     let row = conn
         .query_opt(
@@ -1585,6 +1394,7 @@ fn get_document_by_id(conn: &mut Client, id: i64) -> QmdResult<Option<StoredDocu
     }))
 }
 
+#[cfg(feature = "postgres")]
 fn get_document_by_collection_path(
     conn: &mut Client,
     collection: &str,
@@ -1611,6 +1421,7 @@ fn get_document_by_collection_path(
     }))
 }
 
+#[cfg(feature = "postgres")]
 fn get_document_by_suffix(conn: &mut Client, lookup: &str) -> QmdResult<Option<StoredDocument>> {
     let suffix = format!("%{lookup}");
     let row = conn
@@ -1637,6 +1448,7 @@ fn get_document_by_suffix(conn: &mut Client, lookup: &str) -> QmdResult<Option<S
     }))
 }
 
+#[cfg_attr(not(feature = "postgres"), allow(dead_code))]
 #[derive(Debug)]
 struct FtsRow {
     id: i64,
@@ -1645,6 +1457,7 @@ struct FtsRow {
     path: String,
     title: String,
     body: String,
+    #[cfg_attr(not(feature = "postgres"), allow(dead_code))]
     rank: f64,
 }
 
@@ -1659,6 +1472,7 @@ struct VectorRow {
     qvec_blob: Vec<u8>,
 }
 
+#[cfg(feature = "postgres")]
 fn run_fts_query(
     conn: &mut Client,
     fts_query: &str,
@@ -1712,6 +1526,7 @@ fn run_fts_query(
         .collect())
 }
 
+#[cfg(feature = "postgres")]
 fn run_path_title_fallback(
     conn: &mut Client,
     query: &str,
@@ -1762,6 +1577,7 @@ fn run_path_title_fallback(
         .collect())
 }
 
+#[cfg(feature = "postgres")]
 fn run_vector_prefilter(
     conn: &mut Client,
     lsh_buckets: &[(i64, i64)],
@@ -1820,6 +1636,7 @@ fn run_vector_prefilter(
         .collect())
 }
 
+#[cfg(feature = "postgres")]
 fn run_vector_scan_all(conn: &mut Client, collection: Option<&str>) -> QmdResult<Vec<VectorRow>> {
     let rows = if let Some(collection) = collection {
         conn.query(
@@ -2193,6 +2010,7 @@ fn slice_text(
     out.join("\n")
 }
 
+#[cfg(feature = "postgres")]
 fn parse_postgres_config(database_url: &str) -> QmdResult<r2d2_postgres::postgres::Config> {
     if database_url.starts_with("postgres://") || database_url.starts_with("postgresql://") {
         let parsed = url::Url::parse(database_url)
@@ -2234,6 +2052,7 @@ fn parse_postgres_config(database_url: &str) -> QmdResult<r2d2_postgres::postgre
     Ok(cfg)
 }
 
+#[cfg(feature = "postgres")]
 fn dsn_has_password(database_url: &str) -> bool {
     if database_url.contains("password=") {
         return true;
@@ -2252,6 +2071,7 @@ fn dsn_has_password(database_url: &str) -> bool {
     false
 }
 
+#[cfg(feature = "postgres")]
 fn missing_password_hint(database_url: &str) -> &'static str {
     if dsn_has_password(database_url) || runtime_password().is_some() {
         ""
@@ -2260,6 +2080,7 @@ fn missing_password_hint(database_url: &str) -> &'static str {
     }
 }
 
+#[cfg(feature = "postgres")]
 fn parse_ssl_mode(input: &str) -> Option<SslMode> {
     match input.to_ascii_lowercase().as_str() {
         "disable" => Some(SslMode::Disable),
@@ -2269,265 +2090,7 @@ fn parse_ssl_mode(input: &str) -> Option<SslMode> {
     }
 }
 
-fn sanitize_index_name(value: &str) -> String {
-    value
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() {
-                c.to_ascii_lowercase()
-            } else {
-                '_'
-            }
-        })
-        .collect()
-}
-
-fn default_config_path(index_name: &str) -> QmdResult<PathBuf> {
-    if let Ok(dir) = std::env::var("QMD_CONFIG_DIR") {
-        let mut path = PathBuf::from(dir);
-        path.push(format!("{index_name}.yml"));
-        return Ok(path);
-    }
-
-    let mut base = dirs::config_dir().ok_or_else(|| {
-        QmdError::Internal("unable to determine user config directory".to_string())
-    })?;
-    base.push("qmd");
-    base.push(format!("{index_name}.yml"));
-    Ok(base)
-}
-
-fn resolve_collection_config_path(index_name: &str) -> QmdResult<PathBuf> {
-    if let Some(path) = repo_qmd_config().paths.collections_config_path
-        && !path.trim().is_empty()
-    {
-        return Ok(PathBuf::from(path));
-    }
-    default_config_path(index_name)
-}
-
-fn resolve_runtime_db_settings(index_name: &str) -> RuntimeDbSettings {
-    let fallback_url = build_default_database_url(index_name);
-    default_runtime_db_settings(fallback_url)
-}
-
-fn default_runtime_db_settings(fallback_url: String) -> RuntimeDbSettings {
-    let cfg = repo_qmd_config();
-    let dot = repo_dotenv_values();
-    let db = cfg.database;
-    let sslmode = db
-        .sslmode
-        .clone()
-        .or_else(|| get_dotenv_or_env(&dot, "QMD_DB_SSLMODE"))
-        .or_else(|| get_dotenv_or_env(&dot, "QMD_PG_SSLMODE"))
-        .unwrap_or_else(|| "disable".to_string());
-
-    let database_url = db
-        .url
-        .or_else(|| get_dotenv_or_env(&dot, "QMD_DATABASE_URL"))
-        .or_else(|| get_dotenv_or_env(&dot, "DATABASE_URL"))
-        .unwrap_or_else(|| {
-            let host = db
-                .host
-                .clone()
-                .or_else(|| get_dotenv_or_env(&dot, "QMD_DB_HOST"))
-                .or_else(|| get_dotenv_or_env(&dot, "PGHOST"))
-                .unwrap_or_else(|| "127.0.0.1".to_string());
-            let port = db
-                .port
-                .or_else(|| get_dotenv_or_env(&dot, "QMD_DB_PORT").and_then(|v| v.parse().ok()))
-                .or_else(|| get_dotenv_or_env(&dot, "PGPORT").and_then(|v| v.parse().ok()))
-                .unwrap_or(5432);
-            let user = db
-                .user
-                .clone()
-                .or_else(|| get_dotenv_or_env(&dot, "QMD_DB_USER"))
-                .or_else(|| get_dotenv_or_env(&dot, "PGUSER"))
-                .unwrap_or_else(|| "postgres".to_string());
-            let pass = db
-                .password
-                .clone()
-                .or_else(|| get_dotenv_or_env(&dot, "QMD_DB_PASSWORD"))
-                .or_else(|| get_dotenv_or_env(&dot, "PGPASSWORD"))
-                .unwrap_or_else(|| "password".to_string());
-            let name = db
-                .name
-                .clone()
-                .or_else(|| get_dotenv_or_env(&dot, "QMD_DB_NAME"))
-                .or_else(|| get_dotenv_or_env(&dot, "PGDATABASE"))
-                .unwrap_or_else(|| "qmd_index".to_string());
-            format!("postgresql://{user}:{pass}@{host}:{port}/{name}?sslmode={sslmode}")
-        });
-
-    let pool_max = db
-        .pool_max
-        .or_else(|| get_dotenv_or_env(&dot, "QMD_PG_POOL_MAX").and_then(|v| v.parse().ok()))
-        .unwrap_or(24)
-        .max(4);
-    let pool_min_idle = db
-        .pool_min_idle
-        .or_else(|| get_dotenv_or_env(&dot, "QMD_PG_POOL_MIN_IDLE").and_then(|v| v.parse().ok()))
-        .unwrap_or(4)
-        .min(pool_max);
-    let pool_connect_timeout_ms = db
-        .pool_connect_timeout_ms
-        .or_else(|| {
-            get_dotenv_or_env(&dot, "QMD_PG_POOL_CONNECT_TIMEOUT_MS").and_then(|v| v.parse().ok())
-        })
-        .unwrap_or(8_000);
-    let pool_idle_timeout_ms = db
-        .pool_idle_timeout_ms
-        .or_else(|| {
-            get_dotenv_or_env(&dot, "QMD_PG_POOL_IDLE_TIMEOUT_MS").and_then(|v| v.parse().ok())
-        })
-        .unwrap_or(600_000);
-    let pool_max_lifetime_ms = db
-        .pool_max_lifetime_ms
-        .or_else(|| {
-            get_dotenv_or_env(&dot, "QMD_PG_POOL_MAX_LIFETIME_MS").and_then(|v| v.parse().ok())
-        })
-        .unwrap_or(3_600_000);
-    let pool_test_on_check_out = db
-        .pool_test_on_check_out
-        .or_else(|| {
-            parse_bool_opt(get_dotenv_or_env(&dot, "QMD_PG_POOL_TEST_ON_CHECKOUT").as_deref())
-        })
-        .unwrap_or(true);
-    let db_connect_timeout_ms = db
-        .db_connect_timeout_ms
-        .or_else(|| {
-            get_dotenv_or_env(&dot, "QMD_PG_DB_CONNECT_TIMEOUT_MS").and_then(|v| v.parse().ok())
-        })
-        .unwrap_or(5_000);
-
-    let allow_tls = db
-        .allow_tls
-        .or_else(|| parse_bool_opt(get_dotenv_or_env(&dot, "QMD_PG_ALLOW_TLS").as_deref()))
-        .unwrap_or(true);
-    let allow_insecure_tls = db
-        .allow_insecure_tls
-        .or_else(|| parse_bool_opt(get_dotenv_or_env(&dot, "QMD_PG_TLS_INSECURE").as_deref()))
-        .unwrap_or(false);
-    let bootstrap = db
-        .bootstrap
-        .or_else(|| parse_bool_opt(get_dotenv_or_env(&dot, "QMD_PG_BOOTSTRAP").as_deref()))
-        .unwrap_or(true);
-    let admin_db = db
-        .admin_db
-        .or_else(|| get_dotenv_or_env(&dot, "QMD_PG_ADMIN_DB"))
-        .unwrap_or_else(|| "postgres".to_string());
-
-    RuntimeDbSettings {
-        database_url: if database_url.is_empty() {
-            fallback_url
-        } else {
-            database_url
-        },
-        admin_db,
-        bootstrap,
-        pool_max,
-        pool_min_idle,
-        pool_connect_timeout_ms,
-        pool_idle_timeout_ms,
-        pool_max_lifetime_ms,
-        pool_test_on_check_out,
-        db_connect_timeout_ms,
-        allow_tls,
-        allow_insecure_tls,
-    }
-}
-
-fn build_default_database_url(index_name: &str) -> String {
-    let host = "127.0.0.1";
-    let port = 5432;
-    let user = "postgres";
-    let pass = "password";
-    let db = format!("qmd_{}", sanitize_index_name(index_name));
-    format!("postgresql://{user}:{pass}@{host}:{port}/{db}")
-}
-
-fn runtime_password() -> Option<String> {
-    let dot = repo_dotenv_values();
-    let db = repo_qmd_config().database;
-    db.password
-        .or_else(|| get_dotenv_or_env(&dot, "QMD_DB_PASSWORD"))
-        .or_else(|| get_dotenv_or_env(&dot, "PGPASSWORD"))
-}
-
-fn repo_qmd_config() -> RepoQmdConfig {
-    let config_path = discover_repo_file("qmd.config.json")
-        .or_else(|| discover_repo_file("config/qmd.config.json"));
-    let Some(path) = config_path else {
-        return RepoQmdConfig::default();
-    };
-
-    let raw = match fs::read_to_string(path) {
-        Ok(v) => v,
-        Err(_) => return RepoQmdConfig::default(),
-    };
-    serde_json::from_str::<RepoQmdConfig>(&raw).unwrap_or_default()
-}
-
-fn repo_dotenv_values() -> BTreeMap<String, String> {
-    let env_path = discover_repo_file(".env").or_else(|| discover_repo_file("config/.env"));
-    let Some(path) = env_path else {
-        return BTreeMap::new();
-    };
-    parse_env_file(&path).unwrap_or_default()
-}
-
-fn parse_env_file(path: &Path) -> QmdResult<BTreeMap<String, String>> {
-    let content = fs::read_to_string(path).map_err(io_error)?;
-    let mut out = BTreeMap::new();
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-        let Some((k, v)) = trimmed.split_once('=') else {
-            continue;
-        };
-        let key = k.trim().to_string();
-        let mut value = v.trim().to_string();
-        if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
-            value = value[1..value.len() - 1].to_string();
-        }
-        out.insert(key, value);
-    }
-    Ok(out)
-}
-
-fn discover_repo_file(relative: &str) -> Option<PathBuf> {
-    let mut cursor = std::env::current_dir().ok()?;
-    loop {
-        let candidate = cursor.join(relative);
-        if candidate.exists() {
-            return Some(candidate);
-        }
-        if !cursor.pop() {
-            break;
-        }
-    }
-
-    let known = PathBuf::from("C:/codedev/litho-workspace").join(relative);
-    if known.exists() {
-        return Some(known);
-    }
-    None
-}
-
-fn get_dotenv_or_env(dotenv: &BTreeMap<String, String>, key: &str) -> Option<String> {
-    dotenv.get(key).cloned().or_else(|| std::env::var(key).ok())
-}
-
-fn parse_bool_opt(input: Option<&str>) -> Option<bool> {
-    match input?.trim().to_ascii_lowercase().as_str() {
-        "1" | "true" | "yes" | "on" => Some(true),
-        "0" | "false" | "no" | "off" => Some(false),
-        _ => None,
-    }
-}
-
+#[cfg(feature = "postgres")]
 fn bootstrap_database_if_needed(
     config: &r2d2_postgres::postgres::Config,
     admin_db: &str,
@@ -2603,12 +2166,14 @@ fn bootstrap_database_if_needed(
     Ok(())
 }
 
+#[cfg(feature = "postgres")]
 fn is_missing_database_error(err: &r2d2_postgres::postgres::Error) -> bool {
     err.as_db_error()
         .map(|e| e.code() == &r2d2_postgres::postgres::error::SqlState::INVALID_CATALOG_NAME)
         .unwrap_or(false)
 }
 
+#[cfg(feature = "postgres")]
 fn validate_pg_identifier(input: &str) -> QmdResult<&str> {
     let valid = !input.is_empty()
         && input
@@ -2623,18 +2188,17 @@ fn validate_pg_identifier(input: &str) -> QmdResult<&str> {
     }
 }
 
+#[cfg(feature = "postgres")]
 fn quote_pg_identifier(input: &str) -> String {
     format!("\"{}\"", input.replace('"', "\"\""))
 }
 
-fn default_pattern() -> String {
-    DEFAULT_PATTERN.to_string()
-}
-
+#[cfg(feature = "postgres")]
 fn pool_error(err: r2d2::Error) -> QmdError {
     QmdError::Internal(format!("postgres pool error: {err} ({err:?})"))
 }
 
+#[cfg(feature = "postgres")]
 fn pg_error(err: r2d2_postgres::postgres::Error) -> QmdError {
     QmdError::Internal(format!("postgres error: {err} ({err:?})"))
 }

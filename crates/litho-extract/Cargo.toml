@@ -19,3 +19,5 @@ rayon = "1.10"
 [dev-dependencies]
 tempfile = { workspace = true }
 proptest = "1.6"
+insta = { workspace = true }
+rstest = "0.24"

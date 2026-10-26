@@ -4,6 +4,10 @@ High-level architecture of `litho-workspace`. This document is designed to give
 LLM agents and developers enough context to understand, extend, and operate the
 system.
 
+For the target-state requirements that this architecture supports, see
+[GOALS.md](GOALS.md). For the implementation backlog that leads there, see
+[TODO.md](TODO.md).
+
 ## System Layers
 
 ```

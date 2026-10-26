@@ -95,6 +95,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
+            .cache/cargo-target-release-harness
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
@@ -104,9 +105,25 @@ jobs:
       - name: Build Litho crates (debug)
         run: cargo build -p litho-core -p litho-extract -p litho-codex -p litho-generator -p litho-cli -p litho-book -p litho-qmd-core -p litho-qmd-storage -p litho-qmd-llm -p litho-qmd-cli -p litho-qmd-mcp
 
+      - name: Build and publish release binaries for harness verification
+        shell: pwsh
+        run: |
+          . ./scripts/litho-build-helpers.ps1
+          Build-LithoReleaseArtifacts -Crates @(
+            "litho-cli",
+            "litho-generator",
+            "litho-book",
+            "litho-qmd-cli",
+            "litho-qmd-mcp"
+          ) -RepoRoot (Resolve-Path .).Path -CleanPublished -CleanCargoRelease -UseIsolatedTargetDir | Out-Null
+
       - name: Verify build token across binaries
         shell: pwsh
         run: pwsh -NoProfile -File scripts/verify-build-tokens.ps1
+
+      - name: Run published release startup smoke
+        shell: pwsh
+        run: pwsh -NoProfile -File scripts/startup-warmup-smoke.ps1 -SkipBuildRelease
 
       - name: Run Litho crate tests with nextest (unit + integration except Postgres storage lane)
         run: cargo nextest run --profile ci --no-fail-fast -p litho-core -p litho-extract -p litho-codex -p litho-generator -p litho-cli -p litho-book -p litho-qmd-core -p litho-qmd-llm -p litho-qmd-cli -p litho-qmd-mcp
@@ -301,6 +318,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
+            .cache/cargo-target-release-harness
           key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-release-
@@ -309,13 +327,16 @@ jobs:
       # Build only the CLI crate in release mode.  -p litho-cli restricts the
       # build to the binary crate and its transitive dependencies only.
       - name: Build release binary (litho-cli)
-        run: cargo build --release -p litho-cli
+        shell: pwsh
+        run: |
+          . ./scripts/litho-build-helpers.ps1
+          Build-LithoReleaseArtifacts -Crates @("litho-cli") -RepoRoot (Resolve-Path .).Path -CleanPublished -CleanCargoRelease -UseIsolatedTargetDir | Out-Null
 
       # softprops/action-gh-release creates (or updates) the GitHub Release for
       # the current tag and attaches the specified files as release assets.
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
         with:
-          files: target/release/litho.exe
+          files: release/litho.exe
           # Generate a minimal release body from the tag annotation if present.
           generate_release_notes: true

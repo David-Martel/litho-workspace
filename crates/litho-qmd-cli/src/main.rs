@@ -1,17 +1,18 @@
 use anyhow::{Context as _, bail};
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use litho_qmd_core::{
+use litho_qmd_llm::AdaptiveLlmEngine;
+use litho_qmd_storage::{AutoQmdStore, QmdBackendKind};
+use litho_qmd_storage::{
     CollectionMutation, CollectionRecord, ContextMutation, ContextRecord, ContextTarget,
     DocumentRequest, MultiGetRequest, QmdService, SearchOptions,
 };
-use litho_qmd_llm::AdaptiveLlmEngine;
-use litho_qmd_storage::{AutoQmdStore, QmdBackendKind};
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 type AppService = QmdService<AutoQmdStore, AdaptiveLlmEngine>;
+const SUPPRESS_DIRECT_WARNING_ENV: &str = "LITHO_QMD_SUPPRESS_DIRECT_WARNING";
 
 #[derive(Debug, Parser)]
 #[command(
@@ -209,6 +210,11 @@ fn main() -> anyhow::Result<()> {
         bail!("Build token sync check failed: {msg}");
     }
 
+    let argv: Vec<String> = std::env::args().collect();
+    if should_show_deprecation_warning(&argv) {
+        eprintln!("{}", qmd_cli_deprecation_warning());
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter("warn")
         .without_time()
@@ -258,6 +264,24 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         CommandSet::Cleanup { json } => handle_cleanup(json, &service),
         CommandSet::Mcp { .. } => Ok(()),
     }
+}
+
+fn qmd_cli_deprecation_warning() -> &'static str {
+    "warning: `litho-qmd-cli` is deprecated; use `litho index`, `litho search`, `litho query`, or `litho vsearch` instead."
+}
+
+fn should_show_deprecation_warning(argv: &[String]) -> bool {
+    if env::var_os(SUPPRESS_DIRECT_WARNING_ENV).is_some() {
+        return false;
+    }
+
+    if argv.len() <= 1 {
+        return true;
+    }
+
+    !argv
+        .iter()
+        .any(|arg| matches!(arg.as_str(), "-h" | "--help" | "-V" | "--version" | "help"))
 }
 
 fn handle_search(args: SearchArgs, service: &AppService) -> anyhow::Result<()> {
@@ -903,6 +927,27 @@ fn print_context_gap_report(report: &ContextGapReport) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{LazyLock, Mutex};
+
+    static SUPPRESSION_ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+    fn with_suppression_env<T>(value: Option<&str>, f: impl FnOnce() -> T) -> T {
+        let _guard = SUPPRESSION_ENV_LOCK.lock().expect("env lock");
+        let previous = std::env::var_os(SUPPRESS_DIRECT_WARNING_ENV);
+        match value {
+            Some(value) => unsafe { std::env::set_var(SUPPRESS_DIRECT_WARNING_ENV, value) },
+            None => unsafe { std::env::remove_var(SUPPRESS_DIRECT_WARNING_ENV) },
+        }
+
+        let result = f();
+
+        match previous {
+            Some(previous) => unsafe { std::env::set_var(SUPPRESS_DIRECT_WARNING_ENV, previous) },
+            None => unsafe { std::env::remove_var(SUPPRESS_DIRECT_WARNING_ENV) },
+        }
+
+        result
+    }
 
     fn collection(name: &str, path: &str) -> CollectionRecord {
         CollectionRecord {
@@ -1005,5 +1050,57 @@ mod tests {
                 .contains("possible values"),
             "expected clap value-enum guidance, got: {err}"
         );
+    }
+
+    #[test]
+    fn deprecation_warning_mentions_unified_litho_commands() {
+        let warning = qmd_cli_deprecation_warning();
+        assert!(warning.contains("litho-qmd-cli"));
+        assert!(warning.contains("litho index"));
+        assert!(warning.contains("litho search"));
+        assert!(warning.contains("litho query"));
+        assert!(warning.contains("litho vsearch"));
+    }
+
+    #[test]
+    fn help_and_version_invocations_do_not_warn() {
+        with_suppression_env(None, || {
+            assert!(!should_show_deprecation_warning(&[
+                "litho-qmd-cli".to_string(),
+                "--help".to_string(),
+            ]));
+            assert!(!should_show_deprecation_warning(&[
+                "litho-qmd-cli".to_string(),
+                "search".to_string(),
+                "--version".to_string(),
+            ]));
+            assert!(!should_show_deprecation_warning(&[
+                "litho-qmd-cli".to_string(),
+                "help".to_string(),
+            ]));
+        });
+    }
+
+    #[test]
+    fn suppression_env_disables_warning() {
+        with_suppression_env(Some("1"), || {
+            let should_warn = should_show_deprecation_warning(&[
+                "litho-qmd-cli".to_string(),
+                "search".to_string(),
+                "cache".to_string(),
+            ]);
+            assert!(!should_warn);
+        });
+    }
+
+    #[test]
+    fn regular_invocations_do_warn() {
+        with_suppression_env(None, || {
+            assert!(should_show_deprecation_warning(&[
+                "litho-qmd-cli".to_string(),
+                "search".to_string(),
+                "cache".to_string(),
+            ]));
+        });
     }
 }

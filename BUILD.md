@@ -35,7 +35,17 @@ cargo nextest run --workspace --no-fail-fast
 
 # Clippy (warnings = errors)
 cargo clippy --workspace --all-targets -- -D warnings
+
+# Preferred release path: build + publish binaries into .\release\
+pwsh scripts/build-tiered.ps1 -Release
 ```
+
+The authoritative runnable release artifacts for this repo are the copies in
+`.\release\`, not the raw executables under `T:\RustCache\cargo-target\release`.
+The `T:\RustCache\...` tree is treated as a shared cargo cache and is allowed to
+stay locked by other processes. Release-producing scripts must copy binaries
+from the cargo target cache into the repo-local `release\` folder before those
+artifacts are used by follow-on tooling or manual smoke runs.
 
 ## Compilation Cache (sccache)
 
@@ -84,6 +94,16 @@ The global sccache at `T:\RustCache\sccache` (port 4400) is shared across all
 Rust projects. Heavy concurrent builds can cause server crashes or corrupted
 cache entries. This project runs its own sccache instance on port 5100 with a
 separate 5 GiB cache directory, preventing cross-project interference.
+
+The project-local `.cache/sccache/` directory is also the preferred place for
+build-cache lifecycle control. When you need to clear, inspect, or regulate
+cache behavior for this repo, do it in `.cache/sccache/` rather than touching
+global cache state.
+
+Release-test harnesses also use an isolated cargo target dir under
+`.cache/cargo-target-release-harness/` so they can clean and rebuild fresh
+release variants without fighting locks in shared `T:\RustCache\cargo-target`
+outputs.
 
 ## Codegen Units and Memory Optimization
 
@@ -214,6 +234,17 @@ CargoTools is optional — plain `cargo` commands work fine for all operations.
 
 | Function | Purpose |
 |----------|---------|
+| `Get-LithoRepoReleaseDir` | Create/return the repo-local `release\` folder |
+| `Resolve-LithoCargoTargetDir` | Resolve the active cargo target dir (`T:\RustCache\cargo-target` or override) |
+| `Get-LithoReleaseHarnessTargetDir` | Create/return the isolated repo-local cargo target dir for release harness builds |
+| `Get-LithoLocalSccacheDir` | Create/return the repo-local `.cache\sccache\` directory |
+| `Get-LithoBinaryArtifactName` | Map crate names to published executable names |
+| `Get-LithoPublishedBinaryPath` | Resolve the repo-local published executable path for a crate |
+| `Get-LithoManifestVersion` | Read the expected package version from a crate manifest |
+| `Clear-LithoReleaseArtifacts` | Remove stale published binaries and matching PDBs from `.\release\` |
+| `Clear-LithoCargoReleaseArtifacts` | Ask Cargo to clean stale release outputs for the selected crates |
+| `Build-LithoReleaseArtifacts` | Clean, build with a fresh stamp, and publish release binaries in one step |
+| `Publish-LithoReleaseArtifacts` | Copy built release binaries from cargo target cache into `.\release\` |
 | `Enable-LithoSccache` | Start sccache with fallback to direct rustc |
 | `Set-LithoBuildStamp` | Set build metadata env vars (git tag, SHA, timestamp) |
 | `Invoke-LithoCargo` | Run cargo with automatic sccache fallback on failure |
@@ -227,7 +258,17 @@ Usage from other scripts:
 Enable-LithoSccache -AllowFallback
 Set-LithoBuildStamp
 Invoke-LithoCargo -Arguments @("build", "--release")
+Publish-LithoReleaseArtifacts -Crates @("litho-cli", "litho-qmd-cli")
 ```
+
+Post-build verification and smoke harnesses must clean stale published and cargo
+release outputs before running, then execute only the freshly published binaries
+under `.\release\`. `scripts/verify-build-tokens.ps1` is the canonical
+release-binary verifier and must confirm both the embedded `build_token=` marker
+and the package version reported by `--version`. When those harnesses need a
+fresh release build, they should use the isolated cargo target under
+`.cache/cargo-target-release-harness\` instead of cleaning shared global target
+artifacts in place.
 
 ## Git Hooks (lefthook)
 
@@ -293,19 +334,24 @@ To build codex-rs crates explicitly: `cargo build -p codex-tui --jobs 1`
 ## Release Build
 
 ```bash
-# Full release build (thin LTO, codegen-units=16, stripped)
-cargo build --workspace --release
-
-# Binaries are at:
-# T:\RustCache\cargo-target\release\litho.exe
-# T:\RustCache\cargo-target\release\litho-generator.exe
-# T:\RustCache\cargo-target\release\litho-book.exe
-# T:\RustCache\cargo-target\release\litho-qmd-cli.exe
-# T:\RustCache\cargo-target\release\litho-qmd-mcp.exe
-
-# Or with tiered build for memory safety
+# Preferred: tiered build for memory safety + repo-local artifact publishing
 pwsh scripts/build-tiered.ps1 -Release
+
+# After publish, runnable binaries are at:
+# .\release\litho.exe
+# .\release\litho-generator.exe
+# .\release\litho-book.exe
+# .\release\litho-qmd-cli.exe
+# .\release\litho-qmd-mcp.exe
+
+# Raw cargo outputs may still live under:
+# T:\RustCache\cargo-target\release\...
+# but those are cache artifacts, not the authoritative handoff path
 ```
+
+If a process keeps an executable open under `T:\RustCache\cargo-target\release`,
+that should not block artifact handoff. Publish or consume the repo-local copy
+from `.\release\` instead.
 
 ## CI/CD
 

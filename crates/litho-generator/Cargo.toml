@@ -14,10 +14,15 @@ path = "src/main.rs"
 name = "litho_generator"
 path = "src/lib.rs"
 
+[features]
+default = []
+pdf-extract = ["dep:pdf-extract"]
+
 [dev-dependencies]
 tempfile = { workspace = true }
 criterion = { workspace = true }
 proptest = "1.6"
+wiremock = { workspace = true }
 
 [build-dependencies]
 chrono = { workspace = true }
@@ -29,6 +34,7 @@ harness = false
 [dependencies]
 litho-core = { workspace = true }
 litho-extract = { workspace = true }
+moka = { workspace = true, features = ["future"] }
 reqwest = { version = "0.12", features = ["json"] }
 tokio = { workspace = true }
 anyhow = { workspace = true }
@@ -43,7 +49,7 @@ walkdir = "2.5"
 regex = "1.11"
 md-5 = "0.10"
 base64 = "0.22"
-pdf-extract = "0.7"
+pdf-extract = { version = "0.7", optional = true }
 async-trait = { workspace = true }
 rand = "0.9"
 pathdiff = "0.2.3"

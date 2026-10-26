@@ -1,5 +1,7 @@
-use litho_qmd_core::{ModelPullResult, ModelStatus, QmdError, QmdLlmEngine, QmdResult, SearchHit};
-use serde::Deserialize;
+use litho_qmd_storage::{
+    ModelPullResult, ModelStatus, QmdError, QmdLlmEngine, QmdResult, SearchHit, get_dotenv_or_env,
+    load_repo_dotenv_values, load_repo_qmd_config as repo_qmd_config,
+};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
@@ -168,37 +170,14 @@ enum ProviderMode {
     Hybrid,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
-struct RepoQmdConfig {
-    #[serde(default)]
-    llm: RepoLlmConfig,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-struct RepoLlmConfig {
-    #[serde(default)]
-    provider: Option<String>,
-    #[serde(default)]
-    ollama_query_model: Option<String>,
-    #[serde(default)]
-    ollama_rerank_model: Option<String>,
-    #[serde(default)]
-    ollama_required_models: Vec<String>,
-    #[serde(default)]
-    model_dirs: Vec<String>,
-    #[serde(default)]
-    ollama_complexity_threshold: Option<usize>,
-    #[serde(default)]
-    force_ollama: Option<bool>,
-}
-
 impl AdaptiveLlmEngine {
     pub fn from_env() -> Self {
         let cfg = repo_qmd_config().llm;
+        let dot = load_repo_dotenv_values();
         let mode_raw = cfg
             .provider
             .clone()
-            .or_else(|| get_dotenv_or_env("QMD_LLM_PROVIDER"))
+            .or_else(|| get_dotenv_or_env(&dot, "QMD_LLM_PROVIDER"))
             .unwrap_or_else(|| "hybrid".to_string());
         let mode = match mode_raw.to_lowercase().as_str() {
             "noop" => ProviderMode::Noop,
@@ -215,7 +194,7 @@ impl AdaptiveLlmEngine {
         let threshold = cfg
             .ollama_complexity_threshold
             .or_else(|| {
-                get_dotenv_or_env("QMD_LLM_OLLAMA_COMPLEXITY_THRESHOLD")
+                get_dotenv_or_env(&dot, "QMD_LLM_OLLAMA_COMPLEXITY_THRESHOLD")
                     .and_then(|v| v.parse::<usize>().ok())
             })
             .unwrap_or(6)
@@ -223,7 +202,7 @@ impl AdaptiveLlmEngine {
         let force_ollama = cfg
             .force_ollama
             .or_else(|| {
-                get_dotenv_or_env("QMD_LLM_FORCE_OLLAMA")
+                get_dotenv_or_env(&dot, "QMD_LLM_FORCE_OLLAMA")
                     .as_deref()
                     .map(parse_boolish)
             })
@@ -334,17 +313,18 @@ struct OllamaClient {
 impl OllamaClient {
     fn from_env() -> Self {
         let cfg = repo_qmd_config().llm;
+        let dot = load_repo_dotenv_values();
         let query_model = cfg
             .ollama_query_model
             .clone()
-            .or_else(|| get_dotenv_or_env("QMD_OLLAMA_QUERY_MODEL"))
+            .or_else(|| get_dotenv_or_env(&dot, "QMD_OLLAMA_QUERY_MODEL"))
             .unwrap_or_else(|| {
                 best_ollama_model_candidate().unwrap_or_else(|| "qwen2.5-coder:3b".into())
             });
         let rerank_model = cfg
             .ollama_rerank_model
             .clone()
-            .or_else(|| get_dotenv_or_env("QMD_OLLAMA_RERANK_MODEL"))
+            .or_else(|| get_dotenv_or_env(&dot, "QMD_OLLAMA_RERANK_MODEL"))
             .unwrap_or_else(|| query_model.clone());
         Self {
             query_model,
@@ -459,11 +439,12 @@ fn tokenize(input: &str) -> Vec<String> {
 
 fn required_ollama_models() -> Vec<String> {
     let cfg = repo_qmd_config().llm;
+    let dot = load_repo_dotenv_values();
     if !cfg.ollama_required_models.is_empty() {
         return cfg.ollama_required_models;
     }
 
-    if let Some(raw) = get_dotenv_or_env("QMD_OLLAMA_REQUIRED_MODELS") {
+    if let Some(raw) = get_dotenv_or_env(&dot, "QMD_OLLAMA_REQUIRED_MODELS") {
         let parsed = raw
             .split(',')
             .map(|v| v.trim().to_string())
@@ -653,75 +634,6 @@ fn extract_json_value(raw: &str) -> Option<Value> {
         return None;
     }
     serde_json::from_str::<Value>(&raw[start..=end]).ok()
-}
-
-fn repo_qmd_config() -> RepoQmdConfig {
-    let path = discover_repo_file("qmd.config.json")
-        .or_else(|| discover_repo_file("config/qmd.config.json"));
-    let Some(path) = path else {
-        return RepoQmdConfig::default();
-    };
-
-    let raw = match std::fs::read_to_string(path) {
-        Ok(v) => v,
-        Err(_) => return RepoQmdConfig::default(),
-    };
-    serde_json::from_str::<RepoQmdConfig>(&raw).unwrap_or_default()
-}
-
-fn get_dotenv_or_env(key: &str) -> Option<String> {
-    repo_dotenv_values()
-        .get(key)
-        .cloned()
-        .or_else(|| env::var(key).ok())
-}
-
-fn repo_dotenv_values() -> BTreeMap<String, String> {
-    let env_path = discover_repo_file(".env").or_else(|| discover_repo_file("config/.env"));
-    let Some(path) = env_path else {
-        return BTreeMap::new();
-    };
-
-    let raw = match std::fs::read_to_string(path) {
-        Ok(v) => v,
-        Err(_) => return BTreeMap::new(),
-    };
-    let mut map = BTreeMap::new();
-    for line in raw.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-        let Some((k, v)) = trimmed.split_once('=') else {
-            continue;
-        };
-        let key = k.trim().to_string();
-        let mut value = v.trim().to_string();
-        if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
-            value = value[1..value.len() - 1].to_string();
-        }
-        map.insert(key, value);
-    }
-    map
-}
-
-fn discover_repo_file(relative: &str) -> Option<PathBuf> {
-    let mut cursor = std::env::current_dir().ok()?;
-    loop {
-        let candidate = cursor.join(relative);
-        if candidate.exists() {
-            return Some(candidate);
-        }
-        if !cursor.pop() {
-            break;
-        }
-    }
-
-    let known = PathBuf::from("C:/codedev/litho-workspace").join(relative);
-    if known.exists() {
-        return Some(known);
-    }
-    None
 }
 
 fn parse_boolish(value: &str) -> bool {

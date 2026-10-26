@@ -6,12 +6,17 @@
 //!   emit structured output.
 //! - `litho generate <path>` — Extract a project and then invoke the Codex-CLI
 //!   doc generator to produce Markdown documentation.
+//! - `litho init [path]` — Scaffold a default `litho.toml` and `.litho/` state
+//!   directory for a project.
 //! - `litho status <path>` — Show generation status from the documentation manifest.
 //! - `litho serve <path>` — Launch litho-book to serve generated documentation.
 //! - `litho validate <path>` — Check generated docs for broken references.
-//! - `litho qmd ...` — Forward QMD retrieval/indexing commands to `litho-qmd-cli`.
-//! - `litho search <query>` — Run QMD hybrid search without entering passthrough mode.
-//! - `litho query <query>` — Run QMD query mode without entering passthrough mode.
+//! - `litho index <path>` — Add a collection and build its local index.
+//! - `litho qmd ...` — Forward advanced QMD retrieval/indexing commands.
+//! - `litho search <query>` — Run QMD BM25 keyword search without entering
+//!   passthrough mode.
+//! - `litho query <query>` — Run QMD hybrid query without entering
+//!   passthrough mode.
 //! - `litho vsearch <query>` — Run QMD vector search without entering passthrough mode.
 
 use anyhow::Context as _;
@@ -19,13 +24,15 @@ use clap::{Parser, Subcommand, ValueEnum};
 use litho_codex::exec::CodexExecGenerator;
 use litho_core::config::{ExtractBackend, LithoConfig};
 use litho_core::types::ExtractedCodebase;
-use litho_qmd_core::{QmdService, SearchOptions};
 use litho_qmd_llm::AdaptiveLlmEngine;
-use litho_qmd_storage::{AutoQmdStore, QmdBackendKind};
-use std::path::PathBuf;
+use litho_qmd_storage::{
+    AutoQmdStore, CollectionMutation, QmdBackendKind, QmdService, SearchOptions,
+};
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
 type AppQmdService = QmdService<AutoQmdStore, AdaptiveLlmEngine>;
+const QMD_SUPPRESS_DIRECT_WARNING_ENV: &str = "LITHO_QMD_SUPPRESS_DIRECT_WARNING";
 
 // ---------------------------------------------------------------------------
 // CLI definition
@@ -66,13 +73,20 @@ enum Commands {
     /// Check generated docs for broken file path references.
     Validate(ValidateArgs),
 
-    /// Forward all remaining args to litho-qmd-cli.
+    /// Scaffold a default litho.toml and .litho/ directory.
+    Init(InitArgs),
+
+    /// Add a collection and build its local index.
+    Index(IndexArgs),
+
+    /// Forward advanced QMD retrieval/indexing args.
+    #[command(hide = true)]
     Qmd(QmdArgs),
 
-    /// Run a QMD hybrid search.
+    /// Run a QMD BM25 keyword search.
     Search(QmdSearchArgs),
 
-    /// Run a QMD query.
+    /// Run a QMD hybrid query.
     Query(QmdSearchArgs),
 
     /// Run a QMD vector search.
@@ -205,6 +219,43 @@ struct ValidateArgs {
 }
 
 #[derive(Debug, Parser)]
+struct InitArgs {
+    /// Project directory to initialize.
+    #[arg(default_value = ".")]
+    path: PathBuf,
+
+    /// Overwrite an existing litho.toml.
+    #[arg(long, default_value_t = false, action = clap::ArgAction::SetTrue)]
+    force: bool,
+}
+
+#[derive(Debug, Parser)]
+struct IndexArgs {
+    /// Collection root directory.
+    path: PathBuf,
+
+    /// Collection name. Defaults to the directory name.
+    #[arg(long)]
+    name: Option<String>,
+
+    /// File mask used when adding the collection.
+    #[arg(long, default_value = "**/*.{rs,py,ts,md}")]
+    mask: String,
+
+    /// Optional qmd index override.
+    #[arg(long)]
+    index: Option<String>,
+
+    /// Optional backend override.
+    #[arg(long, value_enum)]
+    backend: Option<QmdBackendArg>,
+
+    /// Force re-ingest and re-embed even when data already exists.
+    #[arg(long, default_value_t = false, action = clap::ArgAction::SetTrue)]
+    force: bool,
+}
+
+#[derive(Debug, Parser)]
 struct QmdArgs {
     /// Raw args forwarded to litho-qmd-cli.
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -270,6 +321,8 @@ async fn main() -> anyhow::Result<()> {
         Commands::Status(args) => cmd_status(args).await,
         Commands::Serve(args) => cmd_serve(args).await,
         Commands::Validate(args) => cmd_validate(args).await,
+        Commands::Init(args) => cmd_init(args),
+        Commands::Index(args) => cmd_index(args).await,
         Commands::Qmd(args) => cmd_qmd(args).await,
         Commands::Search(args) => cmd_qmd_search_like("search", args).await,
         Commands::Query(args) => cmd_qmd_search_like("query", args).await,
@@ -654,6 +707,91 @@ async fn cmd_validate(args: ValidateArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn cmd_init(args: InitArgs) -> anyhow::Result<()> {
+    let project_dir = resolve_init_project_dir(&args.path)?;
+    let config_path = project_dir.join("litho.toml");
+    let state_dir = project_dir.join(".litho");
+
+    if config_path.exists() && !args.force {
+        anyhow::bail!(
+            "{} already exists; pass --force to overwrite it",
+            config_path.display()
+        );
+    }
+
+    std::fs::create_dir_all(&project_dir).with_context(|| {
+        format!(
+            "failed to create project directory: {}",
+            project_dir.display()
+        )
+    })?;
+    std::fs::create_dir_all(&state_dir)
+        .with_context(|| format!("failed to create state directory: {}", state_dir.display()))?;
+
+    let mut config = LithoConfig::default();
+    config.project_path = PathBuf::from(".");
+    config.output_path = PathBuf::from("./litho.docs");
+    config.internal_path = PathBuf::from("./.litho");
+
+    let rendered = toml::to_string_pretty(&config).context("failed to serialize default config")?;
+    let content = format!(
+        "# Litho project configuration.\n# Edit the LLM section before running generation.\n\n{rendered}"
+    );
+    std::fs::write(&config_path, content)
+        .with_context(|| format!("failed to write {}", config_path.display()))?;
+
+    println!("Initialized Litho project at {}", project_dir.display());
+    println!("Wrote {}", config_path.display());
+    println!("Created {}", state_dir.display());
+    Ok(())
+}
+
+async fn cmd_index(args: IndexArgs) -> anyhow::Result<()> {
+    let collection_root = args
+        .path
+        .canonicalize()
+        .with_context(|| format!("collection path does not exist: {}", args.path.display()))?;
+    let collection_name = args.name.unwrap_or_else(|| {
+        collection_root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("collection")
+            .to_string()
+    });
+
+    let service = build_qmd_service(args.index.as_deref(), args.backend)
+        .context("failed to initialize qmd service")?;
+
+    service
+        .add_collection(&CollectionMutation {
+            name: collection_name.clone(),
+            path: collection_root.to_string_lossy().to_string(),
+            pattern: args.mask,
+        })
+        .map_err(anyhow::Error::msg)?;
+    println!(
+        "Added collection {} ({})",
+        collection_name,
+        collection_root.display()
+    );
+
+    let ingest_report = service.ingest(args.force).map_err(anyhow::Error::msg)?;
+    println!(
+        "Indexed {} file(s), {} updated, {} unchanged",
+        ingest_report.indexed_documents,
+        ingest_report.updated_documents,
+        ingest_report.unchanged_documents
+    );
+
+    let embed_report = service.embed(args.force).map_err(anyhow::Error::msg)?;
+    println!(
+        "Embedded {} document(s) with {}",
+        embed_report.embedded, embed_report.model
+    );
+
+    Ok(())
+}
+
 async fn cmd_qmd(args: QmdArgs) -> anyhow::Result<()> {
     run_qmd_cli(args.args).await
 }
@@ -729,6 +867,7 @@ async fn run_qmd_cli(args: Vec<String>) -> anyhow::Result<()> {
 
     let status = tokio::process::Command::new(bin)
         .args(&args)
+        .env(QMD_SUPPRESS_DIRECT_WARNING_ENV, "1")
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
@@ -806,6 +945,17 @@ fn which_qmd_cli() -> Option<PathBuf> {
     None
 }
 
+fn resolve_init_project_dir(path: &Path) -> anyhow::Result<PathBuf> {
+    if path.exists() {
+        if !path.is_dir() {
+            anyhow::bail!("project path is not a directory: {}", path.display());
+        }
+        return Ok(path.to_path_buf());
+    }
+
+    Ok(path.to_path_buf())
+}
+
 /// Walk a directory and collect all file paths.
 fn walkdir(path: &std::path::Path) -> anyhow::Result<Vec<PathBuf>> {
     let mut files = Vec::new();
@@ -857,6 +1007,7 @@ fn find_backtick_paths(line: &str) -> Vec<String> {
 #[cfg(test)]
 mod cli_parse_tests {
     use super::*;
+    use clap::CommandFactory;
 
     #[test]
     fn cli_parses_status_default_path() {
@@ -887,6 +1038,49 @@ mod cli_parse_tests {
         match cli.command {
             Commands::Validate(args) => assert_eq!(args.path, PathBuf::from("docs")),
             _ => panic!("expected validate subcommand"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_init_default_path_and_force() {
+        let cli = Cli::try_parse_from(["litho", "init", "--force"])
+            .expect("failed to parse init command");
+        match cli.command {
+            Commands::Init(args) => {
+                assert_eq!(args.path, PathBuf::from("."));
+                assert!(args.force);
+            }
+            _ => panic!("expected init subcommand"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_index_with_options() {
+        let cli = Cli::try_parse_from([
+            "litho",
+            "index",
+            "repo",
+            "--name",
+            "docs",
+            "--mask",
+            "**/*.md",
+            "--index",
+            "index",
+            "--backend",
+            "sqlite",
+            "--force",
+        ])
+        .expect("failed to parse index command");
+        match cli.command {
+            Commands::Index(args) => {
+                assert_eq!(args.path, PathBuf::from("repo"));
+                assert_eq!(args.name.as_deref(), Some("docs"));
+                assert_eq!(args.mask, "**/*.md");
+                assert_eq!(args.index.as_deref(), Some("index"));
+                assert!(matches!(args.backend, Some(QmdBackendArg::Sqlite)));
+                assert!(args.force);
+            }
+            _ => panic!("expected index subcommand"),
         }
     }
 
@@ -1011,6 +1205,35 @@ mod cli_parse_tests {
             }
             _ => panic!("expected search subcommand"),
         }
+    }
+
+    #[test]
+    fn top_level_help_exposes_primary_workflows_without_crate_names() {
+        let mut cmd = Cli::command();
+        let mut help = Vec::new();
+        cmd.write_long_help(&mut help).expect("render help");
+        let help = String::from_utf8(help).expect("utf8 help");
+
+        for command in [
+            "extract", "generate", "index", "search", "serve", "validate",
+        ] {
+            assert!(
+                help.contains(command),
+                "top-level help should mention `{command}`: {help}"
+            );
+        }
+
+        assert!(
+            !help.contains("litho-qmd-cli"),
+            "top-level help should not require internal crate names: {help}"
+        );
+        assert!(
+            !help.contains("\n  qmd       "),
+            "top-level help should hide the transitional qmd passthrough: {help}"
+        );
+        assert!(help.contains("Run a QMD BM25 keyword search"));
+        assert!(help.contains("Run a QMD hybrid query"));
+        assert!(help.contains("Run a QMD vector search"));
     }
 
     #[test]

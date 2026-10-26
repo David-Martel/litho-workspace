@@ -41,22 +41,33 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
+            .cache/cargo-target-release-harness
           key: ${{ runner.os }}-cargo-docs-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-docs-
 
       - name: Build litho-generator
-        run: cargo build --release -p litho-generator
+        shell: pwsh
+        run: |
+          . ./scripts/litho-build-helpers.ps1
+          Build-LithoReleaseArtifacts -Crates @("litho-generator") -RepoRoot (Resolve-Path .).Path -CleanPublished -CleanCargoRelease -UseIsolatedTargetDir | Out-Null
 
       - name: Verify generator build token
         shell: pwsh
-        run: pwsh -NoProfile -File scripts/verify-build-tokens.ps1 -BinaryPaths @("target/release/litho-generator.exe")
+        run: pwsh -NoProfile -File scripts/verify-build-tokens.ps1 -Crates @("litho-generator")
+
+      - name: Clear previous documentation output
+        shell: pwsh
+        run: |
+          if (Test-Path litho-docs) {
+            Remove-Item -LiteralPath litho-docs -Recurse -Force
+          }
 
       - name: Generate documentation (full on push, incremental on PR)
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             echo "Running incremental generation..."
-            target/release/litho-generator.exe --incremental \
+            ./release/litho-generator.exe --incremental \
               --project-path . \
               --output-path ./litho-docs/ \
               --llm-provider openai \
@@ -66,7 +77,7 @@ jobs:
               --target-language en
           else
             echo "Running full generation..."
-            target/release/litho-generator.exe \
+            ./release/litho-generator.exe \
               --project-path . \
               --output-path ./litho-docs/ \
               --llm-provider openai \

@@ -1,6 +1,9 @@
-use litho_qmd_core::{QmdService, QmdStore, SearchOptions};
-use litho_qmd_llm::NoopLlmEngine;
-use litho_qmd_storage::{AutoQmdStore, QmdBackendKind, SqliteQmdStore};
+mod common;
+
+use common::NoopTestLlmEngine;
+use litho_qmd_storage::{
+    AutoQmdStore, QmdBackendKind, QmdService, QmdStore, SearchOptions, SqliteQmdStore,
+};
 use serial_test::serial;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -109,7 +112,7 @@ fn sqlite_ingest_embed_and_search_pipeline() {
         .expect("vsearch");
     assert!(!vhits.is_empty(), "vector search should return results");
 
-    let service = QmdService::new(store, NoopLlmEngine);
+    let service = QmdService::new(store, NoopTestLlmEngine);
     let qhits = service
         .query(
             "how does rust ownership work",
@@ -192,4 +195,56 @@ fn auto_store_defaults_to_existing_local_sqlite() {
 
     let store = AutoQmdStore::open_default(None).expect("auto store");
     assert_eq!(store.backend_kind(), QmdBackendKind::Sqlite);
+}
+
+#[test]
+#[serial]
+fn auto_store_honors_explicit_sqlite_backend_even_with_database_url_present() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let sqlite_path = temp.path().join("override.sqlite3");
+
+    let _guard = ProcessGuard::new(
+        temp.path(),
+        &[
+            "QMD_BACKEND",
+            "QMD_DATABASE_URL",
+            "DATABASE_URL",
+            "QMD_SQLITE_PATH",
+        ],
+    );
+    unsafe {
+        std::env::set_var("QMD_BACKEND", "sqlite");
+        std::env::set_var("QMD_DATABASE_URL", "postgresql://example.invalid/qmd");
+        std::env::set_var("QMD_SQLITE_PATH", &sqlite_path);
+    }
+
+    let store = AutoQmdStore::open_default(Some("explicit-sqlite")).expect("auto store");
+    assert_eq!(store.backend_kind(), QmdBackendKind::Sqlite);
+}
+
+#[test]
+#[serial]
+fn auto_store_rejects_explicit_postgres_without_postgres_feature() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let _guard = ProcessGuard::new(
+        temp.path(),
+        &[
+            "QMD_BACKEND",
+            "QMD_DATABASE_URL",
+            "DATABASE_URL",
+            "QMD_SQLITE_PATH",
+        ],
+    );
+    unsafe {
+        std::env::set_var("QMD_BACKEND", "postgres");
+        std::env::set_var("QMD_DATABASE_URL", "postgresql://example.invalid/qmd");
+    }
+
+    let err = match AutoQmdStore::open_default(Some("explicit-postgres")) {
+        Ok(_) => panic!("postgres backend should be rejected without feature support"),
+        Err(err) => err,
+    };
+    let message = format!("{err}");
+    assert!(message.contains("postgres backend requested"));
+    assert!(message.contains("without the 'postgres' feature"));
 }

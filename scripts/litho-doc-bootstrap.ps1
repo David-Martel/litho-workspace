@@ -21,16 +21,17 @@ if ($Iterations -lt 1) {
 }
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$binPath = Join-Path $repoRoot "target\release\litho-generator.exe"
+
+. (Join-Path $repoRoot "scripts\litho-build-helpers.ps1")
+$binPath = Join-Path (Get-LithoRepoReleaseDir -RepoRoot $repoRoot) "litho-generator.exe"
 
 Push-Location $repoRoot
 try {
     if ($BuildRelease -or -not (Test-Path $binPath)) {
         Write-Host "Building litho-generator release binary..."
-        cargo build --release -p litho-generator
-        if ($LASTEXITCODE -ne 0) {
-            throw "Failed to build litho-generator (exit $LASTEXITCODE)."
-        }
+        Enable-LithoSccache -AllowFallback
+        Invoke-LithoCargo -Arguments @("build", "--release", "-p", "litho-generator") -WorkingDirectory $repoRoot
+        Publish-LithoReleaseArtifacts -RepoRoot $repoRoot -Crates @("litho-generator") | Out-Null
     }
 
     if (-not (Test-Path $binPath)) {

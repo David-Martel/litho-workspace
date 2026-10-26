@@ -6,8 +6,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-serde = { workspace = true }
-thiserror = { workspace = true }
+litho-qmd-storage = { path = "../litho-qmd-storage" }
 
 [dev-dependencies]
 criterion = "0.5"

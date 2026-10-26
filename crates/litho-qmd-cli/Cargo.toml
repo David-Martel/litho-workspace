@@ -6,6 +6,10 @@ license.workspace = true
 repository.workspace = true
 build = "build.rs"
 
+[features]
+default = []
+postgres = ["litho-qmd-storage/postgres"]
+
 [dependencies]
 anyhow = { workspace = true }
 clap = { workspace = true }
@@ -13,7 +17,6 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 litho-core = { workspace = true }
-litho-qmd-core = { path = "../litho-qmd-core" }
 litho-qmd-llm = { path = "../litho-qmd-llm" }
 litho-qmd-storage = { path = "../litho-qmd-storage" }
 

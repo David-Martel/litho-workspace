@@ -953,8 +953,15 @@ fn gemini_to_completion(content: GeminiContent) -> CompletionResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Config;
+    use crate::llm::client::LLMClient;
     use schemars::JsonSchema;
     use serde::{Deserialize, Serialize};
+    use std::time::Duration;
+    use wiremock::{
+        Mock, MockServer, ResponseTemplate,
+        matchers::{body_string_contains, method, path},
+    };
 
     #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
     struct TestExtraction {
@@ -1005,5 +1012,235 @@ mod tests {
             }
             _ => panic!("expected function-calling extractor"),
         }
+    }
+
+    #[tokio::test]
+    async fn prompt_uses_openai_chat_completions_endpoint() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "mocked reply"
+                        }
+                    }
+                ]
+            })))
+            .mount(&server)
+            .await;
+
+        let cfg = LLMConfig {
+            provider: LLMProvider::OpenAI,
+            api_key: "test-api-key".to_string(),
+            api_base_url: server.uri(),
+            model_efficient: "gpt-4o-mini".to_string(),
+            model_powerful: "gpt-4o".to_string(),
+            ..LLMConfig::default()
+        };
+
+        let client = ProviderClient::new(&cfg).unwrap();
+        let agent = client.create_agent("gpt-4o-mini", "system prompt", &cfg);
+
+        let reply = agent.prompt("hello").await.unwrap();
+        assert_eq!(reply, "mocked reply");
+    }
+
+    #[tokio::test]
+    async fn prompt_surfaces_openai_http_errors() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("boom"))
+            .mount(&server)
+            .await;
+
+        let cfg = LLMConfig {
+            provider: LLMProvider::OpenAI,
+            api_key: "test-api-key".to_string(),
+            api_base_url: server.uri(),
+            model_efficient: "gpt-4o-mini".to_string(),
+            model_powerful: "gpt-4o".to_string(),
+            ..LLMConfig::default()
+        };
+
+        let client = ProviderClient::new(&cfg).unwrap();
+        let agent = client.create_agent("gpt-4o-mini", "system prompt", &cfg);
+
+        let err = agent.prompt("hello").await.unwrap_err();
+        let err_text = err.to_string();
+        assert!(err_text.contains("OpenAI-compatible API error"));
+        assert!(err_text.contains("500"));
+        assert!(err_text.contains("boom"));
+    }
+
+    #[tokio::test]
+    async fn prompt_surfaces_malformed_openai_responses() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("not-json"))
+            .mount(&server)
+            .await;
+
+        let cfg = LLMConfig {
+            provider: LLMProvider::OpenAI,
+            api_key: "test-api-key".to_string(),
+            api_base_url: server.uri(),
+            model_efficient: "gpt-4o-mini".to_string(),
+            model_powerful: "gpt-4o".to_string(),
+            ..LLMConfig::default()
+        };
+
+        let client = ProviderClient::new(&cfg).unwrap();
+        let agent = client.create_agent("gpt-4o-mini", "system prompt", &cfg);
+
+        let err = agent.prompt("hello").await.unwrap_err();
+        let err_text = err.to_string();
+        assert!(err_text.contains("Failed to parse OpenAI-compatible response"));
+    }
+
+    #[tokio::test]
+    async fn extract_with_models_falls_back_after_primary_failure() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .and(body_string_contains("primary-model"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("primary boom"))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .and(body_string_contains("fallback-model"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "{\"value\":\"from fallback\"}"
+                        }
+                    }
+                ]
+            })))
+            .mount(&server)
+            .await;
+
+        let llm = LLMConfig {
+            provider: LLMProvider::OpenAI,
+            api_key: "test-api-key".to_string(),
+            api_base_url: server.uri(),
+            model_efficient: "primary-model".to_string(),
+            model_powerful: "fallback-model".to_string(),
+            codex_as_fallback: false,
+            retry_attempts: 1,
+            ..LLMConfig::default()
+        };
+        let cfg = Config {
+            llm,
+            ..Config::default()
+        };
+
+        let client = LLMClient::new(cfg).unwrap();
+        let extracted = client
+            .extract_with_models::<TestExtraction>(
+                "system prompt",
+                "hello",
+                "primary-model".to_string(),
+                Some("fallback-model".to_string()),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(extracted.value, "from fallback");
+    }
+
+    #[tokio::test]
+    async fn extract_with_models_retries_transient_primary_failure() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .and(body_string_contains("primary-model"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("transient failure"))
+            .expect(2)
+            .mount(&server)
+            .await;
+
+        let llm = LLMConfig {
+            provider: LLMProvider::OpenAI,
+            api_key: "test-api-key".to_string(),
+            api_base_url: server.uri(),
+            model_efficient: "primary-model".to_string(),
+            model_powerful: "fallback-model".to_string(),
+            codex_as_fallback: false,
+            retry_attempts: 2,
+            retry_delay_ms: 1,
+            ..LLMConfig::default()
+        };
+        let cfg = Config {
+            llm,
+            ..Config::default()
+        };
+
+        let client = LLMClient::new(cfg).unwrap();
+        let err = client
+            .extract_with_models::<TestExtraction>(
+                "system prompt",
+                "hello",
+                "primary-model".to_string(),
+                None,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("transient failure"));
+    }
+
+    #[tokio::test]
+    async fn prompt_surfaces_request_timeout() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_delay(Duration::from_millis(1500))
+                    .set_body_json(serde_json::json!({
+                        "choices": [
+                            {
+                                "message": {
+                                    "role": "assistant",
+                                    "content": "too late"
+                                }
+                            }
+                        ]
+                    })),
+            )
+            .mount(&server)
+            .await;
+
+        let cfg = LLMConfig {
+            provider: LLMProvider::OpenAI,
+            api_key: "test-api-key".to_string(),
+            api_base_url: server.uri(),
+            model_efficient: "gpt-4o-mini".to_string(),
+            model_powerful: "gpt-4o".to_string(),
+            timeout_seconds: 1,
+            ..LLMConfig::default()
+        };
+
+        let client = ProviderClient::new(&cfg).unwrap();
+        let agent = client.create_agent("gpt-4o-mini", "system prompt", &cfg);
+
+        let err = agent.prompt("hello").await.unwrap_err();
+        let err_text = err.to_string();
+        assert!(
+            err_text.contains("Failed to send OpenAI-compatible request")
+                || err_text.to_lowercase().contains("timed out")
+                || err_text.to_lowercase().contains("timeout")
+        );
     }
 }

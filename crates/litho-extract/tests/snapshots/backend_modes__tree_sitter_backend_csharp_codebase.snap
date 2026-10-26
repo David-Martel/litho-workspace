@@ -1,0 +1,60 @@
+---
+source: crates/litho-extract/tests/backend_modes.rs
+expression: "serde_json::to_string_pretty(&snapshot).unwrap()"
+---
+{
+  "project_name": "sample-project",
+  "files": [
+    {
+      "path": "src/Program.cs",
+      "language": "CSharp",
+      "classification": "EntryPoint",
+      "complexity": {
+        "cyclomatic": 1.0,
+        "lines_of_code": 12,
+        "functions": 0,
+        "classes": 2
+      },
+      "dependencies": [
+        {
+          "source": "src/Program.cs",
+          "target": "System",
+          "kind": "using"
+        }
+      ],
+      "interfaces": [
+        {
+          "name": "Greeter",
+          "kind": "class",
+          "visibility": "public",
+          "signature": "public static class Greeter",
+          "line": 4
+        },
+        {
+          "name": "Settings",
+          "kind": "class",
+          "visibility": "public",
+          "signature": "public class Settings",
+          "line": 12
+        }
+      ],
+      "lines_of_code": 15,
+      "size_bytes": 217
+    }
+  ],
+  "dependency_graph": {
+    "src/Program.cs": [
+      "System"
+    ]
+  },
+  "statistics": {
+    "total_files": 1,
+    "total_loc": 12,
+    "languages": {
+      "CSharp": 1
+    },
+    "top_complex_files": [
+      "src/Program.cs"
+    ]
+  }
+}

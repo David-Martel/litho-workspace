@@ -63,6 +63,14 @@ pub struct Args {
     #[arg(long)]
     pub max_parallels: Option<usize>,
 
+    /// Minimum overall quality score required by the primary generation run.
+    #[arg(long)]
+    pub min_quality: Option<f64>,
+
+    /// Force the primary generation run to fail when quality falls below the gate.
+    #[arg(long, default_value_t = false, action = clap::ArgAction::SetTrue)]
+    pub enforce_gate: bool,
+
     /// LLM Provider (openai, mistral, openrouter, anthropic, deepseek)
     #[arg(long)]
     pub llm_provider: Option<String>,
@@ -328,6 +336,13 @@ impl Args {
         }
         config.llm.disable_preset_tools = self.disable_preset_tools;
 
+        if let Some(min_quality) = self.min_quality {
+            config.quality.min_score = min_quality;
+        }
+        if self.enforce_gate {
+            config.quality.enforce_gate = true;
+        }
+
         // Target language configuration
         if let Some(target_language_str) = self.target_language {
             if let Ok(target_language) = target_language_str.parse::<TargetLanguage>() {
@@ -349,5 +364,51 @@ impl Args {
         config.output_format = self.format;
 
         config
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cli_parses_quality_flags() {
+        let args =
+            Args::try_parse_from(["litho-generator", "--min-quality", "0.82", "--enforce-gate"])
+                .expect("failed to parse quality flags");
+        assert_eq!(args.min_quality, Some(0.82));
+        assert!(args.enforce_gate);
+    }
+
+    #[test]
+    fn into_config_applies_quality_overrides() {
+        let args = Args {
+            command: None,
+            project_path: PathBuf::from("."),
+            output_path: PathBuf::from("./docs"),
+            config: None,
+            name: None,
+            verbose: false,
+            model_efficient: None,
+            model_powerful: None,
+            llm_api_base_url: None,
+            llm_api_key: None,
+            max_tokens: None,
+            temperature: None,
+            max_parallels: None,
+            min_quality: Some(0.91),
+            enforce_gate: true,
+            llm_provider: None,
+            target_language: None,
+            disable_preset_tools: false,
+            no_cache: false,
+            force_regenerate: false,
+            incremental: false,
+            format: "md".to_string(),
+        };
+
+        let config = args.into_config();
+        assert_eq!(config.quality.min_score, 0.91);
+        assert!(config.quality.enforce_gate);
     }
 }

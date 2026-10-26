@@ -169,6 +169,11 @@ const TOOLS_CALL_PARAMS_FIELDS: &[FieldSpec] = &[
         kind: JsonType::Object,
         required: false,
     },
+    FieldSpec {
+        name: "_meta",
+        kind: JsonType::Object,
+        required: false,
+    },
 ];
 
 const SEARCH_ARGS_FIELDS: &[FieldSpec] = &[
@@ -248,17 +253,31 @@ const FORCE_ARGS_FIELDS: &[FieldSpec] = &[FieldSpec {
     required: false,
 }];
 
-const RESOURCE_READ_PARAMS_FIELDS: &[FieldSpec] = &[FieldSpec {
-    name: "uri",
-    kind: JsonType::String,
-    required: true,
-}];
+const RESOURCE_READ_PARAMS_FIELDS: &[FieldSpec] = &[
+    FieldSpec {
+        name: "uri",
+        kind: JsonType::String,
+        required: true,
+    },
+    FieldSpec {
+        name: "_meta",
+        kind: JsonType::Object,
+        required: false,
+    },
+];
 
-const PROMPT_GET_PARAMS_FIELDS: &[FieldSpec] = &[FieldSpec {
-    name: "name",
-    kind: JsonType::String,
-    required: true,
-}];
+const PROMPT_GET_PARAMS_FIELDS: &[FieldSpec] = &[
+    FieldSpec {
+        name: "name",
+        kind: JsonType::String,
+        required: true,
+    },
+    FieldSpec {
+        name: "_meta",
+        kind: JsonType::Object,
+        required: false,
+    },
+];
 
 const TOOLS_CALL_PARAMS_SCHEMA: ObjectSchema = ObjectSchema {
     fields: TOOLS_CALL_PARAMS_FIELDS,
@@ -1229,6 +1248,21 @@ mod tests {
         assert_eq!(parsed.0, "query");
         assert_eq!(parsed.1["query"], "state machine");
         assert_eq!(parsed.1["limit"], 5);
+    }
+
+    #[test]
+    fn parse_tool_call_params_accepts_protocol_metadata() {
+        let parsed = parse_tool_call_params(&json!({
+            "name": "status",
+            "arguments": {},
+            "_meta": {
+                "progressToken": "qmd-status"
+            }
+        }))
+        .expect("protocol request metadata should be accepted");
+
+        assert_eq!(parsed.0, "status");
+        assert_eq!(parsed.1, json!({}));
     }
 
     proptest! {

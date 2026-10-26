@@ -1,6 +1,9 @@
-use litho_qmd_core::{QmdService, QmdStore, SearchOptions};
-use litho_qmd_llm::NoopLlmEngine;
-use litho_qmd_storage::PostgresQmdStore;
+#![cfg(feature = "postgres")]
+
+mod common;
+
+use common::NoopTestLlmEngine;
+use litho_qmd_storage::{PostgresQmdStore, QmdService, QmdStore, SearchOptions};
 use std::fs;
 use std::path::PathBuf;
 use std::thread;
@@ -90,7 +93,7 @@ fn ingest_embed_and_search_pipeline() {
         .expect("vsearch");
     assert!(!vhits.is_empty(), "vector search should return results");
 
-    let service = QmdService::new(store, NoopLlmEngine);
+    let service = QmdService::new(store, NoopTestLlmEngine);
     let qhits = service
         .query(
             "how does rust ownership work",

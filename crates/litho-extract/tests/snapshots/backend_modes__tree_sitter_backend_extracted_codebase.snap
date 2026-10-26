@@ -1,0 +1,60 @@
+---
+source: crates/litho-extract/tests/backend_modes.rs
+expression: "serde_json::to_string_pretty(&snapshot).unwrap()"
+---
+{
+  "project_name": "sample-project",
+  "files": [
+    {
+      "path": "src/lib.rs",
+      "language": "Rust",
+      "classification": "Module",
+      "complexity": {
+        "cyclomatic": 1.0,
+        "lines_of_code": 7,
+        "functions": 1,
+        "classes": 1
+      },
+      "dependencies": [
+        {
+          "source": "src/lib.rs",
+          "target": "std::path::PathBuf",
+          "kind": "use"
+        }
+      ],
+      "interfaces": [
+        {
+          "name": "Settings",
+          "kind": "struct",
+          "visibility": "pub",
+          "signature": "pub struct Settings {",
+          "line": 8
+        },
+        {
+          "name": "hello",
+          "kind": "function",
+          "visibility": "pub",
+          "signature": "pub fn hello(name: &str) -> String {",
+          "line": 4
+        }
+      ],
+      "lines_of_code": 10,
+      "size_bytes": 142
+    }
+  ],
+  "dependency_graph": {
+    "src/lib.rs": [
+      "std::path::PathBuf"
+    ]
+  },
+  "statistics": {
+    "total_files": 1,
+    "total_loc": 7,
+    "languages": {
+      "Rust": 1
+    },
+    "top_complex_files": [
+      "src/lib.rs"
+    ]
+  }
+}

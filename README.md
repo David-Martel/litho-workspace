@@ -6,11 +6,17 @@ automated documentation pipeline that works on repositories of any size.
 
 **Version:** 2.0.0-alpha.1
 
+## Project Direction
+
+- [`GOALS.md`](GOALS.md) describes the target-state vision and requirements.
+- [`TODO.md`](TODO.md) is the active backlog that drives the work toward that
+  target state.
+
 ## Binaries
 
 | Binary | Crate | Purpose |
 |--------|-------|---------|
-| `litho` | litho-cli | Unified CLI: extract, generate, search, serve, validate |
+| `litho` | litho-cli | Unified CLI: extract, generate, init, index, search, serve, validate |
 | `litho-generator` | litho-generator | 4-stage doc generation pipeline with benchmark tuning |
 | `litho-book` | litho-book | Axum web server for browsing generated docs |
 | `litho-qmd-cli` | litho-qmd-cli | Local document index: ingest, search, embed, retrieve |
@@ -80,14 +86,19 @@ litho <COMMAND>
 Commands:
   extract   Walk a project tree and extract AST metadata
   generate  Generate Markdown documentation via Codex-CLI
+  init      Scaffold a default litho.toml and .litho directory
+  index     Add a collection and build its local index
   status    Show generation status from the documentation manifest
   serve     Launch litho-book to serve generated documentation
   validate  Check generated docs for broken file path references
   search    Run a QMD BM25 search
   query     Run a QMD hybrid query (expansion + reranking)
   vsearch   Run a QMD vector search
-  qmd       Forward all remaining args to litho-qmd-cli
 ```
+
+The transitional `litho qmd ...` passthrough remains available for compatibility
+but is intentionally hidden from the main help so new users stay on the primary
+workflow.
 
 #### `litho extract <PATH>`
 
@@ -156,6 +167,8 @@ Commands:
 | `--no-cache` | false | Disable cache |
 | `--force-regenerate` | false | Clear cache and regenerate |
 | `--format` | `md` | Output format: `md` or `html` |
+| `--min-quality <F>` | config | Minimum quality score for validation |
+| `--enforce-gate` | false | Fail the generation run when quality falls below the gate |
 
 #### LLM configuration flags
 
@@ -305,7 +318,7 @@ context_window = 131072                      # Model context window size
 | `litho-extract` | Tree-sitter AST parsing (Rust, TypeScript, Python, C#), dependency graph |
 | `litho-generator` | 4-stage doc generation: preprocess, research, compose, validate |
 | `litho-codex` | Bridge to OpenAI Codex (in-process and subprocess modes) |
-| `litho-cli` | Unified CLI combining extract, generate, search, serve |
+| `litho-cli` | Unified CLI combining extract, generate, init, index, search, serve, validate |
 | `litho-book` | Axum web server for documentation browsing |
 | `litho-qmd-core` | QMD service trait and shared types |
 | `litho-qmd-storage` | SQLite/PostgreSQL backends, BM25 search, vector storage |
@@ -348,17 +361,10 @@ litho-generator \
 ### Building a searchable index for a repo
 
 ```bash
-# 1. Add the repo as a collection
-litho-qmd-cli collection add /path/to/target-repo \
-  --mask "**/*.{rs,py,ts,md}" --name target-repo
+# Build the repo index in one step
+litho index /path/to/target-repo --name target-repo
 
-# 2. Ingest documents
-litho-qmd-cli ingest
-
-# 3. Build semantic vectors
-litho-qmd-cli embed
-
-# 4. Search
+# Search
 litho-qmd-cli search "authentication" --collection target-repo --limit 5
 litho-qmd-cli vsearch "how does error handling work" --collection target-repo
 ```

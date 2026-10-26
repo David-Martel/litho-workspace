@@ -35,21 +35,32 @@ litho search "query" --limit 5
 
 ## Development Tracking
 
-**Active roadmap:** `TODO.md` — prioritized work items with crate candidates.
-Always check TODO.md before starting new work to stay aligned with priorities.
+**Target state:** `GOALS.md` — the requirement-level vision for the finished
+workspace.
+
+**Active roadmap:** `TODO.md` — prioritized work items with crate candidates
+that should lead toward `GOALS.md`.
+
+Always check both `GOALS.md` and `TODO.md` before starting new work to stay
+aligned with the end state and the current priorities.
 
 | Priority | Focus |
 |----------|-------|
-| P0 | CLI unification (`litho index/init`), testing quick wins (insta, wiremock), moka cache |
-| P1 | Async streaming pipeline, QMD async migration, quality regression infrastructure |
-| P2 | Crate consolidation (11→9), LLM client simplification, config unification |
-| P3 | AST pattern detection, language expansion (4→12), salsa incremental computation |
+| P0 | Public CLI surface, deterministic regression harness, cache wiring |
+| P1 | QMD/config consolidation, dependency trimming, deprecation path |
+| P2 | Async pipeline, QMD async I/O, incremental regeneration hardening |
+| P3 | Search/embedding upgrades, AST expansion, output polish |
 
 **Key docs:**
+- `GOALS.md` — target-state requirements and definition of done
 - `README.md` — CLI reference for all 5 binaries
 - `ARCHITECTURE.md` — pipeline diagrams, crate graph, provider config
 - `BUILD.md` — sccache, codegen-units, CargoTools, tiered build, troubleshooting
 - `TODO.md` — prioritized roadmap with crate candidates table
+
+`BUILD.md` is the authoritative build-policy reference. If you change build
+scripts, artifact paths, sccache handling, or release workflow behavior, update
+`BUILD.md` in the same change and keep the scripts consistent with it.
 
 ## Architecture
 
@@ -74,7 +85,7 @@ Always check TODO.md before starting new work to stay aligned with priorities.
 | litho-codex | Bridge to OpenAI Codex (subprocess + in-process) | — |
 | litho-generator | 4-stage doc generation pipeline | litho-generator.exe |
 | litho-book | Axum web server for doc browsing | litho-book.exe |
-| litho-cli | Unified CLI (extract, generate, search, serve, validate) | litho.exe |
+| litho-cli | Unified CLI (extract, generate, init, index, search, serve, validate) | litho.exe |
 | litho-qmd-core | QMD shared types, service trait | — |
 | litho-qmd-storage | SQLite/PostgreSQL storage, BM25 search, vectors | — |
 | litho-qmd-llm | Adaptive LLM query expansion + reranking | — |
@@ -108,6 +119,7 @@ codegen-units strategy, CargoTools module, and OOM troubleshooting.
 | codegen-units | 512 (dev/test), 16 (release) | `.cargo/config.toml` |
 | Debug info (deps) | line-tables-only | `.cargo/config.toml` |
 | Target dir | `T:\RustCache\cargo-target` (global) | global cargo config |
+| Published release dir | `.\release\` (repo-local, authoritative) | `scripts/litho-build-helpers.ps1` |
 | Jobs | 2 (caps peak memory) | `.cargo/config.toml` |
 
 ### Commands
@@ -116,7 +128,7 @@ codegen-units strategy, CargoTools module, and OOM troubleshooting.
 # Standard build
 cargo build --workspace
 
-# Memory-safe tiered build (serializes large binary links)
+# Memory-safe tiered build (serializes large binary links, publishes to .\release\)
 pwsh scripts/build-tiered.ps1              # dev build, OOM-safe
 pwsh scripts/build-tiered.ps1 -Release     # release build
 
@@ -219,6 +231,8 @@ Lefthook hooks:
 
 - `external/codex-rs/` is NOT a git submodule — tracked as regular files with local mods
 - sccache uses **port 5100** (project-local, isolated from global port 4400)
+- Prefer the repo-local `.cache/sccache/` for cache cleanup and lock regulation
+- Treat `.\release\` as the runnable release artifact folder; do not rely on `T:\RustCache\cargo-target\release\...` for handoff or smoke execution
 - If sccache fails, bypass with `RUSTC_WRAPPER=""` (loses cache)
 - Tree-sitter C compilation requires MSVC clang-cl on Windows
 - rig-core was removed in Session 49 — all LLM calls go through direct reqwest HTTP

@@ -1,11 +1,10 @@
 use anyhow::Result;
-use lru::LruCache;
 use md5::{Digest, Md5};
+use moka::future::Cache;
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
-use std::num::NonZeroUsize;
+use std::future::Future;
 use std::path::PathBuf;
-use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::fs;
 
@@ -21,7 +20,7 @@ pub use performance_monitor::{CachePerformanceMonitor, CachePerformanceReport};
 pub struct CacheManager {
     config: CacheConfig,
     performance_monitor: CachePerformanceMonitor,
-    hot_cache: Mutex<LruCache<String, String>>,
+    hot_cache: Cache<String, String>,
     sqlite_store: Option<SqliteCacheStore>,
 }
 
@@ -124,8 +123,7 @@ pub struct CacheEntry<T> {
 
 impl CacheManager {
     pub fn new(config: CacheConfig, target_language: TargetLanguage) -> Self {
-        let lru_capacity = NonZeroUsize::new(config.lru_max_entries.max(1))
-            .expect("lru_max_entries.max(1) is always non-zero");
+        let hot_cache_capacity = config.lru_max_entries.max(1) as u64;
         let sqlite_store = if config.sqlite_enabled {
             let sqlite_path = config
                 .sqlite_path
@@ -145,12 +143,12 @@ impl CacheManager {
         Self {
             config,
             performance_monitor: CachePerformanceMonitor::new(target_language),
-            hot_cache: Mutex::new(LruCache::new(lru_capacity)),
+            hot_cache: Cache::new(hot_cache_capacity),
             sqlite_store,
         }
     }
 
-    fn lru_key(category: &str, hash: &str) -> String {
+    fn cache_key(category: &str, hash: &str) -> String {
         format!("{category}:{hash}")
     }
 
@@ -161,26 +159,39 @@ impl CacheManager {
         Ok(serde_json::from_str::<CacheEntry<T>>(payload)?)
     }
 
-    fn touch_lru(&self, category: &str, hash: &str, payload: &str) {
-        let key = Self::lru_key(category, hash);
-        if let Ok(mut lru) = self.hot_cache.lock() {
-            lru.put(key, payload.to_string());
-        }
+    async fn hot_get(&self, category: &str, hash: &str) -> Option<String> {
+        self.hot_cache.get(&Self::cache_key(category, hash)).await
     }
 
-    fn lru_get(&self, category: &str, hash: &str) -> Option<String> {
-        let key = Self::lru_key(category, hash);
+    async fn hot_insert(&self, category: &str, hash: &str, payload: String) {
         self.hot_cache
-            .lock()
-            .ok()
-            .and_then(|mut lru| lru.get(&key).cloned())
+            .insert(Self::cache_key(category, hash), payload)
+            .await;
     }
 
-    fn lru_remove(&self, category: &str, hash: &str) {
-        let key = Self::lru_key(category, hash);
-        if let Ok(mut lru) = self.hot_cache.lock() {
-            lru.pop(&key);
-        }
+    async fn hot_remove(&self, category: &str, hash: &str) {
+        self.hot_cache
+            .invalidate(&Self::cache_key(category, hash))
+            .await;
+    }
+
+    async fn hot_get_with_loader<F, Fut>(
+        &self,
+        category: &str,
+        hash: &str,
+        loader: F,
+    ) -> Result<String>
+    where
+        F: FnOnce() -> Fut + Send,
+        Fut: Future<Output = Result<String>> + Send,
+    {
+        let key = Self::cache_key(category, hash);
+        let payload = self
+            .hot_cache
+            .try_get_with(key, async move { loader().await })
+            .await
+            .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+        Ok(payload)
     }
 
     /// Generate MD5 hash of the prompt
@@ -220,11 +231,11 @@ impl CacheManager {
         let hash = self.hash_prompt(prompt);
         let cache_path = self.get_cache_path(category, &hash);
 
-        if let Some(payload) = self.lru_get(category, &hash)
+        if let Some(payload) = self.hot_get(category, &hash).await
             && let Ok(entry) = self.cache_entry_from_payload::<T>(&payload)
         {
             if self.is_expired(entry.timestamp) {
-                self.lru_remove(category, &hash);
+                self.hot_remove(category, &hash).await;
             } else {
                 let estimated_inference_time = self.estimate_inference_time(&payload);
                 if let Some(token_usage) = &entry.token_usage {
@@ -246,7 +257,7 @@ impl CacheManager {
             if self.is_expired(entry.timestamp) {
                 let _ = store.delete_entry(category.to_string(), hash.clone()).await;
             } else {
-                self.touch_lru(category, &hash, &payload);
+                self.hot_insert(category, &hash, payload.clone()).await;
                 let estimated_inference_time = self.estimate_inference_time(&payload);
                 if let Some(token_usage) = &entry.token_usage {
                     self.performance_monitor.record_cache_hit(
@@ -265,7 +276,15 @@ impl CacheManager {
             return Ok(None);
         }
 
-        match fs::read_to_string(&cache_path).await {
+        let read_cache_path = cache_path.clone();
+        match self
+            .hot_get_with_loader(category, &hash, || async move {
+                fs::read_to_string(read_cache_path)
+                    .await
+                    .map_err(Into::into)
+            })
+            .await
+        {
             Ok(content) => {
                 match serde_json::from_str::<CacheEntry<T>>(&content) {
                     Ok(entry) => {
@@ -276,12 +295,12 @@ impl CacheManager {
                                 let _ =
                                     store.delete_entry(category.to_string(), hash.clone()).await;
                             }
-                            self.lru_remove(category, &hash);
+                            self.hot_remove(category, &hash).await;
                             self.performance_monitor.record_cache_miss(category);
                             return Ok(None);
                         }
 
-                        self.touch_lru(category, &hash, &content);
+                        self.hot_insert(category, &hash, content.clone()).await;
                         if let Some(store) = &self.sqlite_store {
                             let _ = store
                                 .set_payload(
@@ -308,6 +327,7 @@ impl CacheManager {
                         Ok(Some(entry.data))
                     }
                     Err(e) => {
+                        self.hot_remove(category, &hash).await;
                         self.performance_monitor.record_cache_error(
                             category,
                             &format!("Deserialization failed: {}", e),
@@ -317,6 +337,7 @@ impl CacheManager {
                 }
             }
             Err(e) => {
+                self.hot_remove(category, &hash).await;
                 self.performance_monitor
                     .record_cache_error(category, &format!("Failed to read file: {}", e));
                 Ok(None)
@@ -363,7 +384,7 @@ impl CacheManager {
         match serde_json::to_string_pretty(&entry) {
             Ok(content) => match fs::write(&cache_path, &content).await {
                 Ok(_) => {
-                    self.touch_lru(category, &hash, &content);
+                    self.hot_insert(category, &hash, content.clone()).await;
                     if let Some(store) = &self.sqlite_store {
                         let _ = store
                             .set_payload(
@@ -444,7 +465,7 @@ impl CacheManager {
         match serde_json::to_string_pretty(&entry) {
             Ok(content) => match fs::write(&cache_path, &content).await {
                 Ok(_) => {
-                    self.touch_lru(category, &hash, &content);
+                    self.hot_insert(category, &hash, content.clone()).await;
                     if let Some(store) = &self.sqlite_store {
                         let _ = store
                             .set_payload(
@@ -504,11 +525,11 @@ impl CacheManager {
             return Ok(None);
         }
 
-        if let Some(payload) = self.lru_get(category, content_hash)
+        if let Some(payload) = self.hot_get(category, content_hash).await
             && let Ok(entry) = self.cache_entry_from_payload::<T>(&payload)
         {
             if self.is_expired(entry.timestamp) {
-                self.lru_remove(category, content_hash);
+                self.hot_remove(category, content_hash).await;
             } else {
                 return Ok(Some(entry.data));
             }
@@ -525,7 +546,8 @@ impl CacheManager {
                     .delete_entry(category.to_string(), content_hash.to_string())
                     .await;
             } else {
-                self.touch_lru(category, content_hash, &payload);
+                self.hot_insert(category, content_hash, payload.clone())
+                    .await;
                 return Ok(Some(entry.data));
             }
         }
@@ -547,12 +569,13 @@ impl CacheManager {
                                 .delete_entry(category.to_string(), content_hash.to_string())
                                 .await;
                         }
-                        self.lru_remove(category, content_hash);
+                        self.hot_remove(category, content_hash).await;
                         self.performance_monitor.record_cache_miss(category);
                         return Ok(None);
                     }
 
-                    self.touch_lru(category, content_hash, &content);
+                    self.hot_insert(category, content_hash, content.clone())
+                        .await;
                     if let Some(store) = &self.sqlite_store {
                         let _ = store
                             .set_payload(
@@ -624,7 +647,8 @@ impl CacheManager {
         match serde_json::to_string_pretty(&entry) {
             Ok(content) => match fs::write(&cache_path, &content).await {
                 Ok(_) => {
-                    self.touch_lru(category, content_hash, &content);
+                    self.hot_insert(category, content_hash, content.clone())
+                        .await;
                     if let Some(store) = &self.sqlite_store {
                         let _ = store
                             .set_payload(
@@ -655,5 +679,71 @@ impl CacheManager {
     /// Generate performance report
     pub fn generate_performance_report(&self) -> CachePerformanceReport {
         self.performance_monitor.generate_report()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn hot_cache_round_trip_preserves_payloads() {
+        let dir = tempdir().unwrap();
+        let config = CacheConfig {
+            enabled: true,
+            cache_dir: dir.path().to_path_buf(),
+            expire_hours: 24,
+            lru_max_entries: 8,
+            sqlite_enabled: false,
+            sqlite_path: None,
+            repo_index_enabled: false,
+            repo_index_path: None,
+        };
+        let cache = CacheManager::new(config, TargetLanguage::default());
+
+        cache
+            .set("prompt", "hello", serde_json::json!({"value":"world"}))
+            .await
+            .unwrap();
+
+        let result: Option<serde_json::Value> = cache.get("prompt", "hello").await.unwrap();
+        assert_eq!(result.unwrap()["value"], "world");
+    }
+
+    #[tokio::test]
+    async fn hot_cache_coalesces_duplicate_loads() {
+        let cache: Arc<Cache<String, String>> = Arc::new(Cache::new(8));
+        let load_count = Arc::new(AtomicUsize::new(0));
+
+        let mut join_set = tokio::task::JoinSet::new();
+        for _ in 0..8 {
+            let cache = Arc::clone(&cache);
+            let load_count = Arc::clone(&load_count);
+            join_set.spawn(async move {
+                cache
+                    .try_get_with("shared-key".to_string(), async move {
+                        load_count.fetch_add(1, Ordering::SeqCst);
+                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                        Ok::<String, anyhow::Error>("shared-value".to_string())
+                    })
+                    .await
+                    .unwrap()
+            });
+        }
+
+        while let Some(result) = join_set.join_next().await {
+            assert_eq!(result.unwrap(), "shared-value");
+        }
+
+        assert_eq!(load_count.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            cache.get(&"shared-key".to_string()).await,
+            Some("shared-value".to_string())
+        );
     }
 }

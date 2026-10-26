@@ -81,10 +81,7 @@ try {
         if ($toolchain) { $args = @($toolchain) + $args }
 
         Write-Host "  cargo $($args -join ' ')" -ForegroundColor DarkGray
-        & cargo @args
-        if ($LASTEXITCODE -ne 0) {
-            throw "Build failed at tier: $Label (exit=$LASTEXITCODE)"
-        }
+        Invoke-LithoCargo -Arguments $args -WorkingDirectory $repoRoot
     }
 
     # Phase 1: Litho libraries in parallel — safe, low memory
@@ -111,6 +108,11 @@ try {
         }
         foreach ($crate in $binaries) {
             Invoke-CargoTier "Binary: $crate" @("-p", $crate) -Jobs $BinJobs
+        }
+
+        if ($Release) {
+            $publishedDir = Publish-LithoReleaseArtifacts -RepoRoot $repoRoot -Crates $binaries
+            Write-Host "[tiered-build] Published release artifacts to $publishedDir" -ForegroundColor Green
         }
     }
 

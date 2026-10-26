@@ -376,13 +376,24 @@ pub struct LocalDocsProcessor;
 impl LocalDocsProcessor {
     /// Extract text content from a PDF file
     pub fn extract_pdf_text(pdf_path: &Path) -> Result<String> {
-        let bytes = fs::read(pdf_path)
-            .with_context(|| format!("Failed to read PDF file: {:?}", pdf_path))?;
+        #[cfg(not(feature = "pdf-extract"))]
+        {
+            let _ = pdf_path;
+            anyhow::bail!(
+                "PDF support is disabled in this build of litho-generator; rebuild with --features pdf-extract"
+            );
+        }
 
-        let text = pdf_extract::extract_text_from_mem(&bytes)
-            .with_context(|| format!("Failed to extract text from PDF: {:?}", pdf_path))?;
+        #[cfg(feature = "pdf-extract")]
+        {
+            let bytes = fs::read(pdf_path)
+                .with_context(|| format!("Failed to read PDF file: {:?}", pdf_path))?;
 
-        Ok(text)
+            let text = pdf_extract::extract_text_from_mem(&bytes)
+                .with_context(|| format!("Failed to extract text from PDF: {:?}", pdf_path))?;
+
+            Ok(text)
+        }
     }
 
     /// Read markdown file content
@@ -631,6 +642,7 @@ impl LocalDocsProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::NamedTempFile;
 
     #[test]
     fn test_detect_file_type() {
@@ -646,5 +658,15 @@ mod tests {
             LocalDocsProcessor::detect_file_type(Path::new("notes.txt")).unwrap(),
             DocFileType::Text
         );
+    }
+
+    #[cfg(not(feature = "pdf-extract"))]
+    #[test]
+    fn extract_pdf_text_reports_disabled_feature() {
+        let temp = NamedTempFile::new().unwrap();
+        let err = LocalDocsProcessor::extract_pdf_text(temp.path()).unwrap_err();
+        let message = format!("{err:#}");
+        assert!(message.contains("PDF support is disabled"));
+        assert!(message.contains("--features pdf-extract"));
     }
 }

@@ -10,6 +10,12 @@
   - `scripts/` for build/test automation
   - `external/` and `third_party/` for vendored dependencies
 
+## Repository Direction
+- `GOALS.md` defines the target-state requirements for the workspace.
+- `TODO.md` is the active implementation backlog that should lead toward `GOALS.md`.
+- When updating architecture, docs, or CLI behavior, check both files to keep the
+  implementation aligned with the long-term vision.
+
 ## Build, Test, and Development Commands
 - `cargo build --workspace`: Build all crates.
 - `cargo build --release -p litho-cli`: Build a specific binary in release mode.
@@ -18,6 +24,11 @@
 - `cargo fmt --check`: Verify formatting.
 - `cargo clippy --workspace --all-targets -- -D warnings`: Enforce lint quality.
 - `pwsh scripts/build-tiered.ps1 -Release`: OOM-safe staged build flow.
+
+## Build Policy
+- `BUILD.md` is the canonical build-policy document. When build behavior, release artifact paths, cache handling, or troubleshooting changes, update `BUILD.md` first and keep scripts aligned with it.
+- Release-producing scripts must publish runnable binaries into the repo-local `release\` folder. Treat `T:\RustCache\cargo-target\release\...` as a shared cache, not the authoritative artifact handoff path.
+- Prefer the workspace-local sccache at `.cache/sccache/` for cache lifecycle control. Do not rely on global cache state when regulating build locks or cache cleanup for this repo.
 
 ## Coding Style & Naming Conventions
 - Follow idiomatic Rust: `snake_case` for functions/modules, `PascalCase` for types.

@@ -1,15 +1,13 @@
 use anyhow::{Context, Result, anyhow};
 use chrono::{DateTime, Utc};
-use futures::future::join_all;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use tokio::sync::Semaphore;
 
 use crate::config::{Config, LocalDocsConfig};
 use crate::integrations::local_docs::{LocalDocMetadata, LocalDocsProcessor};
+use crate::utils::threads::do_parallel_with_limit;
 use std::time::Instant;
 
 /// Metadata about synced knowledge
@@ -98,47 +96,35 @@ impl KnowledgeSyncer {
 
             // Determine chunking config for this category
             let chunking_config = category.chunking.clone().or(default_chunking.clone());
-            let semaphore = Arc::new(Semaphore::new(parallelism));
             let category_name = category.name.clone();
             let target_agents = category.target_agents.clone();
 
-            let tasks = files.into_iter().map(|file_path| {
-                let semaphore = Arc::clone(&semaphore);
-                let category_name = category_name.clone();
-                let target_agents = target_agents.clone();
-                let chunking_config = chunking_config.clone();
-                let file_path_for_worker = file_path.clone();
-                async move {
-                    let _permit = match semaphore.acquire_owned().await {
-                        Ok(permit) => permit,
-                        Err(e) => {
-                            return (
-                                file_path,
-                                Err(anyhow!(
-                                    "failed to acquire local-doc semaphore permit: {}",
-                                    e
-                                )),
-                            );
-                        }
-                    };
+            let tasks: Vec<_> = files
+                .into_iter()
+                .map(|file_path| {
+                    let category_name = category_name.clone();
+                    let target_agents = target_agents.clone();
+                    let chunking_config = chunking_config.clone();
+                    let file_path_for_worker = file_path.clone();
+                    async move {
+                        let result = tokio::task::spawn_blocking(move || {
+                            LocalDocsProcessor::process_file_with_chunking(
+                                &file_path_for_worker,
+                                &category_name,
+                                &target_agents,
+                                chunking_config.as_ref(),
+                            )
+                        })
+                        .await
+                        .map_err(|e| anyhow!("local-doc worker join error: {}", e))
+                        .and_then(|inner| inner);
 
-                    let result = tokio::task::spawn_blocking(move || {
-                        LocalDocsProcessor::process_file_with_chunking(
-                            &file_path_for_worker,
-                            &category_name,
-                            &target_agents,
-                            chunking_config.as_ref(),
-                        )
-                    })
-                    .await
-                    .map_err(|e| anyhow!("local-doc worker join error: {}", e))
-                    .and_then(|inner| inner);
+                        (file_path, result)
+                    }
+                })
+                .collect();
 
-                    (file_path, result)
-                }
-            });
-
-            for (file_path, result) in join_all(tasks).await {
+            for (file_path, result) in do_parallel_with_limit(tasks, parallelism).await {
                 match result {
                     Ok(doc_metas) => {
                         let is_chunked = doc_metas.len() > 1;
