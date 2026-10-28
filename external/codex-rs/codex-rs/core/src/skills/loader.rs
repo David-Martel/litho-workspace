@@ -828,6 +828,18 @@ mod tests {
 
     const REPO_ROOT_CONFIG_DIR_NAME: &str = ".codex";
 
+    // Fixture configuration owns its roots; OS-home agents skills are a separate
+    // dependency covered by the explicit Some(home) test below.
+    fn load_fixture_skills(config: &Config) -> SkillLoadOutcome {
+        let mut roots = skill_roots_from_layer_stack(&config.config_layer_stack, None);
+        roots.extend(repo_agents_skill_roots(
+            &config.config_layer_stack,
+            &config.cwd,
+        ));
+        dedupe_skill_roots_by_path(&mut roots);
+        load_skills_from_roots(roots)
+    }
+
     async fn make_config(codex_home: &TempDir) -> Config {
         make_config_for_cwd(codex_home, codex_home.path().to_path_buf()).await
     }
@@ -990,6 +1002,10 @@ mod tests {
         Ok(())
     }
 
+    // Protects: explicit owned-home agents skills with user scope.
+    // Detects: ignoring the injected Some(home) root while isolating OS-home fixtures.
+    // Needs: an explicitly supplied temporary home and config layer stack; no real home or network.
+    // Breadcrumb: external/codex-rs/codex-rs/core/src/skills/model.rs (skill metadata and outcome contracts).
     #[test]
     fn loads_skills_from_home_agents_dir_for_user_scope() -> anyhow::Result<()> {
         let tmp = tempfile::tempdir()?;
@@ -1086,6 +1102,10 @@ mod tests {
         write_skill_metadata_at(skill_dir, contents)
     }
 
+    // Protects: YAML tool dependency fields in loaded skill metadata.
+    // Detects: lost dependency fields or unrelated host skills in exact fixture results.
+    // Needs: owned fixture configuration; no OS-home agent discovery or network.
+    // Breadcrumb: external/codex-rs/codex-rs/core/src/skills/model.rs (skill metadata and outcome contracts).
     #[tokio::test]
     async fn loads_skill_dependencies_metadata_from_yaml() {
         let codex_home = tempfile::tempdir().expect("tempdir");
@@ -1129,7 +1149,7 @@ mod tests {
         );
 
         let cfg = make_config(&codex_home).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
 
         assert!(
             outcome.errors.is_empty(),
@@ -1187,6 +1207,10 @@ mod tests {
         );
     }
 
+    // Protects: the complete YAML skill interface metadata contract.
+    // Detects: lost display, icon, prompt or color fields and host-skill pollution.
+    // Needs: owned fixture configuration; no OS-home agent discovery or network.
+    // Breadcrumb: external/codex-rs/codex-rs/core/src/skills/model.rs (skill metadata and outcome contracts).
     #[tokio::test]
     async fn loads_skill_interface_metadata_from_yaml() {
         let codex_home = tempfile::tempdir().expect("tempdir");
@@ -1208,7 +1232,7 @@ interface:
         );
 
         let cfg = make_config(&codex_home).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
 
         assert!(
             outcome.errors.is_empty(),
@@ -1243,6 +1267,10 @@ interface:
         );
     }
 
+    // Protects: explicit skill invocation policy from YAML.
+    // Detects: ignoring the configured policy or adding unrelated host skills.
+    // Needs: owned fixture configuration; no OS-home agent discovery or network.
+    // Breadcrumb: external/codex-rs/codex-rs/core/src/skills/model.rs (skill metadata and outcome contracts).
     #[tokio::test]
     async fn loads_skill_policy_from_yaml() {
         let codex_home = tempfile::tempdir().expect("tempdir");
@@ -1258,7 +1286,7 @@ policy:
         );
 
         let cfg = make_config(&codex_home).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
 
         assert!(
             outcome.errors.is_empty(),
@@ -1275,6 +1303,10 @@ policy:
         assert!(outcome.allowed_skills_for_implicit_invocation().is_empty());
     }
 
+    // Protects: default implicit invocation when a skill policy is empty.
+    // Detects: changing the default policy or contaminating fixture outcomes.
+    // Needs: owned fixture configuration; no OS-home agent discovery or network.
+    // Breadcrumb: external/codex-rs/codex-rs/core/src/skills/model.rs (skill metadata and outcome contracts).
     #[tokio::test]
     async fn empty_skill_policy_defaults_to_allow_implicit_invocation() {
         let codex_home = tempfile::tempdir().expect("tempdir");
@@ -1289,7 +1321,7 @@ policy: {}
         );
 
         let cfg = make_config(&codex_home).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
 
         assert!(
             outcome.errors.is_empty(),
@@ -1309,6 +1341,10 @@ policy: {}
         );
     }
 
+    // Protects: compiled skill permissions and their metadata.
+    // Detects: lost permission settings or unrelated skills changing the fixture result.
+    // Needs: owned fixture configuration; no OS-home agent discovery or network.
+    // Breadcrumb: external/codex-rs/codex-rs/core/src/skills/model.rs (skill metadata and outcome contracts).
     #[tokio::test]
     async fn loads_skill_permissions_from_yaml() {
         let codex_home = tempfile::tempdir().expect("tempdir");
@@ -1332,7 +1368,7 @@ permissions:
         );
 
         let cfg = make_config(&codex_home).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
 
         assert!(
             outcome.errors.is_empty(),
@@ -1379,6 +1415,10 @@ permissions:
         );
     }
 
+    // Protects: the absence of a profile for empty permissions.
+    // Detects: creating an unintended profile or loading unrelated host skills.
+    // Needs: owned fixture configuration; no OS-home agent discovery or network.
+    // Breadcrumb: external/codex-rs/codex-rs/core/src/skills/model.rs (skill metadata and outcome contracts).
     #[tokio::test]
     async fn empty_skill_permissions_do_not_create_profile() {
         let codex_home = tempfile::tempdir().expect("tempdir");
@@ -1393,7 +1433,7 @@ permissions: {}
         );
 
         let cfg = make_config(&codex_home).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
 
         assert!(
             outcome.errors.is_empty(),
@@ -1428,6 +1468,10 @@ permissions: {}
         assert_eq!(outcome.skills[0].permissions, expected);
     }
 
+    // Protects: macOS permission compilation for a skill fixture.
+    // Detects: lost macOS permission details or polluted fixture results.
+    // Needs: macOS and owned fixture configuration; no OS-home agent discovery or network.
+    // Breadcrumb: external/codex-rs/codex-rs/core/src/skills/model.rs (skill metadata and outcome contracts).
     #[cfg(target_os = "macos")]
     #[tokio::test]
     async fn loads_skill_macos_permissions_from_yaml() {
@@ -1449,7 +1493,7 @@ permissions:
         );
 
         let cfg = make_config(&codex_home).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
 
         assert!(
             outcome.errors.is_empty(),
@@ -1478,6 +1522,10 @@ permissions:
         );
     }
 
+    // Protects: the non-macOS boundary for macOS-only permissions.
+    // Detects: creating an unsupported profile or loading unrelated host skills.
+    // Needs: a non-macOS host and owned fixture configuration; no OS-home agent discovery or network.
+    // Breadcrumb: external/codex-rs/codex-rs/core/src/skills/model.rs (skill metadata and outcome contracts).
     #[cfg(not(target_os = "macos"))]
     #[tokio::test]
     async fn loads_skill_macos_permissions_from_yaml_non_macos_does_not_create_profile() {
@@ -1499,7 +1547,7 @@ permissions:
         );
 
         let cfg = make_config(&codex_home).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
 
         assert!(
             outcome.errors.is_empty(),
@@ -1522,6 +1570,10 @@ permissions:
         );
     }
 
+    // Protects: valid skill icon paths beneath the assets directory.
+    // Detects: dropping valid icons or allowing host skills into exact fixture results.
+    // Needs: owned fixture configuration; no OS-home agent discovery or network.
+    // Breadcrumb: external/codex-rs/codex-rs/core/src/skills/model.rs (skill metadata and outcome contracts).
     #[tokio::test]
     async fn accepts_icon_paths_under_assets_dir() {
         let codex_home = tempfile::tempdir().expect("tempdir");
@@ -1543,7 +1595,7 @@ permissions:
         );
 
         let cfg = make_config(&codex_home).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
 
         assert!(
             outcome.errors.is_empty(),
@@ -1573,6 +1625,10 @@ permissions:
         );
     }
 
+    // Protects: rejection of invalid interface brand colors.
+    // Detects: retaining malformed colors or polluting the fixture skill set.
+    // Needs: owned fixture configuration; no OS-home agent discovery or network.
+    // Breadcrumb: external/codex-rs/codex-rs/core/src/skills/model.rs (skill metadata and outcome contracts).
     #[tokio::test]
     async fn ignores_invalid_brand_color() {
         let codex_home = tempfile::tempdir().expect("tempdir");
@@ -1591,7 +1647,7 @@ permissions:
         );
 
         let cfg = make_config(&codex_home).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
 
         assert!(
             outcome.errors.is_empty(),
@@ -1614,6 +1670,10 @@ permissions:
         );
     }
 
+    // Protects: the default-prompt length limit in skill interfaces.
+    // Detects: retaining an oversized prompt or adding unrelated host skills.
+    // Needs: owned fixture configuration; no OS-home agent discovery or network.
+    // Breadcrumb: external/codex-rs/codex-rs/core/src/skills/model.rs (skill metadata and outcome contracts).
     #[tokio::test]
     async fn ignores_default_prompt_over_max_length() {
         let codex_home = tempfile::tempdir().expect("tempdir");
@@ -1638,7 +1698,7 @@ permissions:
         );
 
         let cfg = make_config(&codex_home).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
 
         assert!(
             outcome.errors.is_empty(),
@@ -1668,6 +1728,10 @@ permissions:
         );
     }
 
+    // Protects: skill retention with an invalid interface omitted.
+    // Detects: retaining invalid icon metadata or changing the fixture skill set.
+    // Needs: owned fixture configuration; no OS-home agent discovery or network.
+    // Breadcrumb: external/codex-rs/codex-rs/core/src/skills/model.rs (skill metadata and outcome contracts).
     #[tokio::test]
     async fn drops_interface_when_icons_are_invalid() {
         let codex_home = tempfile::tempdir().expect("tempdir");
@@ -1687,7 +1751,7 @@ permissions:
         );
 
         let cfg = make_config(&codex_home).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
 
         assert!(
             outcome.errors.is_empty(),
@@ -1720,6 +1784,10 @@ permissions:
         std::os::unix::fs::symlink(target, link).unwrap();
     }
 
+    // Protects: skill discovery through allowed user-root directory symlinks.
+    // Detects: missing linked skills or assigning the wrong path or scope.
+    // Needs: Unix symlink support and owned fixture configuration; no OS-home agent discovery or network.
+    // Breadcrumb: external/codex-rs/codex-rs/core/src/skills/model.rs (skill metadata and outcome contracts).
     #[tokio::test]
     #[cfg(unix)]
     async fn loads_skills_via_symlinked_subdir_for_user_scope() {
@@ -1732,7 +1800,7 @@ permissions:
         symlink_dir(shared.path(), &codex_home.path().join("skills/shared"));
 
         let cfg = make_config(&codex_home).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
 
         assert!(
             outcome.errors.is_empty(),
@@ -1755,6 +1823,10 @@ permissions:
         );
     }
 
+    // Protects: the exclusion of symlinked user-scope skill files.
+    // Detects: following a forbidden skill-file link into the fixture results.
+    // Needs: Unix symlink support and owned fixture configuration; no OS-home agent discovery or network.
+    // Breadcrumb: external/codex-rs/codex-rs/core/src/skills/model.rs (skill metadata and outcome contracts).
     #[tokio::test]
     #[cfg(unix)]
     async fn ignores_symlinked_skill_file_for_user_scope() {
@@ -1769,7 +1841,7 @@ permissions:
         symlink_file(&shared_skill_path, &skill_dir.join(SKILLS_FILENAME));
 
         let cfg = make_config(&codex_home).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
 
         assert!(
             outcome.errors.is_empty(),
@@ -1779,6 +1851,10 @@ permissions:
         assert_eq!(outcome.skills, Vec::new());
     }
 
+    // Protects: termination and deduplication while traversing a user-root symlink cycle.
+    // Detects: revisiting link targets, looping or duplicating loaded skills.
+    // Needs: Unix symlink support and owned fixture configuration; no OS-home agent discovery or network.
+    // Breadcrumb: external/codex-rs/codex-rs/core/src/skills/model.rs (skill metadata and outcome contracts).
     #[tokio::test]
     #[cfg(unix)]
     async fn does_not_loop_on_symlink_cycle_for_user_scope() {
@@ -1793,7 +1869,7 @@ permissions:
         let skill_path = write_skill_at(&cycle_dir, "demo", "cycle-skill", "still loads");
 
         let cfg = make_config(&codex_home).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
 
         assert!(
             outcome.errors.is_empty(),
@@ -1853,6 +1929,10 @@ permissions:
         );
     }
 
+    // Protects: skill discovery through allowed repository directory symlinks.
+    // Detects: missing linked repository skills or assigning the wrong path or scope.
+    // Needs: Unix symlink support and owned fixture configuration; no OS-home agent discovery or network.
+    // Breadcrumb: external/codex-rs/codex-rs/core/src/skills/model.rs (skill metadata and outcome contracts).
     #[tokio::test]
     #[cfg(unix)]
     async fn loads_skills_via_symlinked_subdir_for_repo_scope() {
@@ -1871,7 +1951,7 @@ permissions:
         symlink_dir(shared.path(), &repo_skills_root.join("shared"));
 
         let cfg = make_config_for_cwd(&codex_home, repo_dir.path().to_path_buf()).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
 
         assert!(
             outcome.errors.is_empty(),
@@ -1962,13 +2042,17 @@ permissions:
         );
     }
 
+    // Protects: valid skill metadata, path and user scope.
+    // Detects: rejecting a valid fixture or adding unrelated host skills.
+    // Needs: owned fixture configuration; no OS-home agent discovery or network.
+    // Breadcrumb: external/codex-rs/codex-rs/core/src/skills/model.rs (skill metadata and outcome contracts).
     #[tokio::test]
     async fn loads_valid_skill() {
         let codex_home = tempfile::tempdir().expect("tempdir");
         let skill_path = write_skill(&codex_home, "demo", "demo-skill", "does things\ncarefully");
         let cfg = make_config(&codex_home).await;
 
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
         assert!(
             outcome.errors.is_empty(),
             "unexpected errors: {:?}",
@@ -1990,6 +2074,10 @@ permissions:
         );
     }
 
+    // Protects: the short description supplied by skill frontmatter metadata.
+    // Detects: dropping the configured description or polluting fixture results.
+    // Needs: owned fixture configuration; no OS-home agent discovery or network.
+    // Breadcrumb: external/codex-rs/codex-rs/core/src/skills/model.rs (skill metadata and outcome contracts).
     #[tokio::test]
     async fn loads_short_description_from_metadata() {
         let codex_home = tempfile::tempdir().expect("tempdir");
@@ -2000,7 +2088,7 @@ permissions:
         fs::write(&skill_path, contents).unwrap();
 
         let cfg = make_config(&codex_home).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
         assert!(
             outcome.errors.is_empty(),
             "unexpected errors: {:?}",
@@ -2022,6 +2110,10 @@ permissions:
         );
     }
 
+    // Protects: rejection of oversized skill short descriptions.
+    // Detects: accepting over-limit metadata or losing its validation error.
+    // Needs: owned fixture configuration; no OS-home agent discovery or network.
+    // Breadcrumb: external/codex-rs/codex-rs/core/src/skills/model.rs (skill metadata and outcome contracts).
     #[tokio::test]
     async fn enforces_short_description_length_limits() {
         let codex_home = tempfile::tempdir().expect("tempdir");
@@ -2034,7 +2126,7 @@ permissions:
         fs::write(skill_dir.join(SKILLS_FILENAME), contents).unwrap();
 
         let cfg = make_config(&codex_home).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
         assert_eq!(outcome.skills.len(), 0);
         assert_eq!(outcome.errors.len(), 1);
         assert!(
@@ -2046,6 +2138,10 @@ permissions:
         );
     }
 
+    // Protects: hidden-skill exclusion and invalid frontmatter reporting.
+    // Detects: loading hidden or invalid fixtures or losing expected errors.
+    // Needs: owned fixture configuration; no OS-home agent discovery or network.
+    // Breadcrumb: external/codex-rs/codex-rs/core/src/skills/model.rs (skill metadata and outcome contracts).
     #[tokio::test]
     async fn skips_hidden_and_invalid() {
         let codex_home = tempfile::tempdir().expect("tempdir");
@@ -2063,7 +2159,7 @@ permissions:
         fs::write(invalid_dir.join(SKILLS_FILENAME), "---\nname: bad").unwrap();
 
         let cfg = make_config(&codex_home).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
         assert_eq!(outcome.skills.len(), 0);
         assert_eq!(outcome.errors.len(), 1);
         assert!(
@@ -2074,6 +2170,10 @@ permissions:
         );
     }
 
+    // Protects: skill name and description length limits.
+    // Detects: accepting oversized fields or changing the expected validation errors.
+    // Needs: owned fixture configuration; no OS-home agent discovery or network.
+    // Breadcrumb: external/codex-rs/codex-rs/core/src/skills/model.rs (skill metadata and outcome contracts).
     #[tokio::test]
     async fn enforces_length_limits() {
         let codex_home = tempfile::tempdir().expect("tempdir");
@@ -2081,7 +2181,7 @@ permissions:
         write_skill(&codex_home, "max-len", "max-len", &max_desc);
         let cfg = make_config(&codex_home).await;
 
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
         assert!(
             outcome.errors.is_empty(),
             "unexpected errors: {:?}",
@@ -2091,7 +2191,7 @@ permissions:
 
         let too_long_desc = "\u{1F4A1}".repeat(MAX_DESCRIPTION_LEN + 1);
         write_skill(&codex_home, "too-long", "too-long", &too_long_desc);
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
         assert_eq!(outcome.skills.len(), 1);
         assert_eq!(outcome.errors.len(), 1);
         assert!(
@@ -2100,6 +2200,10 @@ permissions:
         );
     }
 
+    // Protects: repository-root skill discovery and repository scope.
+    // Detects: missing owned repository skills or leaking unrelated roots.
+    // Needs: owned fixture configuration; no OS-home agent discovery or network.
+    // Breadcrumb: external/codex-rs/codex-rs/core/src/skills/model.rs (skill metadata and outcome contracts).
     #[tokio::test]
     async fn loads_skills_from_repo_root() {
         let codex_home = tempfile::tempdir().expect("tempdir");
@@ -2113,7 +2217,7 @@ permissions:
         let skill_path = write_skill_at(&skills_root, "repo", "repo-skill", "from repo");
         let cfg = make_config_for_cwd(&codex_home, repo_dir.path().to_path_buf()).await;
 
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
         assert!(
             outcome.errors.is_empty(),
             "unexpected errors: {:?}",
@@ -2135,6 +2239,10 @@ permissions:
         );
     }
 
+    // Protects: repository agents skill discovery without a Codex directory.
+    // Detects: requiring an unrelated directory or missing the agents fixture.
+    // Needs: owned fixture configuration; no OS-home agent discovery or network.
+    // Breadcrumb: external/codex-rs/codex-rs/core/src/skills/model.rs (skill metadata and outcome contracts).
     #[tokio::test]
     async fn loads_skills_from_agents_dir_without_codex_dir() {
         let codex_home = tempfile::tempdir().expect("tempdir");
@@ -2149,7 +2257,7 @@ permissions:
         );
         let cfg = make_config_for_cwd(&codex_home, repo_dir.path().to_path_buf()).await;
 
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
         assert!(
             outcome.errors.is_empty(),
             "unexpected errors: {:?}",
@@ -2171,6 +2279,10 @@ permissions:
         );
     }
 
+    // Protects: skill discovery across owned Codex directories inside the project root.
+    // Detects: missing an in-project layer or crossing the project boundary.
+    // Needs: owned fixture configuration; no OS-home agent discovery or network.
+    // Breadcrumb: external/codex-rs/codex-rs/core/src/skills/model.rs (skill metadata and outcome contracts).
     #[tokio::test]
     async fn loads_skills_from_all_codex_dirs_under_project_root() {
         let codex_home = tempfile::tempdir().expect("tempdir");
@@ -2202,7 +2314,7 @@ permissions:
 
         let cfg = make_config_for_cwd(&codex_home, nested_dir).await;
 
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
         assert!(
             outcome.errors.is_empty(),
             "unexpected errors: {:?}",
@@ -2237,6 +2349,10 @@ permissions:
         );
     }
 
+    // Protects: local Codex skill discovery outside a Git repository.
+    // Detects: missing the owned local fixture or importing ancestor skills.
+    // Needs: owned fixture configuration; no OS-home agent discovery or network.
+    // Breadcrumb: external/codex-rs/codex-rs/core/src/skills/model.rs (skill metadata and outcome contracts).
     #[tokio::test]
     async fn loads_skills_from_codex_dir_when_not_git_repo() {
         let codex_home = tempfile::tempdir().expect("tempdir");
@@ -2254,7 +2370,7 @@ permissions:
 
         let cfg = make_config_for_cwd(&codex_home, work_dir.path().to_path_buf()).await;
 
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
         assert!(
             outcome.errors.is_empty(),
             "unexpected errors: {:?}",
@@ -2314,6 +2430,10 @@ permissions:
         );
     }
 
+    // Protects: distinct repository and user skills that share a name.
+    // Detects: deduplicating by name instead of path or changing scope ordering.
+    // Needs: owned fixture configuration; no OS-home agent discovery or network.
+    // Breadcrumb: external/codex-rs/codex-rs/core/src/skills/model.rs (skill metadata and outcome contracts).
     #[tokio::test]
     async fn keeps_duplicate_names_from_repo_and_user() {
         let codex_home = tempfile::tempdir().expect("tempdir");
@@ -2333,7 +2453,7 @@ permissions:
 
         let cfg = make_config_for_cwd(&codex_home, repo_dir.path().to_path_buf()).await;
 
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
         assert!(
             outcome.errors.is_empty(),
             "unexpected errors: {:?}",
@@ -2368,6 +2488,10 @@ permissions:
         );
     }
 
+    // Protects: same-named skills at distinct nested Codex paths.
+    // Detects: dropping a distinct path or changing the expected discovery order.
+    // Needs: owned fixture configuration; no OS-home agent discovery or network.
+    // Breadcrumb: external/codex-rs/codex-rs/core/src/skills/model.rs (skill metadata and outcome contracts).
     #[tokio::test]
     async fn keeps_duplicate_names_from_nested_codex_dirs() {
         let codex_home = tempfile::tempdir().expect("tempdir");
@@ -2398,7 +2522,7 @@ permissions:
         );
 
         let cfg = make_config_for_cwd(&codex_home, nested_dir).await;
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
 
         assert!(
             outcome.errors.is_empty(),
@@ -2444,6 +2568,10 @@ permissions:
         );
     }
 
+    // Protects: the repository boundary during parent skill discovery.
+    // Detects: loading skills from an ancestor outside the owned repository.
+    // Needs: owned fixture configuration; no OS-home agent discovery or network.
+    // Breadcrumb: external/codex-rs/codex-rs/core/src/skills/model.rs (skill metadata and outcome contracts).
     #[tokio::test]
     async fn repo_skills_search_does_not_escape_repo_root() {
         let codex_home = tempfile::tempdir().expect("tempdir");
@@ -2464,7 +2592,7 @@ permissions:
 
         let cfg = make_config_for_cwd(&codex_home, repo_dir).await;
 
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
         assert!(
             outcome.errors.is_empty(),
             "unexpected errors: {:?}",
@@ -2473,6 +2601,10 @@ permissions:
         assert_eq!(outcome.skills.len(), 0);
     }
 
+    // Protects: repository skill discovery when the current path names a file.
+    // Detects: starting discovery at the wrong directory or missing the repository fixture.
+    // Needs: owned fixture configuration; no OS-home agent discovery or network.
+    // Breadcrumb: external/codex-rs/codex-rs/core/src/skills/model.rs (skill metadata and outcome contracts).
     #[tokio::test]
     async fn loads_skills_when_cwd_is_file_in_repo() {
         let codex_home = tempfile::tempdir().expect("tempdir");
@@ -2493,7 +2625,7 @@ permissions:
 
         let cfg = make_config_for_cwd(&codex_home, file_path).await;
 
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
         assert!(
             outcome.errors.is_empty(),
             "unexpected errors: {:?}",
@@ -2515,6 +2647,10 @@ permissions:
         );
     }
 
+    // Protects: the parent-search boundary outside Git repositories.
+    // Detects: loading an ancestor skill that the fixture deliberately excludes.
+    // Needs: owned fixture configuration; no OS-home agent discovery or network.
+    // Breadcrumb: external/codex-rs/codex-rs/core/src/skills/model.rs (skill metadata and outcome contracts).
     #[tokio::test]
     async fn non_git_repo_skills_search_does_not_walk_parents() {
         let codex_home = tempfile::tempdir().expect("tempdir");
@@ -2534,7 +2670,7 @@ permissions:
 
         let cfg = make_config_for_cwd(&codex_home, nested_dir).await;
 
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
         assert!(
             outcome.errors.is_empty(),
             "unexpected errors: {:?}",
@@ -2543,6 +2679,10 @@ permissions:
         assert_eq!(outcome.skills.len(), 0);
     }
 
+    // Protects: system-cache skill discovery and system scope.
+    // Detects: missing the owned cache fixture or reporting the wrong metadata or scope.
+    // Needs: owned fixture configuration; no OS-home agent discovery or network.
+    // Breadcrumb: external/codex-rs/codex-rs/core/src/skills/model.rs (skill metadata and outcome contracts).
     #[tokio::test]
     async fn loads_skills_from_system_cache_when_present() {
         let codex_home = tempfile::tempdir().expect("tempdir");
@@ -2552,7 +2692,7 @@ permissions:
 
         let cfg = make_config_for_cwd(&codex_home, work_dir.path().to_path_buf()).await;
 
-        let outcome = load_skills(&cfg);
+        let outcome = load_fixture_skills(&cfg);
         assert!(
             outcome.errors.is_empty(),
             "unexpected errors: {:?}",

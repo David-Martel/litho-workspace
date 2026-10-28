@@ -197,6 +197,10 @@ fn format_labeled_requests_snapshot(
     )
 }
 
+// Protects: compacted history carries instructions, user messages and its summary into the next request.
+// Detects: stale assistant history, lost summaries or missing compaction rollout records.
+// Needs: owned local SSE mock server, temporary Codex home and Tokio; no external model or credentials.
+// Breadcrumb: external/codex-rs/codex-rs/core/src/compact.rs (run_compact_task and compacted history).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn summarize_context_three_requests_and_instructions() {
     skip_if_no_network!();
@@ -386,10 +390,8 @@ async fn summarize_context_three_requests_and_instructions() {
             RolloutItem::TurnContext(_) => {
                 api_turn_count += 1;
             }
-            RolloutItem::Compacted(ci) => {
-                if ci.message == expected_summary_message {
-                    saw_compacted_summary = true;
-                }
+            RolloutItem::Compacted(ci) if ci.message == expected_summary_message => {
+                saw_compacted_summary = true;
             }
             _ => {}
         }

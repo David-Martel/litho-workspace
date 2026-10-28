@@ -14,6 +14,8 @@ rustc-wrapper = "sccache"
 jobs = 2  # Cap parallel compile jobs to reduce peak memory
 
 [env]
+# Vendored snapshot sources are compiled relative to this outer workspace.
+INSTA_WORKSPACE_ROOT = { value = ".", relative = true }
 # Project-local sccache on port 5100 — isolated from global (port 4400)
 # Uses force=true on all keys to override global string-format env vars
 SCCACHE_DIR = { value = "C:/codedev/litho-workspace/.cache/sccache", force = true }

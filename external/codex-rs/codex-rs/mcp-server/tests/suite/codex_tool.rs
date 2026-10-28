@@ -35,6 +35,10 @@ const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 /// Test that a shell command that is not on the "trusted" list triggers an
 /// elicitation request to the MCP and that sending the approval runs the
 /// command, as expected.
+// Protects: untrusted shell calls require an MCP approval before their file side effect.
+// Detects: missing elicitation, incorrect approval payloads, or approval without execution.
+// Needs: an owned MCP child, temporary directory, local server, native Windows file command or python3 elsewhere, and external/codex-rs/codex-rs/mcp-server/tests/common/mcp_process.rs. Classifier: external/codex-rs/codex-rs/shell-command/src/command_safety/windows_safe_commands.rs.
+// Breadcrumb: external/codex-rs/codex-rs/mcp-server/src/message_processor.rs
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_shell_command_approval_triggers_elicitation() {
     if env::var(CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok() {
@@ -55,22 +59,36 @@ async fn shell_command_approval_triggers_elicitation() -> anyhow::Result<()> {
     // Use a simple, untrusted command that creates a file so we can
     // observe a side-effect.
     //
-    // Cross‑platform approach: run a tiny Python snippet to touch the file
-    // using `python3 -c ...` on all platforms.
+    // Use a native file-creating cmdlet on Windows to avoid interpreter aliases
+    // and startup costs. Both commands remain untrusted and require approval.
     let workdir_for_shell_function_call = TempDir::new()?;
     let created_filename = "created_by_shell_tool.txt";
     let created_file = workdir_for_shell_function_call
         .path()
         .join(created_filename);
 
-    let shell_command = vec![
-        "python3".to_string(),
-        "-c".to_string(),
-        format!("import pathlib; pathlib.Path('{created_filename}').touch()"),
-    ];
-    let expected_shell_command = format_with_current_shell(&format!(
-        "python3 -c \"import pathlib; pathlib.Path('{created_filename}').touch()\""
-    ));
+    let (shell_command, expected_command) = if cfg!(windows) {
+        (
+            vec![
+                "New-Item".to_string(),
+                "-ItemType".to_string(),
+                "File".to_string(),
+                "-Path".to_string(),
+                created_filename.to_string(),
+            ],
+            format!("New-Item -ItemType File -Path {created_filename}"),
+        )
+    } else {
+        (
+            vec![
+                "python3".to_string(),
+                "-c".to_string(),
+                format!("import pathlib; pathlib.Path('{created_filename}').touch()"),
+            ],
+            format!("python3 -c \"import pathlib; pathlib.Path('{created_filename}').touch()\""),
+        )
+    };
+    let expected_shell_command = format_with_current_shell(&expected_command);
 
     let McpHandle {
         process: mut mcp_process,
@@ -124,7 +142,11 @@ async fn shell_command_approval_triggers_elicitation() -> anyhow::Result<()> {
         )?)
     );
 
-    // Accept the `git init` request by responding to the elicitation.
+    assert!(
+        !created_file.exists(),
+        "file must not exist before approval is sent"
+    );
+    // Accept the file-creation request by responding to the elicitation.
     mcp_process
         .send_response(
             elicitation_request_id,
@@ -334,6 +356,10 @@ async fn patch_approval_triggers_elicitation() -> anyhow::Result<()> {
     Ok(())
 }
 
+// Protects: caller-provided base instructions reach the model through the MCP tool.
+// Detects: lost or substituted instructions in the captured model request.
+// Needs: an owned MCP child, local response server, and external/codex-rs/codex-rs/mcp-server/tests/common/mcp_process.rs.
+// Breadcrumb: external/codex-rs/codex-rs/mcp-server/src/message_processor.rs
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_codex_tool_passes_base_instructions() {
     skip_if_no_network!();

@@ -21,6 +21,69 @@ Optional:
 - Ollama — local LLM for doc generation (not needed for building)
 - PostgreSQL 18 — for QMD postgres backend tests
 
+Litho's root CI uses stable Rust. The nested Codex standalone toolchain pin does
+not select the compiler for a build launched from this workspace root. The root
+[`async-trait` dependency](Cargo.toml) starts at 0.1.92, which no longer generates
+redundant `must_use` attributes on boxed-future methods such as the vendored
+[`HttpTransport`](external/codex-rs/codex-rs/codex-client/src/transport.rs).
+This preserves unused-future diagnostics without a lint exception, including on
+older supported compilers. The standalone Codex manifest and its toolchain pin
+remain separate inputs to its Bazel dependency graph.
+The root also starts `thiserror` at 2.0.21 so its generated named-field `From`
+implementations remain compatible with current Clippy while preserving automatic
+error conversion and source chaining.
+
+On Windows, the pinned Bazel GNU-LLVM Cargo also needs `libunwind.dll` from its
+matching Rust compiler distribution. Make that runtime directory available on
+the invoking shell's `PATH` for the Bazel lock commands. Verify the archive
+against the Rust distribution manifest; do not substitute a different Cargo or
+change the standalone compiler pin to work around a loader failure.
+
+The private MCP startup sender keeps its concrete channel error and unsent event
+inside a box so the async result no longer carries a large error inline.
+Its [real-channel controls](external/codex-rs/codex-rs/core/src/mcp_connection_manager/emit_update_tests.rs)
+check exact delivery and payload custody when the receiver has closed.
+The vendored test setup retains an unsafe block around each actual environment
+mutation; its redundant outer block is removed. The
+[compaction control](external/codex-rs/codex-rs/core/tests/suite/compact.rs)
+keeps its request and rollout assertions after a guarded-match lint cleanup.
+The [review register](TEST_REVIEW.csv) records that selector independently.
+Skill metadata fixtures select configuration roots without discovering the
+operator's home agents directory; a separate owned-home control exercises that
+root explicitly. The full-path PowerShell fixture discovers the installed
+executable and checks both allowed and refused candidate commands through its
+real AST parser. These are fixture corrections, with their original metadata
+and rollout assertions retained.
+
+Insta snapshots use the Cargo invocation's workspace root. The root and nested
+standalone Cargo configurations each provide a project-relative
+`INSTA_WORKSPACE_ROOT` default so vendored `file!()` paths reach the existing
+goldens. An explicit operator environment value still wins. Invoke Cargo from
+the intended workspace directory; an outer working directory with a nested
+`--manifest-path` does not select the standalone environment defaults. See
+[Insta's root override](https://insta.rs/docs/advanced/#workspace-root) and
+[Cargo's relative environment configuration](https://doc.rust-lang.org/cargo/reference/config.html#env).
+
+The [CLI dispatcher](external/codex-rs/codex-rs/cli/src/main.rs) pins its root and
+heavy subcommand futures on the heap. The pre-thread argument-zero bootstrap and
+command routing stay at their existing boundaries. Deep debug execution also
+needs the standalone workspace's existing 8 MiB Windows stack reserve. The
+[CLI build script](external/codex-rs/codex-rs/cli/build.rs) and
+[exec build script](external/codex-rs/codex-rs/exec/build.rs) apply that policy
+only to their named binaries, including when built from this outer workspace.
+They select the target's MSVC or GNU linker syntax without changing host or
+workspace-wide flags. See Cargo's
+[binary-specific linker directive](https://doc.rust-lang.org/cargo/reference/build-scripts.html#rustc-link-arg-bin).
+
+The [status fixtures](external/codex-rs/codex-rs/tui/src/status/tests.rs) assert
+the current package-version header before normalizing only that header's version
+and equivalent padding for the existing full-card goldens. MCP initialization
+and app-server user-agent fixtures retain full response equality while deriving
+the package version from their manifests. The
+[MCP approval fixture](external/codex-rs/codex-rs/mcp-server/tests/suite/codex_tool.rs)
+uses an untrusted native file-creation cmdlet on Windows and Python elsewhere;
+the approval payload, owned-file assertion and five-second deadline remain.
+
 ## Quick Build
 
 ```bash

@@ -720,7 +720,6 @@ async fn exec(
         network_attempt_id,
         arg0,
         expiration,
-        windows_sandbox_level: _,
         ..
     } = params;
     let network_attempt_id = network_attempt_id.map(|attempt_id| attempt_id.to_string());
