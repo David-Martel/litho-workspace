@@ -90,6 +90,37 @@ fn reset_at_from(captured_at: &chrono::DateTime<chrono::Local>, seconds: i64) ->
         .timestamp()
 }
 
+fn normalize_snapshot_version(lines: Vec<String>) -> Vec<String> {
+    let current_header = format!("│  >_ OpenAI Codex (v{})", env!("CARGO_PKG_VERSION"));
+    let fixture_header = "│  >_ OpenAI Codex (v0.0.0)";
+    let mut headers = 0;
+    let normalized = lines
+        .into_iter()
+        .map(|line| {
+            if !line.starts_with("│  >_ OpenAI Codex ") {
+                return line;
+            }
+            let padding = line
+                .strip_prefix(&current_header)
+                .and_then(|suffix| suffix.strip_suffix('│'))
+                .expect("status header must contain the declared package version");
+            assert!(padding.chars().all(|character| character == ' '));
+            headers += 1;
+            let padding_width = line.chars().count() - fixture_header.chars().count() - 1;
+            format!("{fixture_header}{}│", " ".repeat(padding_width))
+        })
+        .collect();
+    assert_eq!(
+        headers, 1,
+        "status snapshot must include exactly one version header"
+    );
+    normalized
+}
+
+// Protects: the complete status card layout and fields represented by this snapshot.
+// Detects: rendering or content changes after asserting the exact declared package-version header.
+// Needs: owned temporary configuration and the unchanged status snapshot golden; only version padding is normalized.
+// Breadcrumb: external/codex-rs/codex-rs/tui/src/status/card.rs
 #[tokio::test]
 async fn status_snapshot_includes_reasoning_details() {
     let temp_home = TempDir::new().expect("temp home");
@@ -167,7 +198,7 @@ async fn status_snapshot_includes_reasoning_details() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = normalize_snapshot_version(sanitize_directory(rendered_lines)).join("\n");
     assert_snapshot!(sanitized);
 }
 
@@ -236,6 +267,10 @@ async fn status_permissions_non_default_workspace_write_is_custom() {
     );
 }
 
+// Protects: the complete status card layout and fields represented by this snapshot.
+// Detects: rendering or content changes after asserting the exact declared package-version header.
+// Needs: owned temporary configuration and the unchanged status snapshot golden; only version padding is normalized.
+// Breadcrumb: external/codex-rs/codex-rs/tui/src/status/card.rs
 #[tokio::test]
 async fn status_snapshot_includes_forked_from() {
     let temp_home = TempDir::new().expect("temp home");
@@ -286,10 +321,14 @@ async fn status_snapshot_includes_forked_from() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = normalize_snapshot_version(sanitize_directory(rendered_lines)).join("\n");
     assert_snapshot!(sanitized);
 }
 
+// Protects: the complete status card layout and fields represented by this snapshot.
+// Detects: rendering or content changes after asserting the exact declared package-version header.
+// Needs: owned temporary configuration and the unchanged status snapshot golden; only version padding is normalized.
+// Breadcrumb: external/codex-rs/codex-rs/tui/src/status/card.rs
 #[tokio::test]
 async fn status_snapshot_includes_monthly_limit() {
     let temp_home = TempDir::new().expect("temp home");
@@ -348,7 +387,7 @@ async fn status_snapshot_includes_monthly_limit() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = normalize_snapshot_version(sanitize_directory(rendered_lines)).join("\n");
     assert_snapshot!(sanitized);
 }
 
@@ -590,6 +629,10 @@ async fn status_card_token_usage_excludes_cached_tokens() {
     );
 }
 
+// Protects: the complete status card layout and fields represented by this snapshot.
+// Detects: rendering or content changes after asserting the exact declared package-version header.
+// Needs: owned temporary configuration and the unchanged status snapshot golden; only version padding is normalized.
+// Breadcrumb: external/codex-rs/codex-rs/tui/src/status/card.rs
 #[tokio::test]
 async fn status_snapshot_truncates_in_narrow_terminal() {
     let temp_home = TempDir::new().expect("temp home");
@@ -650,11 +693,15 @@ async fn status_snapshot_truncates_in_narrow_terminal() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = normalize_snapshot_version(sanitize_directory(rendered_lines)).join("\n");
 
     assert_snapshot!(sanitized);
 }
 
+// Protects: the complete status card layout and fields represented by this snapshot.
+// Detects: rendering or content changes after asserting the exact declared package-version header.
+// Needs: owned temporary configuration and the unchanged status snapshot golden; only version padding is normalized.
+// Breadcrumb: external/codex-rs/codex-rs/tui/src/status/card.rs
 #[tokio::test]
 async fn status_snapshot_shows_missing_limits_message() {
     let temp_home = TempDir::new().expect("temp home");
@@ -699,10 +746,14 @@ async fn status_snapshot_shows_missing_limits_message() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = normalize_snapshot_version(sanitize_directory(rendered_lines)).join("\n");
     assert_snapshot!(sanitized);
 }
 
+// Protects: the complete status card layout and fields represented by this snapshot.
+// Detects: rendering or content changes after asserting the exact declared package-version header.
+// Needs: owned temporary configuration and the unchanged status snapshot golden; only version padding is normalized.
+// Breadcrumb: external/codex-rs/codex-rs/tui/src/status/card.rs
 #[tokio::test]
 async fn status_snapshot_includes_credits_and_limits() {
     let temp_home = TempDir::new().expect("temp home");
@@ -768,10 +819,14 @@ async fn status_snapshot_includes_credits_and_limits() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = normalize_snapshot_version(sanitize_directory(rendered_lines)).join("\n");
     assert_snapshot!(sanitized);
 }
 
+// Protects: the complete status card layout and fields represented by this snapshot.
+// Detects: rendering or content changes after asserting the exact declared package-version header.
+// Needs: owned temporary configuration and the unchanged status snapshot golden; only version padding is normalized.
+// Breadcrumb: external/codex-rs/codex-rs/tui/src/status/card.rs
 #[tokio::test]
 async fn status_snapshot_shows_empty_limits_message() {
     let temp_home = TempDir::new().expect("temp home");
@@ -825,10 +880,14 @@ async fn status_snapshot_shows_empty_limits_message() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = normalize_snapshot_version(sanitize_directory(rendered_lines)).join("\n");
     assert_snapshot!(sanitized);
 }
 
+// Protects: the complete status card layout and fields represented by this snapshot.
+// Detects: rendering or content changes after asserting the exact declared package-version header.
+// Needs: owned temporary configuration and the unchanged status snapshot golden; only version padding is normalized.
+// Breadcrumb: external/codex-rs/codex-rs/tui/src/status/card.rs
 #[tokio::test]
 async fn status_snapshot_shows_stale_limits_message() {
     let temp_home = TempDir::new().expect("temp home");
@@ -891,10 +950,14 @@ async fn status_snapshot_shows_stale_limits_message() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = normalize_snapshot_version(sanitize_directory(rendered_lines)).join("\n");
     assert_snapshot!(sanitized);
 }
 
+// Protects: the complete status card layout and fields represented by this snapshot.
+// Detects: rendering or content changes after asserting the exact declared package-version header.
+// Needs: owned temporary configuration and the unchanged status snapshot golden; only version padding is normalized.
+// Breadcrumb: external/codex-rs/codex-rs/tui/src/status/card.rs
 #[tokio::test]
 async fn status_snapshot_cached_limits_hide_credits_without_flag() {
     let temp_home = TempDir::new().expect("temp home");
@@ -961,7 +1024,7 @@ async fn status_snapshot_cached_limits_hide_credits_without_flag() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = normalize_snapshot_version(sanitize_directory(rendered_lines)).join("\n");
     assert_snapshot!(sanitized);
 }
 

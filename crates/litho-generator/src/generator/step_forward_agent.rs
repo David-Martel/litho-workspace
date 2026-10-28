@@ -227,13 +227,13 @@ impl DataFormatter {
             if !insight.detailed_description.is_empty() {
                 content.push_str(&format!(
                     "   Detailed description: {}\n",
-                    &insight.detailed_description
+                    insight.detailed_description
                 ));
             }
             if config.include_source_code {
                 content.push_str(&format!(
                     "   Source code details: ```code\n{}\n\n",
-                    &insight.code_dossier.source_summary
+                    insight.code_dossier.source_summary
                 ));
             }
         }

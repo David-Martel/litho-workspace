@@ -446,17 +446,16 @@ impl PickerState {
                 new_query.pop();
                 self.set_query(new_query);
             }
-            KeyCode::Char(c) => {
-                // basic text input for search
+            KeyCode::Char(c)
                 if !key
                     .modifiers
                     .contains(crossterm::event::KeyModifiers::CONTROL)
-                    && !key.modifiers.contains(crossterm::event::KeyModifiers::ALT)
-                {
-                    let mut new_query = self.query.clone();
-                    new_query.push(c);
-                    self.set_query(new_query);
-                }
+                    && !key.modifiers.contains(crossterm::event::KeyModifiers::ALT) =>
+            {
+                // basic text input for search
+                let mut new_query = self.query.clone();
+                new_query.push(c);
+                self.set_query(new_query);
             }
             _ => {}
         }
