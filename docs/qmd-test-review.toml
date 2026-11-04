@@ -1,0 +1,22 @@
+# Advisory inventory of the QMD MCP transport and selected build compatibility files.
+# Recorded reviews cover named selectors only; other selected legacy tests stay unreviewed.
+reviewers = ["codex-p1gen9-fleet-integration"]
+
+[tests]
+dirs = [
+    "crates/litho-qmd-mcp/src",
+    "external/codex-rs/codex-rs/core/src/mcp_connection_manager",
+]
+require_labels = ["Protects", "Detects", "Needs", "Breadcrumb"]
+
+# The shared CLI accepts directories; the repo helper adds these exact files
+# through the same collector, hash, register and inventory APIs.
+[inventory]
+files = [
+    "external/codex-rs/codex-rs/core/tests/suite/compact.rs",
+    "external/codex-rs/codex-rs/shell-command/src/command_safety/is_safe_command.rs",
+    "external/codex-rs/codex-rs/core/src/skills/loader.rs",
+    "external/codex-rs/codex-rs/app-server/tests/suite/user_agent.rs",
+    "external/codex-rs/codex-rs/mcp-server/tests/suite/codex_tool.rs",
+    "external/codex-rs/codex-rs/tui/src/status/tests.rs",
+]

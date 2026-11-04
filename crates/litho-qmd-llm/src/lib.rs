@@ -428,7 +428,7 @@ impl OllamaClient {
 fn merge_variants(base: Vec<String>, extra: Vec<String>, max_items: usize) -> Vec<String> {
     let mut seen = BTreeSet::<String>::new();
     let mut out = Vec::new();
-    for item in base.into_iter().chain(extra.into_iter()) {
+    for item in base.into_iter().chain(extra) {
         let normalized = item.trim().to_string();
         if normalized.is_empty() {
             continue;

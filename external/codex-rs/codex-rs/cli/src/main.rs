@@ -543,10 +543,8 @@ fn stage_str(stage: codex_core::features::Stage) -> &'static str {
 }
 
 fn main() -> anyhow::Result<()> {
-    arg0_dispatch_or_else(|codex_linux_sandbox_exe| async move {
-        cli_main(codex_linux_sandbox_exe).await?;
-        Ok(())
-    })
+    // The root future is polled on the process main stack, not a Tokio worker.
+    arg0_dispatch_or_else(|codex_linux_sandbox_exe| Box::pin(cli_main(codex_linux_sandbox_exe)))
 }
 
 async fn cli_main(codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()> {
@@ -567,7 +565,8 @@ async fn cli_main(codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()
                 &mut interactive.config_overrides,
                 root_config_overrides.clone(),
             );
-            let exit_info = run_interactive_tui(interactive, codex_linux_sandbox_exe).await?;
+            let exit_info =
+                Box::pin(run_interactive_tui(interactive, codex_linux_sandbox_exe)).await?;
             handle_app_exit(exit_info)?;
         }
         Some(Subcommand::Exec(mut exec_cli)) => {
@@ -575,7 +574,7 @@ async fn cli_main(codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()
                 &mut exec_cli.config_overrides,
                 root_config_overrides.clone(),
             );
-            codex_exec::run_main(exec_cli, codex_linux_sandbox_exe).await?;
+            Box::pin(codex_exec::run_main(exec_cli, codex_linux_sandbox_exe)).await?;
         }
         Some(Subcommand::Review(review_args)) => {
             let mut exec_cli = ExecCli::try_parse_from(["codex", "exec"])?;
@@ -584,26 +583,30 @@ async fn cli_main(codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()
                 &mut exec_cli.config_overrides,
                 root_config_overrides.clone(),
             );
-            codex_exec::run_main(exec_cli, codex_linux_sandbox_exe).await?;
+            Box::pin(codex_exec::run_main(exec_cli, codex_linux_sandbox_exe)).await?;
         }
         Some(Subcommand::McpServer) => {
-            codex_mcp_server::run_main(codex_linux_sandbox_exe, root_config_overrides).await?;
+            Box::pin(codex_mcp_server::run_main(
+                codex_linux_sandbox_exe,
+                root_config_overrides,
+            ))
+            .await?;
         }
         Some(Subcommand::Mcp(mut mcp_cli)) => {
             // Propagate any root-level config overrides (e.g. `-c key=value`).
             prepend_config_flags(&mut mcp_cli.config_overrides, root_config_overrides.clone());
-            mcp_cli.run().await?;
+            Box::pin(mcp_cli.run()).await?;
         }
         Some(Subcommand::AppServer(app_server_cli)) => match app_server_cli.subcommand {
             None => {
                 let transport = app_server_cli.listen;
-                codex_app_server::run_main_with_transport(
+                Box::pin(codex_app_server::run_main_with_transport(
                     codex_linux_sandbox_exe,
                     root_config_overrides,
                     codex_core::config_loader::LoaderOverrides::default(),
                     app_server_cli.analytics_default_enabled,
                     transport,
-                )
+                ))
                 .await?;
             }
             Some(AppServerSubcommand::GenerateTs(gen_cli)) => {
@@ -642,7 +645,8 @@ async fn cli_main(codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()
                 all,
                 config_overrides,
             );
-            let exit_info = run_interactive_tui(interactive, codex_linux_sandbox_exe).await?;
+            let exit_info =
+                Box::pin(run_interactive_tui(interactive, codex_linux_sandbox_exe)).await?;
             handle_app_exit(exit_info)?;
         }
         Some(Subcommand::Fork(ForkCommand {
@@ -659,7 +663,8 @@ async fn cli_main(codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()
                 all,
                 config_overrides,
             );
-            let exit_info = run_interactive_tui(interactive, codex_linux_sandbox_exe).await?;
+            let exit_info =
+                Box::pin(run_interactive_tui(interactive, codex_linux_sandbox_exe)).await?;
             handle_app_exit(exit_info)?;
         }
         Some(Subcommand::Login(mut login_cli)) => {
@@ -708,7 +713,11 @@ async fn cli_main(codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()
                 &mut cloud_cli.config_overrides,
                 root_config_overrides.clone(),
             );
-            codex_cloud_tasks::run_main(cloud_cli, codex_linux_sandbox_exe).await?;
+            Box::pin(codex_cloud_tasks::run_main(
+                cloud_cli,
+                codex_linux_sandbox_exe,
+            ))
+            .await?;
         }
         Some(Subcommand::Sandbox(sandbox_args)) => match sandbox_args.cmd {
             SandboxCommand::Macos(mut seatbelt_cli) => {
@@ -912,7 +921,7 @@ async fn run_interactive_tui(
         }
     }
 
-    codex_tui::run_main(interactive, codex_linux_sandbox_exe).await
+    Box::pin(codex_tui::run_main(interactive, codex_linux_sandbox_exe)).await
 }
 
 fn confirm(prompt: &str) -> std::io::Result<bool> {

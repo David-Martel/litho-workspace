@@ -417,7 +417,7 @@ pub async fn run_main(cli: Cli, codex_linux_sandbox_exe: Option<PathBuf>) -> any
             let prompt_text = resolve_prompt(prompt_arg);
             let mut items: Vec<UserInput> = imgs
                 .into_iter()
-                .chain(args.images.into_iter())
+                .chain(args.images)
                 .map(|path| UserInput::LocalImage { path })
                 .collect();
             items.push(UserInput::Text {
@@ -777,8 +777,10 @@ fn decode_utf16(
     }
 
     let units: Vec<u16> = input
-        .chunks_exact(2)
-        .map(|chunk| decode_unit([chunk[0], chunk[1]]))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|chunk| decode_unit(*chunk))
         .collect();
 
     String::from_utf16(&units).map_err(|_| PromptDecodeError::InvalidUtf16 { encoding })

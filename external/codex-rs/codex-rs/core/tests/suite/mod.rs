@@ -19,7 +19,7 @@ const CODEX_HOME_ENV_VAR: &str = "CODEX_HOME";
 // based on the arg0.
 // NOTE: this doesn't work on ARM
 #[ctor]
-pub static CODEX_ALIASES_TEMP_DIR: TestCodexAliasesGuard = unsafe {
+pub static CODEX_ALIASES_TEMP_DIR: TestCodexAliasesGuard = {
     #[allow(clippy::unwrap_used)]
     let codex_home = tempfile::Builder::new()
         .prefix("codex-core-tests")

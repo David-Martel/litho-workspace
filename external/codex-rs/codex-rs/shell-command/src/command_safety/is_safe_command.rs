@@ -481,6 +481,10 @@ mod tests {
         }
     }
 
+    // Protects: safe classification through an installed PowerShell executable's absolute path.
+    // Detects: path-dependent parser failures or accepting a command with filesystem side effects.
+    // Needs: installed PowerShell on Windows and its local AST parser; no candidate command or network execution.
+    // Breadcrumb: external/codex-rs/codex-rs/shell-command/src/command_safety/windows_safe_commands.rs (PowerShell AST classification).
     #[test]
     fn windows_powershell_full_path_is_safe() {
         if !cfg!(windows) {
@@ -488,10 +492,20 @@ mod tests {
             return;
         }
 
+        let pwsh = crate::powershell::try_find_pwsh_executable_blocking()
+            .expect("PowerShell is required for the Windows full-path safety test");
+        assert!(pwsh.as_path().is_absolute());
+        let executable = pwsh.as_path().to_str().expect("PowerShell path is UTF-8");
+
         assert!(is_known_safe_command(&vec_str(&[
-            r"C:\Program Files\PowerShell\7\pwsh.exe",
+            executable,
             "-Command",
             "Get-Location",
+        ])));
+        assert!(!is_known_safe_command(&vec_str(&[
+            executable,
+            "-Command",
+            "Remove-Item test-owned-never-executed.txt",
         ])));
     }
 

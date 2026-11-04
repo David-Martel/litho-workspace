@@ -11,6 +11,10 @@ use tokio::time::timeout;
 
 const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
+// Protects: the complete app-server user-agent response for the declared package version.
+// Detects: stale version, OS, architecture, terminal or initialized client identity fields.
+// Needs: owned temporary Codex home and local JSON-RPC child; external/codex-rs/codex-rs/app-server/tests/common/mcp_process.rs.
+// Breadcrumb: external/codex-rs/codex-rs/core/src/default_client.rs (get_codex_user_agent).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn get_user_agent_returns_current_codex_user_agent() -> Result<()> {
     let codex_home = TempDir::new()?;
@@ -31,8 +35,9 @@ async fn get_user_agent_returns_current_codex_user_agent() -> Result<()> {
     let os_version = os_info.version();
     let architecture = os_info.architecture().unwrap_or("unknown");
     let terminal_ua = codex_core::terminal::user_agent();
+    let package_version = env!("CARGO_PKG_VERSION");
     let user_agent = format!(
-        "{originator}/0.0.0 ({os_type} {os_version}; {architecture}) {terminal_ua} ({DEFAULT_CLIENT_NAME}; 0.1.0)"
+        "{originator}/{package_version} ({os_type} {os_version}; {architecture}) {terminal_ua} ({DEFAULT_CLIENT_NAME}; 0.1.0)"
     );
 
     let received: GetUserAgentResponse = to_response(response)?;

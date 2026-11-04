@@ -834,17 +834,25 @@ impl McpConnectionManager {
     }
 }
 
+/// Publish a startup update and preserve unsent events on failure.
+///
+/// # Errors
+/// Returns the original channel error, boxed to keep the result small.
 async fn emit_update(
     tx_event: &Sender<Event>,
     update: McpStartupUpdateEvent,
-) -> Result<(), async_channel::SendError<Event>> {
+) -> Result<(), Box<async_channel::SendError<Event>>> {
     tx_event
         .send(Event {
             id: INITIAL_SUBMIT_ID.to_owned(),
             msg: EventMsg::McpStartupUpdate(update),
         })
         .await
+        .map_err(Box::new)
 }
+
+#[cfg(test)]
+mod emit_update_tests;
 
 /// A tool is allowed to be used if both are true:
 /// 1. enabled is None (no allowlist is set) or the tool is explicitly enabled.

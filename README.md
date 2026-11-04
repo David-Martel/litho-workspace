@@ -6,6 +6,17 @@ automated documentation pipeline that works on repositories of any size.
 
 **Version:** 2.0.0-alpha.1
 
+## Install, build, test and run
+
+From this checkout, with the [build prerequisites](BUILD.md) installed:
+
+```sh
+cargo install --locked --path crates/litho-cli
+cargo build --locked -p litho-cli
+cargo nextest run --workspace --no-fail-fast
+cargo run --locked -p litho-cli -- --help
+```
+
 ## Binaries
 
 | Binary | Crate | Purpose |
@@ -236,6 +247,9 @@ litho-qmd-cli [--index <NAME>] [--backend auto|sqlite|postgres] <COMMAND>
 
 MCP (Model Context Protocol) server for LLM agent integration. Runs over
 stdin/stdout JSON-RPC.
+
+The [request parameter contract](docs/qmd-mcp.md) describes protocol metadata,
+strict tool arguments and the focused test command.
 
 ```
 litho-qmd-mcp [--index <NAME>] [--backend auto|sqlite|postgres]
